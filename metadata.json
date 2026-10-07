@@ -1,0 +1,6 @@
+{
+  "name": "LinkedIn Lead Finder",
+  "description": "Internal B2B lead discovery tool for agencies with client management, deduplication, and Google Sheets export.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
