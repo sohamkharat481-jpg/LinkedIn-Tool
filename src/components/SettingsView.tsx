@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { LeadProviderConfig, Workspace, ProviderStatusInfo } from '../types';
 import { User as FirebaseUser } from 'firebase/auth';
 import {
@@ -23,6 +23,8 @@ import {
   Lock
 } from 'lucide-react';
 import { googleSignIn, googleSignOut } from '../services/auth';
+import { SupabaseDiagnosticStatus, testSupabaseHealth } from '../services/supabase';
+import { apiUrl } from '../services/apiClient';
 
 interface SettingsViewProps {
   workspaces: Workspace[];
@@ -68,9 +70,28 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [wsNameInput, setWsNameInput] = useState('');
   const [wsDescInput, setWsDescInput] = useState('');
 
-  // Supabase Config state
-  const [supabaseUrl, setSupabaseUrl] = useState('');
-  const [supabaseAnonKey, setSupabaseAnonKey] = useState('');
+  // Supabase Config & Diagnostics state
+  const [supabaseDiag, setSupabaseDiag] = useState<SupabaseDiagnosticStatus | null>(null);
+
+  const fetchSupabaseDiag = async () => {
+    try {
+      const res = await fetch(apiUrl('/api/supabase-status'));
+      if (res.ok) {
+        const data = await res.json();
+        setSupabaseDiag(data);
+      } else {
+        const fallback = await testSupabaseHealth();
+        setSupabaseDiag(fallback);
+      }
+    } catch {
+      const fallback = await testSupabaseHealth();
+      setSupabaseDiag(fallback);
+    }
+  };
+
+  useEffect(() => {
+    fetchSupabaseDiag();
+  }, []);
 
   const handleSaveProviderConfig = (e: React.FormEvent) => {
     e.preventDefault();
@@ -88,7 +109,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setIsTestingHealth(true);
     setHealthTestResult(null);
     try {
-      const res = await fetch('/api/provider-status/test', {
+      const res = await fetch(apiUrl('/api/provider-status/test'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -429,9 +450,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       <div className="bg-white rounded-2xl border border-gray-200/90 shadow-xs p-6 space-y-4">
         <div className="flex items-center justify-between border-b border-gray-100 pb-3">
           <div>
-            <h2 className="text-base font-bold text-gray-900">Database & Supabase RLS Configuration</h2>
+            <h2 className="text-base font-bold text-gray-900">Supabase Connection Diagnostics</h2>
             <p className="text-xs text-gray-500">
-              App uses multi-tenant workspace isolation with Row Level Security (RLS) policies.
+              Multi-tenant database connection telemetry (Keys and secret tokens are strictly hidden).
             </p>
           </div>
 
@@ -443,32 +464,52 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </button>
         </div>
 
-        <div className="space-y-3">
+        {/* 4 Required Supabase Diagnostics Metrics */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 bg-gray-50 p-4 rounded-xl border border-gray-200">
           <div>
-            <label className="block text-xs font-semibold text-gray-700 mb-1">Supabase Project URL</label>
-            <input
-              type="text"
-              placeholder="https://your-project.supabase.co"
-              value={supabaseUrl}
-              onChange={(e) => setSupabaseUrl(e.target.value)}
-              className="w-full text-xs px-3 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-            />
+            <span className="text-[10px] font-bold text-gray-500 uppercase block">Supabase URL</span>
+            <span className={`text-xs font-bold mt-1 inline-block ${supabaseDiag?.supabaseUrlStatus === 'CONFIGURED' ? 'text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200' : 'text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200'}`}>
+              {supabaseDiag?.supabaseUrlStatus || 'MISSING'}
+            </span>
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-gray-700 mb-1">Supabase Anon Key</label>
-            <input
-              type="password"
-              placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-              value={supabaseAnonKey}
-              onChange={(e) => setSupabaseAnonKey(e.target.value)}
-              className="w-full text-xs px-3 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-            />
+            <span className="text-[10px] font-bold text-gray-500 uppercase block">Supabase Client</span>
+            <span className={`text-xs font-bold mt-1 inline-block ${supabaseDiag?.supabaseClientStatus === 'CONNECTED' ? 'text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200' : 'text-red-700 bg-red-50 px-2 py-0.5 rounded border border-red-200'}`}>
+              {supabaseDiag?.supabaseClientStatus || 'FAILED'}
+            </span>
           </div>
 
-          <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-900">
-            <span className="font-bold">Active Local Database Store:</span> All database operations run with exact workspace tenant isolation. Supabase credentials can be saved here to sync directly to external cloud database.
+          <div>
+            <span className="text-[10px] font-bold text-gray-500 uppercase block">Database Query</span>
+            <span className={`text-xs font-bold mt-1 inline-block ${supabaseDiag?.databaseQueryStatus === 'PASS' ? 'text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200' : 'text-red-700 bg-red-50 px-2 py-0.5 rounded border border-red-200'}`}>
+              {supabaseDiag?.databaseQueryStatus || 'FAIL'}
+            </span>
           </div>
+
+          <div>
+            <span className="text-[10px] font-bold text-gray-500 uppercase block">Auth Service</span>
+            <span className={`text-xs font-bold mt-1 inline-block ${supabaseDiag?.authServiceStatus === 'AVAILABLE' ? 'text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200' : 'text-red-700 bg-red-50 px-2 py-0.5 rounded border border-red-200'}`}>
+              {supabaseDiag?.authServiceStatus || 'FAILED'}
+            </span>
+          </div>
+        </div>
+
+        {supabaseDiag?.missingVariableNames && supabaseDiag.missingVariableNames.length > 0 && (
+          <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 space-y-1">
+            <p className="font-bold flex items-center gap-1.5">
+              <AlertCircle className="w-4 h-4 text-amber-600" /> Missing Required Deployment Environment Variables:
+            </p>
+            <ul className="list-disc pl-5 font-mono text-[11px] text-amber-800 space-y-0.5">
+              {supabaseDiag.missingVariableNames.map((v: string) => (
+                <li key={v}>{v}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-900">
+          <span className="font-bold">Row Level Security (RLS):</span> Multi-tenant client isolation is active across all database operations. All clients and search records are partitioned by <code className="bg-blue-100 px-1 py-0.5 rounded font-mono">workspace_id</code>.
         </div>
       </div>
     </div>

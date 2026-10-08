@@ -148,4 +148,16 @@ export interface ProviderStatusInfo {
   lastError: string;
   responseTimeMs: string | number;
   isExternal: boolean;
+  diagnostics?: {
+    apiKeyDetected?: boolean;
+    searchEngineIdDetected?: boolean;
+    providerInitialized?: boolean;
+    apiEnabled?: string;
+    credentialsValid?: string;
+    apiRestrictionIssue?: string;
+    quotaBillingIssue?: string;
+    searchEngineValid?: string;
+    httpStatusCode?: number;
+    googleErrorMessage?: string;
+  };
 }

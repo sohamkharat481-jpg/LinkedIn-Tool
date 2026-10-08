@@ -22,7 +22,7 @@ export class GoogleSearchLeadProvider implements LeadProvider {
       process.env.GOOGLE_SEARCH_API_KEY ||
       process.env.LEAD_PROVIDER_API_KEY ||
       '';
-    this.cx = cx || process.env.GOOGLE_SEARCH_ENGINE_ID || '';
+    this.cx = cx || process.env.GOOGLE_SEARCH_ENGINE_ID || '41f25e8b9b4d94578';
   }
 
   /**
@@ -153,8 +153,11 @@ export class GoogleSearchLeadProvider implements LeadProvider {
 
         if (response.status === 403) {
           const errData = await response.json().catch(() => ({}));
-          const msg = errData.error?.message || 'Google Search API quota exceeded or invalid credentials.';
-          throw new Error(`Google API Error (403): ${msg}`);
+          const msg = errData.error?.message || '';
+          if (msg.includes('does not have the access to Custom Search JSON API')) {
+            throw new Error('Google Custom Search JSON API = UNAVAILABLE FOR NEW CUSTOMERS');
+          }
+          throw new Error(`Google API Error (403): ${msg || 'Access Denied'}`);
         }
 
         if (response.status === 429) {

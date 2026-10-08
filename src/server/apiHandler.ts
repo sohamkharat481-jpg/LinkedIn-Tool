@@ -2,6 +2,7 @@ import express, { Request, Response } from 'express';
 import { LeadFilter, RawLead } from '../types';
 import { filterAndDeduplicateLeads } from '../services/deduplication';
 import { ServerLeadProviderService } from './leadProviderService';
+import { testSupabaseHealth } from '../services/supabase';
 
 export const apiRouter = express.Router();
 
@@ -53,6 +54,12 @@ apiRouter.get('/health', (_req: Request, res: Response) => {
   });
 });
 
+// Supabase Connection Diagnostics Endpoint (Does NOT reveal secret keys)
+apiRouter.get('/supabase-status', async (_req: Request, res: Response) => {
+  const diag = await testSupabaseHealth();
+  res.json(diag);
+});
+
 // 2. Provider Health / Status Endpoint (Does NOT expose secrets)
 apiRouter.get('/provider-status', (req: Request, res: Response) => {
   const apiKey = (req.headers['x-provider-api-key'] as string) || process.env.GOOGLE_SEARCH_API_KEY || process.env.LEAD_PROVIDER_API_KEY;
@@ -72,6 +79,15 @@ apiRouter.get('/provider-status', (req: Request, res: Response) => {
 
   const statusInfo = ServerLeadProviderService.getStatus(apiKey, isMock ? 'mock' : 'production', cx);
   res.json(statusInfo);
+});
+
+// Safe Diagnostic Endpoint (Reports CONFIGURED/MISSING status only)
+apiRouter.get('/provider-status/diagnostics', (req: Request, res: Response) => {
+  const apiKey = (req.headers['x-provider-api-key'] as string);
+  const cx = (req.headers['x-provider-engine-id'] as string);
+
+  const diag = ServerLeadProviderService.getDiagnostics(apiKey, cx);
+  res.json(diag);
 });
 
 // 3. Test Provider Connection

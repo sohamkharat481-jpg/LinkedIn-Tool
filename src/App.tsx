@@ -14,6 +14,7 @@ import {
 import { dbService } from './services/storage';
 import { initAuthListener, setCachedAccessToken } from './services/auth';
 import { ProviderFactory } from './services/leadProviders/ProviderFactory';
+import { apiUrl } from './services/apiClient';
 
 import { TopBar } from './components/TopBar';
 import { Sidebar, NavTab } from './components/Sidebar';
@@ -73,7 +74,7 @@ export default function App() {
     const activeCfg = cfg || providerConfig;
     try {
       const modeParam = activeCfg.providerType === 'mock' ? '?mode=mock' : '';
-      const res = await fetch(`/api/provider-status${modeParam}`, {
+      const res = await fetch(apiUrl(`/api/provider-status${modeParam}`), {
         headers: {
           'X-Provider-Api-Key': activeCfg.apiKey || ''
         }
@@ -201,7 +202,7 @@ export default function App() {
     finalCount: number;
   }> => {
     // Call server endpoint
-    const response = await fetch('/api/search-leads', {
+    const response = await fetch(apiUrl('/api/search-leads'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -210,7 +211,8 @@ export default function App() {
         workspaceId: activeWorkspace.id,
         providerType: providerConfig.providerType,
         apiKey: providerConfig.apiKey,
-        customEndpoint: providerConfig.customEndpoint
+        customEndpoint: providerConfig.customEndpoint,
+        searchEngineId: providerConfig.customEndpoint
       })
     });
 
