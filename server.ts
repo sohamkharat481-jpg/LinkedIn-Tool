@@ -30,13 +30,20 @@ app.use(express.json());
 // API Routes
 app.use('/api', apiRouter);
 
-// Serve static frontend assets from dist in production
-const distPath = path.join(__dirname, 'dist');
-app.use(express.static(distPath));
+// Serve static frontend assets from dist in production (only when not running on Vercel serverless)
+if (!process.env.VERCEL) {
+  const distPath = path.join(__dirname, 'dist');
+  app.use(express.static(distPath));
 
-app.get('*', (_req, res) => {
-  res.sendFile(path.join(distPath, 'index.html'));
-});
+  app.get('*', (_req, res) => {
+    res.sendFile(path.join(distPath, 'index.html'));
+  });
+} else {
+  // Fallback 404 handler for unmatched API routes on Vercel
+  app.use('/api', (_req, res) => {
+    res.status(404).json({ error: 'API endpoint not found' });
+  });
+}
 
 if (!process.env.VERCEL) {
   app.listen(PORT, () => {
