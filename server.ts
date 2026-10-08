@@ -38,7 +38,11 @@ app.get('*', (_req, res) => {
   res.sendFile(path.join(distPath, 'index.html'));
 });
 
-app.listen(PORT, () => {
-  console.log(`LinkedIn Lead Finder production backend running on port ${PORT}`);
-});
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`LinkedIn Lead Finder production backend running on port ${PORT}`);
+  });
+}
+
+export default app;
 
