@@ -68,7 +68,7 @@ export const GoogleSheetsExportModal: React.FC<GoogleSheetsExportModalProps> = (
     } catch (err: any) {
       console.error('Export modal error:', err);
       setExportError(err.message || 'Failed to export leads to Google Sheets.');
-    } font: {
+    } finally {
       setIsExporting(false);
     }
   };

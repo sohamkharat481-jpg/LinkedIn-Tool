@@ -54,7 +54,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onRefreshProviderStatus
 }) => {
   // Provider state
-  const [providerType, setProviderType] = useState<'mock' | 'rapidapi' | 'custom_proxy' | 'google_search'>(
+  const [providerType, setProviderType] = useState<'mock' | 'rapidapi' | 'custom_proxy' | 'google_search' | 'leadocean'>(
     providerConfig.providerType
   );
   const [apiKeyInput, setApiKeyInput] = useState(providerConfig.apiKey || '');

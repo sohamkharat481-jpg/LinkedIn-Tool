@@ -31,7 +31,7 @@ export class SerpApiLeadProvider implements LeadProvider {
       engine: 'google',
       q: queryStr,
       api_key: this.apiKey,
-      num: String(Math.min(filters.maxLeads || 50, 50))
+      num: String(Math.min(Math.max(filters.maxLeads || 50, 1), 500))
     });
 
     const url = `https://serpapi.com/search.json?${params.toString()}`;

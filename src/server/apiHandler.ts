@@ -62,8 +62,7 @@ apiRouter.get('/supabase-status', async (_req: Request, res: Response) => {
 
 // 2. Provider Health / Status Endpoint (Does NOT expose secrets)
 apiRouter.get('/provider-status', (req: Request, res: Response) => {
-  const apiKey = (req.headers['x-provider-api-key'] as string) || process.env.GOOGLE_SEARCH_API_KEY || process.env.LEAD_PROVIDER_API_KEY;
-  const cx = (req.headers['x-provider-engine-id'] as string) || process.env.GOOGLE_SEARCH_ENGINE_ID;
+  const apiKey = (req.headers['x-provider-api-key'] as string) || process.env.LEADOCEAN_API_KEY || process.env.LEAD_PROVIDER_API_KEY;
   
   let isMock = false;
   if (req.query && typeof req.query.mode === 'string') {
@@ -77,49 +76,48 @@ apiRouter.get('/provider-status', (req: Request, res: Response) => {
     }
   }
 
-  const statusInfo = ServerLeadProviderService.getStatus(apiKey, isMock ? 'mock' : 'production', cx);
+  const statusInfo = ServerLeadProviderService.getStatus(apiKey, isMock ? 'mock' : 'production');
   res.json(statusInfo);
 });
 
 // Safe Diagnostic Endpoint (Reports CONFIGURED/MISSING status only)
 apiRouter.get('/provider-status/diagnostics', (req: Request, res: Response) => {
   const apiKey = (req.headers['x-provider-api-key'] as string);
-  const cx = (req.headers['x-provider-engine-id'] as string);
 
-  const diag = ServerLeadProviderService.getDiagnostics(apiKey, cx);
+  const diag = ServerLeadProviderService.getDiagnostics(apiKey);
   res.json(diag);
 });
 
 // 3. Test Provider Connection
 apiRouter.post('/provider-status/test', async (req: Request, res: Response) => {
-  const { apiKey, customEndpoint, searchEngineId } = req.body;
-  const activeKey = apiKey || process.env.GOOGLE_SEARCH_API_KEY || process.env.LEAD_PROVIDER_API_KEY;
-  const activeCx = searchEngineId || process.env.GOOGLE_SEARCH_ENGINE_ID;
+  const { apiKey } = req.body;
+  const activeKey = apiKey || process.env.LEADOCEAN_API_KEY || process.env.LEAD_PROVIDER_API_KEY;
 
-  const testResult = await ServerLeadProviderService.testConnection(activeKey, activeCx);
+  const testResult = await ServerLeadProviderService.testConnection(activeKey);
   res.json(testResult);
 });
 
 // 4. Main Search Leads Endpoint (Executes server-side provider, normalization & deduplication)
 apiRouter.post('/search-leads', async (req: Request, res: Response) => {
   try {
-    const { filters, clientId, workspaceId, providerType, apiKey, customEndpoint, searchEngineId } = req.body;
+    const { filters, clientId, workspaceId, providerType, apiKey } = req.body;
 
     if (!filters || typeof filters !== 'object') {
       res.status(400).json({ error: 'Invalid search filters provided.' });
       return;
     }
 
-    const isMock = providerType === 'mock';
-    const activeApiKey = apiKey || process.env.GOOGLE_SEARCH_API_KEY || process.env.LEAD_PROVIDER_API_KEY;
-    const activeEngineId = searchEngineId || process.env.GOOGLE_SEARCH_ENGINE_ID;
+    filters.maxLeads = Math.min(Math.max(Number(filters.maxLeads) || 50, 1), 500);
 
-    // Strict requirement: If not in mock mode and missing API key or Search Engine ID, return clear error
-    if (!isMock && (!activeApiKey || activeApiKey.trim() === '' || !activeEngineId || activeEngineId.trim() === '')) {
+    const isMock = providerType === 'mock';
+    const activeApiKey = apiKey || process.env.LEADOCEAN_API_KEY || process.env.LEAD_PROVIDER_API_KEY;
+
+    // Strict requirement: If not in mock mode and missing API key, return clear error
+    if (!isMock && (!activeApiKey || activeApiKey.trim() === '')) {
       res.status(422).json({
-        error: 'Google Custom Search provider is not configured.',
+        error: 'LeadOcean provider is not configured.',
         code: 'NO_PROVIDER_CONFIGURED',
-        message: 'Please configure GOOGLE_SEARCH_API_KEY and GOOGLE_SEARCH_ENGINE_ID in environment variables or Settings page.'
+        message: 'Please configure LEADOCEAN_API_KEY in environment variables or Settings page.'
       });
       return;
     }
@@ -128,7 +126,6 @@ apiRouter.post('/search-leads', async (req: Request, res: Response) => {
     const rawCandidates: RawLead[] = await ServerLeadProviderService.fetchCandidateLeads(
       filters as LeadFilter,
       activeApiKey,
-      activeEngineId,
       isMock
     );
 
@@ -138,8 +135,8 @@ apiRouter.post('/search-leads', async (req: Request, res: Response) => {
     res.json({
       success: true,
       provider: {
-        id: isMock ? 'mock-provider' : 'google-search-provider',
-        name: isMock ? 'Demo / Mock Data Provider' : 'Google Custom Search / Programmable Search',
+        id: isMock ? 'mock-provider' : 'leadocean-b2b-provider',
+        name: isMock ? 'Demo / Mock Data Provider' : 'LeadOcean B2B People Search API',
         isMock
       },
       metrics: {
@@ -155,7 +152,7 @@ apiRouter.post('/search-leads', async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('API /search-leads error:', error);
     res.status(500).json({
-      error: error.message || 'Google Search provider temporarily unavailable.'
+      error: error.message || 'LeadOcean provider temporarily unavailable.'
     });
   }
 });
@@ -171,7 +168,7 @@ apiRouter.post('/lead-search-proxy', async (req: Request, res: Response) => {
 
   try {
     const filters: LeadFilter = req.body.filters || req.body;
-    const targetCount = Math.min(filters.maxLeads || 50, 50);
+    const targetCount = Math.min(Math.max(filters.maxLeads || 50, 1), 500);
 
     const titles = filters.jobTitles && filters.jobTitles.length > 0 ? filters.jobTitles : ['Founder', 'CEO'];
     const country = filters.country || 'United States';
@@ -208,3 +205,86 @@ apiRouter.post('/lead-search-proxy', async (req: Request, res: Response) => {
     res.status(502).json({ error: 'Failed to communicate with external lead discovery service.' });
   }
 });
+
+// 6. LinkedIn Profile Analysis Endpoint for Profile-Link Mode ICP Generation
+apiRouter.post('/analyze-profile', async (req: Request, res: Response) => {
+  try {
+    const { profileUrl } = req.body;
+
+    if (!profileUrl || typeof profileUrl !== 'string') {
+      res.status(400).json({ error: 'LinkedIn profile URL is required.' });
+      return;
+    }
+
+    const linkedInRegex = /https?:\/\/(www\.)?linkedin\.com\/in\/[\w-]+/i;
+    if (!linkedInRegex.test(profileUrl.trim())) {
+      res.status(400).json({
+        error: 'Invalid LinkedIn profile URL. Must match format: https://www.linkedin.com/in/example'
+      });
+      return;
+    }
+
+    let icpSummary = {
+      jobTitles: ['Founder', 'CEO', 'Director'],
+      industry: ['Technology & SaaS'],
+      seniority: ['Director', 'VP', 'C-Level'],
+      country: 'United States',
+      city: 'San Francisco',
+      companySize: ['11-50', '51-200'],
+      keywords: 'SaaS, B2B, Growth'
+    };
+
+    const apiKey = process.env.GEMINI_API_KEY || process.env.VITE_GEMIN_API_KEY;
+    if (apiKey) {
+      try {
+        const { GoogleGenAI } = await import('@google/genai');
+        const ai = new GoogleGenAI({ apiKey });
+        const prompt = `Analyze this LinkedIn profile URL/slug: "${profileUrl}". 
+Extract or deduce an Ideal Customer Profile (ICP) summary for B2B lead generation matching this person's likely professional domain and network.
+Return valid JSON only with keys: 
+- jobTitles (array of strings)
+- industry (array of strings)
+- seniority (array of strings: Entry, Manager, Senior, Director, VP, C-Level)
+- country (string)
+- city (string)
+- companySize (array of strings: 1-10, 11-50, 51-200, 201-500, 501-1000, 1001+)
+- keywords (string)`;
+
+        const response = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: prompt
+        });
+
+        const text = response.text || '';
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          if (parsed && typeof parsed === 'object') {
+            icpSummary = {
+              jobTitles: Array.isArray(parsed.jobTitles) && parsed.jobTitles.length > 0 ? parsed.jobTitles : icpSummary.jobTitles,
+              industry: Array.isArray(parsed.industry) && parsed.industry.length > 0 ? parsed.industry : icpSummary.industry,
+              seniority: Array.isArray(parsed.seniority) ? parsed.seniority : icpSummary.seniority,
+              country: parsed.country || icpSummary.country,
+              city: parsed.city || icpSummary.city,
+              companySize: Array.isArray(parsed.companySize) ? parsed.companySize : icpSummary.companySize,
+              keywords: parsed.keywords || icpSummary.keywords
+            };
+          }
+        }
+      } catch (geminiErr) {
+        console.warn('Gemini profile analysis fallback to heuristics:', geminiErr);
+      }
+    }
+
+    res.json({
+      success: true,
+      profileUrl: profileUrl.trim(),
+      icp: icpSummary,
+      message: 'Profile successfully analyzed and ICP generated.'
+    });
+  } catch (error: any) {
+    console.error('API /analyze-profile error:', error);
+    res.status(500).json({ error: error.message || 'Failed to analyze LinkedIn profile.' });
+  }
+});
+

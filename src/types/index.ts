@@ -16,6 +16,7 @@ export interface LeadFilter {
   seniority: SeniorityLevel[];
   companySize: CompanySizeRange[];
   maxLeads: number;
+  keywords?: string;
 }
 
 export interface RawLead {
@@ -113,7 +114,7 @@ export interface SearchProgressState {
 }
 
 export interface LeadProviderConfig {
-  providerType: 'mock' | 'rapidapi' | 'custom_proxy' | 'google_search';
+  providerType: 'mock' | 'rapidapi' | 'custom_proxy' | 'google_search' | 'leadocean';
   apiKey?: string;
   customEndpoint?: string;
 }

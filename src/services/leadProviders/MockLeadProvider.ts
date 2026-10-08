@@ -41,7 +41,7 @@ export class MockLeadProvider implements LeadProvider {
     // Simulate brief network latency for discovery phase
     await new Promise((resolve) => setTimeout(resolve, 800));
 
-    const targetCount = Math.min(filters.maxLeads || 50, 50);
+    const targetCount = Math.min(Math.max(filters.maxLeads || 50, 1), 500);
     // Generate ~20% extra candidates including duplicate profile URLs and duplicate name/company
     // so the deduplication pipeline can demonstrate real filtering
     const candidatePoolSize = Math.floor(targetCount * 1.25);

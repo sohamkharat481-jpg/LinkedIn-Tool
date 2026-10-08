@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Client, LeadFilter, SeniorityLevel, CompanySizeRange, RawLead, SearchProgressState, ProviderStatusInfo } from '../types';
-import { Search, Sparkles, Filter, CheckCircle2, Loader2, AlertTriangle, ArrowRight, ShieldCheck, Tag, XCircle, Settings } from 'lucide-react';
+import { Search, Sparkles, Filter, CheckCircle2, Loader2, AlertTriangle, ArrowRight, ShieldCheck, Tag, XCircle, Settings, Link, User, Globe, Building2 } from 'lucide-react';
+import { apiUrl } from '../services/apiClient';
 
 interface LeadFinderViewProps {
   clients: Client[];
@@ -19,7 +20,6 @@ interface LeadFinderViewProps {
 }
 
 const SENIORITY_OPTIONS: SeniorityLevel[] = ['Entry', 'Manager', 'Senior', 'Director', 'VP', 'C-Level'];
-
 const COMPANY_SIZE_OPTIONS: CompanySizeRange[] = ['1-10', '11-50', '51-200', '201-500', '501-1000', '1001+'];
 
 const POPULAR_COUNTRIES = [
@@ -67,7 +67,24 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
   providerStatus,
   onEnableMockMode
 }) => {
-  // Form State
+  // Search Mode state: 'manual' | 'profile'
+  const [searchMode, setSearchMode] = useState<'manual' | 'profile'>('manual');
+
+  // LinkedIn Profile Mode state
+  const [clientProfileUrl, setClientProfileUrl] = useState('');
+  const [profileInputError, setProfileInputError] = useState<string | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analyzedIcp, setAnalyzedIcp] = useState<{
+    jobTitles: string[];
+    industry: string[];
+    seniority: SeniorityLevel[];
+    country: string;
+    city: string;
+    companySize: CompanySizeRange[];
+    keywords: string;
+  } | null>(null);
+
+  // Manual Form State
   const [jobTitles, setJobTitles] = useState<string[]>(['Founder', 'CEO', 'Marketing Manager']);
   const [titleInput, setTitleInput] = useState('');
   
@@ -133,13 +150,52 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
     }
   };
 
-  const handleRunSearch = async () => {
+  const handleAnalyzeProfile = async () => {
+    const url = clientProfileUrl.trim();
+    const linkedInRegex = /https?:\/\/(www\.)?linkedin\.com\/in\/[\w-]+/i;
+
+    if (!url) {
+      setProfileInputError('Please enter a LinkedIn profile URL.');
+      return;
+    }
+
+    if (!linkedInRegex.test(url)) {
+      setProfileInputError('Invalid LinkedIn profile URL. Example: https://www.linkedin.com/in/example');
+      return;
+    }
+
+    setProfileInputError(null);
+    setIsAnalyzing(true);
+    setAnalyzedIcp(null);
+
+    try {
+      const res = await fetch(apiUrl('/api/analyze-profile'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profileUrl: url })
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to analyze LinkedIn profile.');
+      }
+
+      setAnalyzedIcp(data.icp);
+    } catch (err: any) {
+      setProfileInputError(err.message || 'Error communicating with profile analyzer.');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const handleRunSearch = async (overrideFilters?: LeadFilter) => {
     if (!activeClient) {
       setSearchError('Please select or create an active target client first.');
       return;
     }
 
-    if (jobTitles.length === 0) {
+    const activeJobTitles = overrideFilters ? overrideFilters.jobTitles : jobTitles;
+    if (activeJobTitles.length === 0) {
       setSearchError('At least one job title is required.');
       return;
     }
@@ -148,36 +204,30 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
     setSearchError(null);
     setSearchResultSummary(null);
 
-    const filters: LeadFilter = {
+    const filters: LeadFilter = overrideFilters || {
       jobTitles,
       industry: industries,
       country,
       city: city.trim() || undefined,
       seniority,
       companySize,
-      maxLeads: Math.min(maxLeads, 50)
+      maxLeads: Math.min(Math.max(maxLeads, 1), 500)
     };
 
     try {
-      // Step 1: Preparing search...
       setProgressState({ step: 1, message: 'Preparing search parameters...' });
       await new Promise((r) => setTimeout(r, 300));
 
-      // Step 2: Finding potential leads...
       setProgressState({ step: 2, message: 'Connecting to server lead provider...' });
       
-      // Execute backend API search
       const result = await onExecuteSearch(filters, activeClient);
 
-      // Step 3: Filtering results...
       setProgressState({ step: 3, message: 'Validating public lead records...' });
       await new Promise((r) => setTimeout(r, 300));
 
-      // Step 4: Removing duplicates...
       setProgressState({ step: 4, message: 'Executing profile URL & composite deduplication...' });
       await new Promise((r) => setTimeout(r, 300));
 
-      // Step 5: Preparing results...
       setProgressState({ step: 5, message: 'Saving unique leads to client database...' });
       await new Promise((r) => setTimeout(r, 200));
 
@@ -194,6 +244,21 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
     }
   };
 
+  const handleSearchWithAnalyzedIcp = () => {
+    if (!analyzedIcp) return;
+    const filters: LeadFilter = {
+      jobTitles: analyzedIcp.jobTitles,
+      industry: analyzedIcp.industry,
+      country: analyzedIcp.country,
+      city: analyzedIcp.city || undefined,
+      seniority: analyzedIcp.seniority,
+      companySize: analyzedIcp.companySize,
+      maxLeads: Math.min(Math.max(maxLeads, 1), 500),
+      keywords: analyzedIcp.keywords
+    };
+    handleRunSearch(filters);
+  };
+
   const isNotConfigured = !providerStatus.isMock && providerStatus.status === 'Not Configured';
 
   return (
@@ -203,7 +268,7 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
         <div>
           <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Find Potential Customers</h1>
           <p className="text-xs text-gray-500 mt-1">
-            Configure manual search filters to discover relevant public B2B leads.
+            Discover relevant public B2B leads via Manual Filters or LinkedIn Profile Mode.
           </p>
         </div>
 
@@ -239,7 +304,7 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
                 No real lead provider is configured.
               </h3>
               <p className="text-xs text-amber-800">
-                To perform production searches, set <code className="bg-amber-100 font-mono px-1 py-0.5 rounded text-amber-900 font-bold">LEAD_PROVIDER_API_KEY</code> in environment variables or enter your key in Settings. Alternatively, enable Demo / Mock Mode to test searching with sample leads.
+                To perform production searches, set <code className="bg-amber-100 font-mono px-1 py-0.5 rounded text-amber-900 font-bold">LEADOCEAN_API_KEY</code> in environment variables or enter your key in Settings. Alternatively, enable Demo / Mock Mode to test searching with sample leads.
               </p>
             </div>
           </div>
@@ -270,292 +335,462 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
         </div>
       )}
 
-      {/* Main Search Configuration Card */}
-      <div className="bg-white rounded-2xl border border-gray-200/90 shadow-xs p-6 space-y-6">
-        
-        {/* Section 1: Job Titles & Industry */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Job Titles */}
-          <div>
-            <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
-              Job Titles * (Multiple Allowed)
-            </label>
-            <div className="flex gap-2 mb-2">
-              <input
-                type="text"
-                placeholder="Type job title & press Enter..."
-                value={titleInput}
-                onChange={(e) => setTitleInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    handleAddJobTitle(titleInput);
-                  }
-                }}
-                className="flex-1 text-xs border border-gray-300 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-              />
-              <button
-                type="button"
-                onClick={() => handleAddJobTitle(titleInput)}
-                className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold px-3 py-2 rounded-xl"
-              >
-                Add
-              </button>
-            </div>
-
-            {/* Selected Tags */}
-            <div className="flex flex-wrap gap-1.5 min-h-[36px]">
-              {jobTitles.map((title) => (
-                <span
-                  key={title}
-                  className="inline-flex items-center gap-1.5 bg-blue-50 text-blue-800 border border-blue-200 text-xs font-semibold px-2.5 py-1 rounded-lg"
-                >
-                  {title}
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveJobTitle(title)}
-                    className="text-blue-500 hover:text-blue-900 font-bold"
-                  >
-                    ×
-                  </button>
-                </span>
-              ))}
-            </div>
-
-            {/* Presets */}
-            <div className="mt-2 text-[11px] text-gray-500 flex flex-wrap items-center gap-1">
-              <span className="font-medium text-gray-400">Presets:</span>
-              {POPULAR_JOB_TITLE_PRESETS.slice(0, 5).map((preset) => (
-                <button
-                  key={preset}
-                  type="button"
-                  onClick={() => handleAddJobTitle(preset)}
-                  className="text-blue-600 hover:underline bg-gray-50 px-1.5 py-0.5 rounded border border-gray-200"
-                >
-                  +{preset}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Industry */}
-          <div>
-            <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
-              Industry (Multiple Allowed)
-            </label>
-            <div className="flex gap-2 mb-2">
-              <input
-                type="text"
-                placeholder="Type industry & press Enter..."
-                value={industryInput}
-                onChange={(e) => setIndustryInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    handleAddIndustry(industryInput);
-                  }
-                }}
-                className="flex-1 text-xs border border-gray-300 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-              />
-              <button
-                type="button"
-                onClick={() => handleAddIndustry(industryInput)}
-                className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold px-3 py-2 rounded-xl"
-              >
-                Add
-              </button>
-            </div>
-
-            {/* Selected Industries */}
-            <div className="flex flex-wrap gap-1.5 min-h-[36px]">
-              {industries.map((ind) => (
-                <span
-                  key={ind}
-                  className="inline-flex items-center gap-1.5 bg-purple-50 text-purple-800 border border-purple-200 text-xs font-semibold px-2.5 py-1 rounded-lg"
-                >
-                  {ind}
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveIndustry(ind)}
-                    className="text-purple-500 hover:text-purple-900 font-bold"
-                  >
-                    ×
-                  </button>
-                </span>
-              ))}
-            </div>
-
-            {/* Presets */}
-            <div className="mt-2 text-[11px] text-gray-500 flex flex-wrap items-center gap-1">
-              <span className="font-medium text-gray-400">Presets:</span>
-              {POPULAR_INDUSTRY_PRESETS.slice(0, 4).map((preset) => (
-                <button
-                  key={preset}
-                  type="button"
-                  onClick={() => handleAddIndustry(preset)}
-                  className="text-purple-600 hover:underline bg-gray-50 px-1.5 py-0.5 rounded border border-gray-200"
-                >
-                  +{preset}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Section 2: Country & City */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-gray-100">
-          <div>
-            <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
-              Country *
-            </label>
-            <select
-              value={country}
-              onChange={(e) => setCountry(e.target.value)}
-              className="w-full text-xs font-medium border border-gray-300 rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-            >
-              {POPULAR_COUNTRIES.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
-              City (Optional)
-            </label>
-            <input
-              type="text"
-              placeholder="e.g. New York, Chicago, London, Toronto"
-              value={city}
-              onChange={(e) => setCity(e.target.value)}
-              className="w-full text-xs border border-gray-300 rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-            />
-          </div>
-        </div>
-
-        {/* Section 3: Seniority & Company Size */}
-        <div className="space-y-4 pt-4 border-t border-gray-100">
-          <div>
-            <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">
-              Seniority Level
-            </label>
-            <div className="flex flex-wrap gap-2">
-              {SENIORITY_OPTIONS.map((level) => {
-                const isSelected = seniority.includes(level);
-                return (
-                  <button
-                    key={level}
-                    type="button"
-                    onClick={() => toggleSeniority(level)}
-                    className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold border transition-all ${
-                      isSelected
-                        ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
-                        : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'
-                    }`}
-                  >
-                    {level}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">
-              Company Size (Employees)
-            </label>
-            <div className="flex flex-wrap gap-2">
-              {COMPANY_SIZE_OPTIONS.map((size) => {
-                const isSelected = companySize.includes(size);
-                return (
-                  <button
-                    key={size}
-                    type="button"
-                    onClick={() => toggleCompanySize(size)}
-                    className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold border transition-all ${
-                      isSelected
-                        ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                        : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'
-                    }`}
-                  >
-                    {size}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-
-        {/* Section 4: Max Leads Limit */}
-        <div className="pt-4 border-t border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-              Maximum Leads to Discover (Phase 1 Max = 50)
-            </label>
-            <p className="text-xs text-gray-500">Default = 50 unique leads per search run</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <input
-              type="range"
-              min="10"
-              max="50"
-              step="5"
-              value={maxLeads}
-              onChange={(e) => setMaxLeads(parseInt(e.target.value, 10))}
-              className="w-32 accent-blue-600 cursor-pointer"
-            />
-            <span className="text-sm font-bold text-gray-900 bg-gray-100 px-3 py-1 rounded-lg border border-gray-200 min-w-[50px] text-center">
-              {maxLeads}
-            </span>
-          </div>
-        </div>
-
-        {/* Filter Summary Before Starting */}
-        <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-2 text-xs">
-          <div className="font-bold text-slate-800 flex items-center gap-2">
-            <Filter className="w-3.5 h-3.5 text-blue-600" /> Filter Summary Overview
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 text-slate-600">
-            <div><span className="font-semibold text-slate-900">Client:</span> {activeClient?.name || 'None'}</div>
-            <div><span className="font-semibold text-slate-900">Titles:</span> {jobTitles.join(', ') || 'Any'}</div>
-            <div><span className="font-semibold text-slate-900">Location:</span> {city ? `${city}, ${country}` : country}</div>
-            <div><span className="font-semibold text-slate-900">Seniority:</span> {seniority.join(', ') || 'Any'}</div>
-          </div>
-        </div>
-
-        {searchError && (
-          <div className="p-4 bg-red-50 border border-red-200 rounded-2xl text-xs text-red-700 font-medium flex items-start gap-2">
-            <XCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
-            <div>
-              <p className="font-bold">Search Execution Error</p>
-              <p className="mt-0.5">{searchError}</p>
-            </div>
-          </div>
-        )}
-
-        {/* Find Leads Action Button */}
-        <div className="pt-2">
-          <button
-            onClick={handleRunSearch}
-            disabled={isSearching || !activeClient || isNotConfigured}
-            className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold text-sm py-3.5 px-6 rounded-2xl transition-all shadow-md shadow-blue-600/20"
-          >
-            {isSearching ? (
-              <>
-                <Loader2 className="w-5 h-5 animate-spin" />
-                <span>Searching & Deduplicating...</span>
-              </>
-            ) : (
-              <>
-                <Search className="w-5 h-5" />
-                <span>Find Leads</span>
-              </>
-            )}
-          </button>
-        </div>
+      {/* Mode Selector Tabs */}
+      <div className="flex bg-gray-100 p-1 rounded-2xl max-w-md gap-1">
+        <button
+          type="button"
+          onClick={() => setSearchMode('manual')}
+          className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+            searchMode === 'manual'
+              ? 'bg-white text-blue-900 shadow-sm'
+              : 'text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          <Filter className="w-4 h-4 text-blue-600" />
+          A. Manual Filters
+        </button>
+        <button
+          type="button"
+          onClick={() => setSearchMode('profile')}
+          className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+            searchMode === 'profile'
+              ? 'bg-white text-blue-900 shadow-sm'
+              : 'text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          <Link className="w-4 h-4 text-purple-600" />
+          B. LinkedIn Profile Mode
+        </button>
       </div>
+
+      {/* PROFILE MODE VIEW */}
+      {searchMode === 'profile' && (
+        <div className="bg-white rounded-2xl border border-gray-200/90 shadow-xs p-6 space-y-6">
+          <div className="space-y-1">
+            <h2 className="text-base font-bold text-gray-900 flex items-center gap-2">
+              <Link className="w-5 h-5 text-purple-600" /> LinkedIn Profile ICP Mode
+            </h2>
+            <p className="text-xs text-gray-500">
+              Paste a client or reference LinkedIn profile URL. We will analyze the profile and generate a target Ideal Customer Profile (ICP) summary automatically.
+            </p>
+          </div>
+
+          <div className="space-y-3">
+            <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider">
+              Client LinkedIn Profile URL *
+            </label>
+            <div className="flex gap-3">
+              <div className="relative flex-1">
+                <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400">
+                  <User className="w-4 h-4" />
+                </span>
+                <input
+                  type="url"
+                  placeholder="https://www.linkedin.com/in/example-profile"
+                  value={clientProfileUrl}
+                  onChange={(e) => setClientProfileUrl(e.target.value)}
+                  className="w-full text-xs font-medium border border-gray-300 rounded-xl pl-10 pr-3.5 py-3 focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={handleAnalyzeProfile}
+                disabled={isAnalyzing || !clientProfileUrl.trim()}
+                className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white font-bold text-xs px-6 py-3 rounded-xl transition-all shadow-md shadow-purple-600/20 shrink-0"
+              >
+                {isAnalyzing ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Analyzing...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4" />
+                    <span>Analyze Profile & ICP</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {profileInputError && (
+              <p className="text-xs text-red-600 font-semibold flex items-center gap-1.5 mt-1">
+                <XCircle className="w-4 h-4" /> {profileInputError}
+              </p>
+            )}
+          </div>
+
+          {/* Analyzed ICP Results Card */}
+          {analyzedIcp && (
+            <div className="p-6 bg-purple-50/70 border border-purple-200 rounded-2xl space-y-4 animate-fade-in">
+              <div className="flex items-center gap-2 text-purple-900 font-bold text-sm">
+                <Sparkles className="w-4 h-4 text-purple-600" />
+                Generated Target ICP Summary from Profile
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs bg-white p-4 rounded-xl border border-purple-100">
+                <div>
+                  <span className="font-bold text-gray-500 uppercase block text-[10px] mb-1">Target Job Titles</span>
+                  <div className="flex flex-wrap gap-1">
+                    {analyzedIcp.jobTitles.map((t) => (
+                      <span key={t} className="bg-blue-50 text-blue-800 px-2 py-0.5 rounded font-semibold border border-blue-200">
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <span className="font-bold text-gray-500 uppercase block text-[10px] mb-1">Target Industry</span>
+                  <div className="flex flex-wrap gap-1">
+                    {analyzedIcp.industry.map((ind) => (
+                      <span key={ind} className="bg-purple-50 text-purple-800 px-2 py-0.5 rounded font-semibold border border-purple-200">
+                        {ind}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <span className="font-bold text-gray-500 uppercase block text-[10px] mb-1">Location</span>
+                  <p className="font-semibold text-gray-900">
+                    {analyzedIcp.city ? `${analyzedIcp.city}, ${analyzedIcp.country}` : analyzedIcp.country}
+                  </p>
+                </div>
+
+                <div>
+                  <span className="font-bold text-gray-500 uppercase block text-[10px] mb-1">Seniority & Company Size</span>
+                  <p className="font-semibold text-gray-900">
+                    {analyzedIcp.seniority.join(', ')} | Size: {analyzedIcp.companySize.join(', ')}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-2">
+                <span className="text-[11px] text-purple-700 italic">
+                  Ready to discover matching real B2B leads from LeadOcean using this profile's ICP.
+                </span>
+                <button
+                  type="button"
+                  onClick={handleSearchWithAnalyzedIcp}
+                  disabled={isSearching || !activeClient}
+                  className="flex items-center gap-2 bg-purple-700 hover:bg-purple-800 text-white font-bold text-xs px-5 py-3 rounded-xl transition-all shadow-md shadow-purple-700/20"
+                >
+                  {isSearching ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Searching ICP Leads...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Search className="w-4 h-4" />
+                      <span>Run Search with Generated ICP</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* MANUAL FILTERS MODE VIEW */}
+      {searchMode === 'manual' && (
+        <div className="bg-white rounded-2xl border border-gray-200/90 shadow-xs p-6 space-y-6">
+          
+          {/* Section 1: Job Titles & Industry */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Job Titles */}
+            <div>
+              <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
+                Job Titles * (Multiple Allowed)
+              </label>
+              <div className="flex gap-2 mb-2">
+                <input
+                  type="text"
+                  placeholder="Type job title & press Enter..."
+                  value={titleInput}
+                  onChange={(e) => setTitleInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAddJobTitle(titleInput);
+                    }
+                  }}
+                  className="flex-1 text-xs border border-gray-300 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => handleAddJobTitle(titleInput)}
+                  className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold px-3 py-2 rounded-xl"
+                >
+                  Add
+                </button>
+              </div>
+
+              {/* Selected Tags */}
+              <div className="flex flex-wrap gap-1.5 min-h-[36px]">
+                {jobTitles.map((title) => (
+                  <span
+                    key={title}
+                    className="inline-flex items-center gap-1.5 bg-blue-50 text-blue-800 border border-blue-200 text-xs font-semibold px-2.5 py-1 rounded-lg"
+                  >
+                    {title}
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveJobTitle(title)}
+                      className="text-blue-500 hover:text-blue-900 font-bold"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+
+              {/* Presets */}
+              <div className="mt-2 text-[11px] text-gray-500 flex flex-wrap items-center gap-1">
+                <span className="font-medium text-gray-400">Presets:</span>
+                {POPULAR_JOB_TITLE_PRESETS.slice(0, 5).map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => handleAddJobTitle(preset)}
+                    className="text-blue-600 hover:underline bg-gray-50 px-1.5 py-0.5 rounded border border-gray-200"
+                  >
+                    +{preset}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Industry */}
+            <div>
+              <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
+                Industry (Multiple Allowed)
+              </label>
+              <div className="flex gap-2 mb-2">
+                <input
+                  type="text"
+                  placeholder="Type industry & press Enter..."
+                  value={industryInput}
+                  onChange={(e) => setIndustryInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAddIndustry(industryInput);
+                    }
+                  }}
+                  className="flex-1 text-xs border border-gray-300 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => handleAddIndustry(industryInput)}
+                  className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold px-3 py-2 rounded-xl"
+                >
+                  Add
+                </button>
+              </div>
+
+              {/* Selected Industries */}
+              <div className="flex flex-wrap gap-1.5 min-h-[36px]">
+                {industries.map((ind) => (
+                  <span
+                    key={ind}
+                    className="inline-flex items-center gap-1.5 bg-purple-50 text-purple-800 border border-purple-200 text-xs font-semibold px-2.5 py-1 rounded-lg"
+                  >
+                    {ind}
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveIndustry(ind)}
+                      className="text-purple-500 hover:text-purple-900 font-bold"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+
+              {/* Presets */}
+              <div className="mt-2 text-[11px] text-gray-500 flex flex-wrap items-center gap-1">
+                <span className="font-medium text-gray-400">Presets:</span>
+                {POPULAR_INDUSTRY_PRESETS.slice(0, 4).map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => handleAddIndustry(preset)}
+                    className="text-purple-600 hover:underline bg-gray-50 px-1.5 py-0.5 rounded border border-gray-200"
+                  >
+                    +{preset}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Section 2: Country & City */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-gray-100">
+            <div>
+              <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
+                Country *
+              </label>
+              <select
+                value={country}
+                onChange={(e) => setCountry(e.target.value)}
+                className="w-full text-xs font-medium border border-gray-300 rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+              >
+                {POPULAR_COUNTRIES.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
+                City (Optional)
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. New York, Chicago, London, Toronto"
+                value={city}
+                onChange={(e) => setCity(e.target.value)}
+                className="w-full text-xs border border-gray-300 rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+              />
+            </div>
+          </div>
+
+          {/* Section 3: Seniority & Company Size */}
+          <div className="space-y-4 pt-4 border-t border-gray-100">
+            <div>
+              <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">
+                Seniority Level
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {SENIORITY_OPTIONS.map((level) => {
+                  const isSelected = seniority.includes(level);
+                  return (
+                    <button
+                      key={level}
+                      type="button"
+                      onClick={() => toggleSeniority(level)}
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold border transition-all ${
+                        isSelected
+                          ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                          : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      {level}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">
+                Company Size (Employees)
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {COMPANY_SIZE_OPTIONS.map((size) => {
+                  const isSelected = companySize.includes(size);
+                  return (
+                    <button
+                      key={size}
+                      type="button"
+                      onClick={() => toggleCompanySize(size)}
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold border transition-all ${
+                        isSelected
+                          ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                          : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      {size}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Section 4: Max Leads Limit */}
+          <div className="pt-4 border-t border-gray-100 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                  Maximum Leads to Discover (Max 500)
+                </label>
+                <p className="text-xs text-gray-500">Select batch size for search execution (Default: 50)</p>
+              </div>
+              <span className="text-sm font-bold text-blue-700 bg-blue-50 px-3 py-1 rounded-xl border border-blue-200">
+                {maxLeads} Leads Selected
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {[5, 50, 100, 200, 300, 500].map((num) => {
+                const isSelected = maxLeads === num;
+                return (
+                  <button
+                    key={num}
+                    type="button"
+                    onClick={() => setMaxLeads(num)}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all ${
+                      isSelected
+                        ? 'bg-blue-600 text-white border-blue-600 shadow-sm shadow-blue-600/20'
+                        : 'bg-white text-gray-700 border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    {num} {num === 50 ? '(Default)' : ''}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Filter Summary Before Starting */}
+          <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-2 text-xs">
+            <div className="font-bold text-slate-800 flex items-center gap-2">
+              <Filter className="w-3.5 h-3.5 text-blue-600" /> Filter Summary Overview
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 text-slate-600">
+              <div><span className="font-semibold text-slate-900">Client:</span> {activeClient?.name || 'None'}</div>
+              <div><span className="font-semibold text-slate-900">Titles:</span> {jobTitles.join(', ') || 'Any'}</div>
+              <div><span className="font-semibold text-slate-900">Location:</span> {city ? `${city}, ${country}` : country}</div>
+              <div><span className="font-semibold text-slate-900">Seniority:</span> {seniority.join(', ') || 'Any'}</div>
+            </div>
+          </div>
+
+          {searchError && (
+            <div className="p-4 bg-red-50 border border-red-200 rounded-2xl text-xs text-red-700 font-medium flex items-start gap-2">
+              <XCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold">Search Execution Error</p>
+                <p className="mt-0.5">{searchError}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Find Leads Action Button */}
+          <div className="pt-2">
+            <button
+              onClick={() => handleRunSearch()}
+              disabled={isSearching || !activeClient || isNotConfigured}
+              className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold text-sm py-3.5 px-6 rounded-2xl transition-all shadow-md shadow-blue-600/20"
+            >
+              {isSearching ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span>Searching & Deduplicating...</span>
+                </>
+              ) : (
+                <>
+                  <Search className="w-5 h-5" />
+                  <span>Find Leads</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Real Progress Modal Overlay */}
       {isSearching && progressState && (

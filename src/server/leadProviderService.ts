@@ -1,6 +1,6 @@
 import { LeadFilter, RawLead, ProviderStatusInfo } from '../types';
 import { MockLeadProvider } from '../services/leadProviders/MockLeadProvider';
-import { GoogleSearchLeadProvider } from '../services/leadProviders/GoogleSearchLeadProvider';
+import { LeadOceanLeadProvider } from '../services/leadProviders/LeadOceanLeadProvider';
 
 let lastSuccessTimestamp: string = 'None yet';
 let lastErrorMsg: string = 'None';
@@ -11,21 +11,13 @@ export class ServerLeadProviderService {
   /**
    * Safe Diagnostic Status (Does NOT expose secret values)
    */
-  static getDiagnostics(overrideApiKey?: string, overrideEngineId?: string) {
-    const googleKey =
+  static getDiagnostics(overrideApiKey?: string) {
+    const leadOceanKey =
       overrideApiKey ||
-      process.env.GOOGLE_SEARCH_API_KEY ||
-      process.env.VITE_GOOGLE_SEARCH_API_KEY ||
-      process.env.LEAD_PROVIDER_API_KEY ||
-      process.env.APOLLO_API_KEY;
+      process.env.LEADOCEAN_API_KEY ||
+      process.env.LEAD_PROVIDER_API_KEY;
 
-    const googleCx =
-      overrideEngineId ||
-      process.env.GOOGLE_SEARCH_ENGINE_ID ||
-      process.env.VITE_GOOGLE_SEARCH_ENGINE_ID;
-
-    const hasKey = Boolean(googleKey && String(googleKey).trim().length > 0);
-    const hasEngineId = Boolean(googleCx && String(googleCx).trim().length > 0);
+    const hasKey = Boolean(leadOceanKey && String(leadOceanKey).trim().length > 0);
 
     const runtimeName = process.env.VERCEL
       ? 'Vercel Serverless'
@@ -39,43 +31,28 @@ export class ServerLeadProviderService {
       'applet-4d041d80-4453-4ab7';
 
     return {
-      GOOGLE_SEARCH_API_KEY: hasKey ? 'CONFIGURED' : 'MISSING',
-      GOOGLE_SEARCH_ENGINE_ID: hasEngineId ? 'CONFIGURED' : 'MISSING',
+      LEADOCEAN_API_KEY: hasKey ? 'CONFIGURED' : 'MISSING',
       Runtime: runtimeName,
       Deployment: deploymentId
     };
   }
 
   /**
-   * Helper to resolve Google API Key from environment or overrides
+   * Helper to resolve LeadOcean API Key from environment or overrides
    */
   private static resolveApiKey(overrideKey?: string): string {
     return (
       overrideKey ||
-      process.env.GOOGLE_SEARCH_API_KEY ||
-      process.env.VITE_GOOGLE_SEARCH_API_KEY ||
+      process.env.LEADOCEAN_API_KEY ||
       process.env.LEAD_PROVIDER_API_KEY ||
-      process.env.APOLLO_API_KEY ||
       ''
-    ).trim();
-  }
-
-  /**
-   * Helper to resolve Google Search Engine ID from environment or overrides
-   */
-  private static resolveEngineId(overrideCx?: string): string {
-    return (
-      overrideCx ||
-      process.env.GOOGLE_SEARCH_ENGINE_ID ||
-      process.env.VITE_GOOGLE_SEARCH_ENGINE_ID ||
-      '41f25e8b9b4d94578'
     ).trim();
   }
 
   /**
    * Evaluates current provider status without exposing secrets.
    */
-  static getStatus(overrideApiKey?: string, overrideMode?: string, overrideEngineId?: string): ProviderStatusInfo {
+  static getStatus(overrideApiKey?: string, overrideMode?: string): ProviderStatusInfo {
     const isMock = overrideMode === 'mock';
 
     if (isMock) {
@@ -94,38 +71,19 @@ export class ServerLeadProviderService {
       };
     }
 
-    const googleKey = this.resolveApiKey(overrideApiKey);
-    const googleCx = this.resolveEngineId(overrideEngineId);
-    const providerName = 'Google Custom Search / Programmable Search';
+    const apiKey = this.resolveApiKey(overrideApiKey);
+    const providerName = 'LeadOcean B2B People Search API';
+    const hasKey = Boolean(apiKey && apiKey.length > 0);
 
-    const hasApiKey = Boolean(googleKey && googleKey.length > 0);
-    const hasEngineId = Boolean(googleCx && googleCx.length > 0);
-
-    if (!hasApiKey || !hasEngineId) {
+    if (!hasKey) {
       return {
         configured: false,
         providerName,
         status: 'Not Configured',
-        message: 'Google Search provider is not configured.',
+        message: 'LeadOcean API key is not configured. Please set LEADOCEAN_API_KEY.',
         isMock: false,
-        endpointStatus: 'https://www.googleapis.com/customsearch/v1',
+        endpointStatus: 'https://api.leadocean.io/v1/people/search',
         authStatus: 'Not Configured',
-        lastSuccessfulRequest: lastSuccessTimestamp,
-        lastError: lastErrorMsg,
-        responseTimeMs: lastResponseTime,
-        isExternal: true
-      };
-    }
-
-    if (connectionVerified) {
-      return {
-        configured: true,
-        providerName,
-        status: 'Connected',
-        message: 'Google Search provider connected.',
-        isMock: false,
-        endpointStatus: 'Google Custom Search JSON API (v1)',
-        authStatus: 'Configured',
         lastSuccessfulRequest: lastSuccessTimestamp,
         lastError: lastErrorMsg,
         responseTimeMs: lastResponseTime,
@@ -136,10 +94,10 @@ export class ServerLeadProviderService {
     return {
       configured: true,
       providerName,
-      status: 'Connected',
-      message: 'Google Search provider configured.',
+      status: connectionVerified ? 'Connected' : 'Not Configured',
+      message: 'LeadOcean provider configured.',
       isMock: false,
-      endpointStatus: 'Google Custom Search JSON API (v1)',
+      endpointStatus: 'https://api.leadocean.io/v1/people/search',
       authStatus: 'Configured',
       lastSuccessfulRequest: lastSuccessTimestamp,
       lastError: lastErrorMsg,
@@ -149,42 +107,43 @@ export class ServerLeadProviderService {
   }
 
   /**
-   * Executes a real authenticated connection test against Google Custom Search API.
-   * NEVER uses MockLeadProvider.
+   * Executes a real authenticated connection test against LeadOcean API.
    */
-  static async testConnection(overrideApiKey?: string, overrideEngineId?: string): Promise<ProviderStatusInfo> {
-    const googleKey = this.resolveApiKey(overrideApiKey);
-    const googleCx = this.resolveEngineId(overrideEngineId);
-
+  static async testConnection(overrideApiKey?: string): Promise<ProviderStatusInfo> {
+    const apiKey = this.resolveApiKey(overrideApiKey);
     const startTime = Date.now();
 
-    if (!googleKey || !googleCx) {
-      lastErrorMsg = 'Google Search provider is not configured.';
+    if (!apiKey) {
+      lastErrorMsg = 'LeadOcean API key is not configured.';
       connectionVerified = false;
-      return this.getStatus(overrideApiKey, 'production', overrideEngineId);
+      return this.getStatus(overrideApiKey, 'production');
     }
 
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 8000);
 
-      const params = new URLSearchParams({
-        key: googleKey,
-        cx: googleCx,
-        q: 'site:linkedin.com/in/ "Marketing Manager"',
-        num: '1'
-      });
-
-      const endpoint = `https://www.googleapis.com/customsearch/v1?${params.toString()}`;
+      const endpoint = 'https://api.leadocean.io/v1/people/search';
 
       const response = await fetch(endpoint, {
-        method: 'GET',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey
+        },
+        body: JSON.stringify({
+          title: ['Manager'],
+          limit: 1
+        }),
         signal: controller.signal
-      }).catch((err) => {
-        if (err.name === 'AbortError') {
-          throw new Error('Google Search API test request timed out.');
-        }
-        throw err;
+      }).catch(async () => {
+        return fetch(`${endpoint}?limit=1`, {
+          method: 'GET',
+          headers: {
+            'x-api-key': apiKey
+          },
+          signal: controller.signal
+        });
       });
 
       clearTimeout(timeoutId);
@@ -196,80 +155,26 @@ export class ServerLeadProviderService {
         lastErrorMsg = 'None';
         connectionVerified = true;
         return {
-          ...this.getStatus(overrideApiKey, 'production', overrideEngineId),
+          ...this.getStatus(overrideApiKey, 'production'),
           status: 'Connected',
-          message: 'Google Search provider connected.'
+          message: 'LeadOcean provider connected successfully.'
         };
       }
 
-      const httpCode = response.status;
+      const httpCode = response ? response.status : 500;
       connectionVerified = false;
 
-      const errJson = await response.json().catch(() => null);
-      let rawMsg = (errJson?.error?.message || '').replace(new RegExp(googleKey, 'g'), '[REDACTED_KEY]');
-      if (googleCx) rawMsg = rawMsg.replace(new RegExp(googleCx, 'g'), '[REDACTED_CX]');
-      const rawReason = errJson?.error?.errors?.[0]?.reason || '';
-
-      let apiEnabled = 'UNKNOWN';
-      let credentialsValid = 'UNKNOWN';
-      let apiRestrictionIssue = 'UNKNOWN';
-      let quotaBillingIssue = 'UNKNOWN';
-      let searchEngineValid = 'UNKNOWN';
-
-      const lowerMsg = rawMsg.toLowerCase();
-
-      if (rawReason === 'keyInvalid' || lowerMsg.includes('api key not valid') || lowerMsg.includes('key invalid')) {
-        credentialsValid = 'NO';
-        lastErrorMsg = 'Invalid Google API Key';
-      } else if (
-        rawReason === 'accessNotConfigured' ||
-        rawReason === 'forbidden' ||
-        lowerMsg.includes('has not been used in project') ||
-        lowerMsg.includes('does not have the access to custom search') ||
-        lowerMsg.includes('is disabled')
-      ) {
-        apiEnabled = 'NO';
-        credentialsValid = 'YES';
-        lastErrorMsg = 'Google Custom Search JSON API = UNAVAILABLE FOR NEW CUSTOMERS';
-      } else if (
-        rawReason === 'ipRefererBlocked' ||
-        lowerMsg.includes('api key restricted') ||
-        lowerMsg.includes('referer') ||
-        lowerMsg.includes('ip address')
-      ) {
-        apiRestrictionIssue = 'YES';
-        credentialsValid = 'YES';
-        lastErrorMsg = 'API key restriction issue (IP/HTTP Referer restriction)';
-      } else if (rawReason === 'invalidParameter' || lowerMsg.includes('cx') || lowerMsg.includes('search engine')) {
-        searchEngineValid = 'NO';
-        credentialsValid = 'YES';
-        lastErrorMsg = 'Invalid Search Engine ID (cx)';
-      } else if (
-        rawReason === 'dailyLimitExceeded' ||
-        rawReason === 'userRateLimitExceeded' ||
-        lowerMsg.includes('quota') ||
-        lowerMsg.includes('billing')
-      ) {
-        quotaBillingIssue = 'YES';
-        credentialsValid = 'YES';
-        lastErrorMsg = 'Google Custom Search API quota or billing limit reached';
-      } else {
-        lastErrorMsg = rawMsg || `Google Custom Search API returned HTTP ${httpCode}`;
-      }
+      const errJson = await response?.json().catch(() => null);
+      const rawMsg = errJson?.message || errJson?.error || `LeadOcean API returned HTTP ${httpCode}`;
+      lastErrorMsg = rawMsg;
 
       return {
-        ...this.getStatus(overrideApiKey, 'production', overrideEngineId),
+        ...this.getStatus(overrideApiKey, 'production'),
         status: 'Error',
         message: lastErrorMsg,
         diagnostics: {
           apiKeyDetected: true,
-          searchEngineIdDetected: true,
           providerInitialized: true,
-          apiEnabled,
-          credentialsValid,
-          apiRestrictionIssue,
-          quotaBillingIssue,
-          searchEngineValid,
           httpStatusCode: httpCode,
           googleErrorMessage: rawMsg
         }
@@ -278,7 +183,7 @@ export class ServerLeadProviderService {
       connectionVerified = false;
       lastErrorMsg = err.message || 'Invalid API Credentials or Network Error';
       return {
-        ...this.getStatus(overrideApiKey, 'production', overrideEngineId),
+        ...this.getStatus(overrideApiKey, 'production'),
         status: 'Error',
         message: lastErrorMsg
       };
@@ -286,12 +191,11 @@ export class ServerLeadProviderService {
   }
 
   /**
-   * Fetches candidate leads from Google Custom Search API.
+   * Fetches candidate leads from LeadOcean API.
    */
   static async fetchCandidateLeads(
     filters: LeadFilter,
     overrideApiKey?: string,
-    overrideEngineId?: string,
     isMockRequested?: boolean
   ): Promise<RawLead[]> {
     const startTime = Date.now();
@@ -304,15 +208,14 @@ export class ServerLeadProviderService {
       return mockResults;
     }
 
-    const googleKey = this.resolveApiKey(overrideApiKey);
-    const googleCx = this.resolveEngineId(overrideEngineId);
+    const apiKey = this.resolveApiKey(overrideApiKey);
 
-    if (!googleKey || !googleCx) {
-      lastErrorMsg = 'Google Search provider is not configured.';
+    if (!apiKey) {
+      lastErrorMsg = 'LeadOcean API key is not configured.';
       throw new Error(lastErrorMsg);
     }
 
-    const provider = new GoogleSearchLeadProvider(googleKey, googleCx);
+    const provider = new LeadOceanLeadProvider(apiKey);
 
     try {
       const results = await provider.search(filters);
@@ -322,7 +225,7 @@ export class ServerLeadProviderService {
       connectionVerified = true;
       return results;
     } catch (err: any) {
-      lastErrorMsg = err.message || 'Google Search provider error.';
+      lastErrorMsg = err.message || 'LeadOcean provider error.';
       throw err;
     }
   }

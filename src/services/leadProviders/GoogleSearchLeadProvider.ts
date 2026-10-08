@@ -124,7 +124,7 @@ export class GoogleSearchLeadProvider implements LeadProvider {
       throw new Error('Missing GOOGLE_SEARCH_ENGINE_ID in environment variables.');
     }
 
-    const targetLimit = Math.min(filters.maxLeads || 50, 50);
+    const targetLimit = Math.min(Math.max(filters.maxLeads || 50, 1), 500);
     const queries = this.generateQueries(filters);
 
     const candidates: RawLead[] = [];
