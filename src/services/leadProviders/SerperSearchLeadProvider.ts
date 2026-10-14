@@ -18,12 +18,32 @@ export class SerperSearchLeadProvider implements LeadProvider {
   private endpoint: string;
 
   constructor(apiKey?: string, endpoint?: string) {
-    this.apiKey =
-      apiKey ||
-      process.env.SERPER_API_KEY ||
-      process.env.SERPER_SEARCH_API_KEY ||
-      process.env.LEAD_PROVIDER_API_KEY ||
-      '';
+    let resolvedKey = apiKey;
+    if (!resolvedKey || resolvedKey.trim() === '') {
+      if (typeof process !== 'undefined' && process.env) {
+        resolvedKey =
+          process.env.SERPER_API_KEY ||
+          process.env.SERPER_SEARCH_API_KEY ||
+          process.env.VITE_SERPER_API_KEY ||
+          process.env.VITE_SERPER_SEARCH_API_KEY ||
+          process.env.LEAD_PROVIDER_API_KEY ||
+          '';
+      }
+      if ((!resolvedKey || resolvedKey.trim() === '') && typeof window !== 'undefined') {
+        try {
+          const meta = eval('typeof import.meta !== "undefined" ? import.meta : {}') as any;
+          resolvedKey =
+            meta?.env?.SERPER_API_KEY ||
+            meta?.env?.VITE_SERPER_API_KEY ||
+            meta?.env?.SERPER_SEARCH_API_KEY ||
+            meta?.env?.VITE_SERPER_SEARCH_API_KEY ||
+            '';
+        } catch {
+          // ignore
+        }
+      }
+    }
+    this.apiKey = (resolvedKey || '').trim();
     this.endpoint = endpoint || 'https://google.serper.dev/search';
   }
 

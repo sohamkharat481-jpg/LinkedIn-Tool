@@ -15,11 +15,16 @@ export class ServerLeadProviderService {
     const serperKey =
       overrideApiKey ||
       process.env.SERPER_API_KEY ||
-      process.env.SERPER_SEARCH_API_KEY;
+      process.env.SERPER_SEARCH_API_KEY ||
+      process.env.VITE_SERPER_API_KEY ||
+      process.env.VITE_SERPER_SEARCH_API_KEY ||
+      process.env.LEAD_PROVIDER_API_KEY;
 
     const leadOceanKey =
+      overrideApiKey ||
       process.env.LEADOCEAN_API_KEY ||
-      process.env.LEAD_PROVIDER_API_KEY;
+      process.env.LEAD_PROVIDER_API_KEY ||
+      process.env.VITE_LEADOCEAN_API_KEY;
 
     const hasSerper = Boolean(serperKey && String(serperKey).trim().length > 0);
     const hasLeadOcean = Boolean(leadOceanKey && String(leadOceanKey).trim().length > 0);
@@ -57,6 +62,7 @@ export class ServerLeadProviderService {
         overrideKey ||
         process.env.LEADOCEAN_API_KEY ||
         process.env.LEAD_PROVIDER_API_KEY ||
+        process.env.VITE_LEADOCEAN_API_KEY ||
         ''
       ).trim();
       return { key, type: 'leadocean' };
@@ -67,6 +73,9 @@ export class ServerLeadProviderService {
       overrideKey ||
       process.env.SERPER_API_KEY ||
       process.env.SERPER_SEARCH_API_KEY ||
+      process.env.VITE_SERPER_API_KEY ||
+      process.env.VITE_SERPER_SEARCH_API_KEY ||
+      process.env.LEAD_PROVIDER_API_KEY ||
       ''
     ).trim();
 
@@ -78,6 +87,7 @@ export class ServerLeadProviderService {
     const leadOceanKey = (
       process.env.LEADOCEAN_API_KEY ||
       process.env.LEAD_PROVIDER_API_KEY ||
+      process.env.VITE_LEADOCEAN_API_KEY ||
       ''
     ).trim();
 
