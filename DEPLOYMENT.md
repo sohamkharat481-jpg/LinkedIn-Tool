@@ -9,7 +9,7 @@ This guide details how to deploy the **LinkedIn Lead Finder** full-stack applica
 1. A free [Vercel](https://vercel.com/) account.
 2. The GitHub repository containing this codebase.
 3. Your Supabase project URL and Anon Key.
-4. (Optional) Google Custom Search API Key and Programmable Search Engine ID.
+4. Your LeadOcean API Key for real B2B people search.
 
 ---
 
@@ -38,11 +38,13 @@ This guide details how to deploy the **LinkedIn Lead Finder** full-stack applica
    - **Install Command**: `npm install`
 
 4. **Configure Environment Variables**:
-   In the Vercel project settings under **Environment Variables**, add the following production keys:
+   In the Vercel project settings under **Environment Variables** (Select Target: **Production**):
    - `SUPABASE_URL`: `https://your-project.supabase.co`
    - `SUPABASE_ANON_KEY`: `your-supabase-anon-key`
-   - `GOOGLE_SEARCH_API_KEY`: `your-google-search-api-key` (optional)
-   - `GOOGLE_SEARCH_ENGINE_ID`: `your-search-engine-cx-id` (optional)
+   - `SERPER_API_KEY`: `your-serper-api-key` (Primary public search provider - server-side only)
+   - `LEADOCEAN_API_KEY`: `your-leadocean-api-key` (Alternative B2B provider - server-side only)
+   - `VITE_SUPABASE_URL`: `https://your-project.supabase.co`
+   - `VITE_SUPABASE_ANON_KEY`: `your-supabase-anon-key`
 
 5. **Deploy**:
    - Click **Deploy**. Vercel will build the frontend assets and deploy the serverless backend functions automatically.
@@ -54,4 +56,5 @@ This guide details how to deploy the **LinkedIn Lead Finder** full-stack applica
 Once deployed, verify your production deployment at your assigned Vercel domain (`https://your-project.vercel.app`):
 - `GET /api/health` -> Returns service status (`ok`).
 - `GET /api/supabase-status` -> Verifies Supabase connection, database query, and RLS persistence.
-- `GET /api/provider-status` -> Reports lead provider readiness.
+- `GET /api/provider-status` -> Reports LeadOcean provider readiness and API status.
+- `POST /api/provider-status/test` -> Executes an authenticated test ping against LeadOcean API.

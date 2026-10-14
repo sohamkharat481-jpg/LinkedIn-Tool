@@ -164,7 +164,7 @@ export async function exportLeadsToGoogleSheet(
       ]);
 
       const appendRes = await fetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Leads!A1:valueInputOption=USER_ENTERED`,
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Leads!A1:append?valueInputOption=USER_ENTERED`,
         {
           method: 'POST',
           headers: {
@@ -180,8 +180,14 @@ export async function exportLeadsToGoogleSheet(
       );
 
       if (!appendRes.ok) {
+        if (appendRes.status === 401) {
+          throw new Error('Google Sheets OAuth token expired or revoked. Please click Connect Sheets to refresh your session.');
+        }
+        if (appendRes.status === 403) {
+          throw new Error('Google Sheets access denied (403). Please verify spreadsheets permission was granted.');
+        }
         const errJson = await appendRes.json().catch(() => ({}));
-        throw new Error(errJson.error?.message || `Failed to write lead rows to Google Sheet.`);
+        throw new Error(errJson.error?.message || `Failed to write lead rows to Google Sheet (HTTP ${appendRes.status}).`);
       }
     }
 

@@ -54,9 +54,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onRefreshProviderStatus
 }) => {
   // Provider state
-  const [providerType, setProviderType] = useState<'mock' | 'rapidapi' | 'custom_proxy' | 'google_search' | 'leadocean'>(
-    providerConfig.providerType
-  );
+  const [providerType] = useState<'leadocean'>('leadocean');
   const [apiKeyInput, setApiKeyInput] = useState(providerConfig.apiKey || '');
   const [endpointInput, setEndpointInput] = useState(providerConfig.customEndpoint || '');
   const [providerSavedNotice, setProviderSavedNotice] = useState(false);
@@ -186,11 +184,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             >
               {isTestingHealth ? (
                 <>
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Authenticating Google API...
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Testing LeadOcean API...
                 </>
               ) : (
                 <>
-                  <Activity className="w-3.5 h-3.5" /> Test Google Search Connection
+                  <Activity className="w-3.5 h-3.5" /> Test LeadOcean Connection
                 </>
               )}
             </button>
@@ -262,139 +260,66 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <div className="flex items-center gap-2">
             <Database className="w-5 h-5 text-blue-600" />
             <div>
-              <h2 className="text-base font-bold text-gray-900">Lead Discovery Data Provider Settings</h2>
+              <h2 className="text-base font-bold text-gray-900">Lead Discovery Data Provider (Serper.dev Google Search)</h2>
               <p className="text-xs text-gray-500">
-                Provider adapter pattern allows changing external data vendors without altering frontend code.
+                Primary public Google-indexed web search engine for discovering genuine LinkedIn member profiles.
               </p>
             </div>
           </div>
         </div>
 
-        <form onSubmit={handleSaveProviderConfig} className="space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">
-              Active Provider Mode
-            </label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <label
-                className={`p-4 rounded-xl border cursor-pointer transition-all ${
-                  providerType === 'mock'
-                    ? 'border-blue-500 bg-blue-50/40 ring-2 ring-blue-500/20'
-                    : 'border-gray-200 hover:border-gray-300'
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    name="providerType"
-                    value="mock"
-                    checked={providerType === 'mock'}
-                    onChange={() => setProviderType('mock')}
-                    className="text-blue-600"
-                  />
-                  <span className="font-bold text-xs text-gray-900">Demo / Mock Provider (Development)</span>
-                </div>
-                <p className="text-[11px] text-gray-500 mt-1 pl-5">
-                  Generates realistic sample B2B lead candidates for testing without external keys.
+        <div className="space-y-4 pt-2">
+          <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-2xl space-y-3">
+            <div className="flex items-start gap-3">
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <h3 className="text-xs font-bold text-emerald-900 uppercase tracking-wider">
+                  Serper.dev Google Search API (Primary)
+                </h3>
+                <p className="text-xs text-emerald-800">
+                  Authentication is secured via server-side <code className="bg-emerald-100 font-mono px-1 py-0.5 rounded text-emerald-900 font-bold">SERPER_API_KEY</code> environment variable. No API keys are exposed to the browser.
                 </p>
-              </label>
-
-              <label
-                className={`p-4 rounded-xl border cursor-pointer transition-all ${
-                  providerType === 'rapidapi' || providerType === 'custom_proxy'
-                    ? 'border-blue-500 bg-blue-50/40 ring-2 ring-blue-500/20'
-                    : 'border-gray-200 hover:border-gray-300'
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    name="providerType"
-                    value="custom_proxy"
-                    checked={providerType === 'custom_proxy' || providerType === 'rapidapi'}
-                    onChange={() => setProviderType('custom_proxy')}
-                    className="text-blue-600"
-                  />
-                  <span className="font-bold text-xs text-gray-900">Production Public Search API</span>
-                </div>
-                <p className="text-[11px] text-gray-500 mt-1 pl-5">
-                  Routes discovery requests to server-side external B2B lead provider adapter.
-                </p>
-              </label>
+              </div>
             </div>
+
+            <div className="p-3 bg-white border border-emerald-100 rounded-xl text-xs space-y-2">
+              <p className="font-bold text-gray-800">Discovery Capabilities Matrix:</p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                <span className="text-emerald-700 font-semibold">✓ Job Titles Querying</span>
+                <span className="text-emerald-700 font-semibold">✓ Industry Filters</span>
+                <span className="text-emerald-700 font-semibold">✓ Country & City</span>
+                <span className="text-emerald-700 font-semibold">✓ Seniority Level</span>
+                <span className="text-emerald-700 font-semibold">✓ Company Name</span>
+                <span className="text-emerald-700 font-semibold">✓ Verified LinkedIn URLs</span>
+                <span className="text-emerald-700 font-semibold">✓ Google Organic Index</span>
+                <span className="text-emerald-700 font-semibold">✓ Composite Deduplication</span>
+              </div>
+            </div>
+
+            <p className="text-[11px] text-gray-500 pt-1">
+              Fallback support for <code className="bg-gray-100 font-mono px-1 py-0.5 rounded text-gray-800">LEADOCEAN_API_KEY</code> is retained for multi-provider flexibility.
+            </p>
           </div>
-
-          {(providerType === 'custom_proxy' || providerType === 'rapidapi') && (
-            <div className="space-y-4 pt-2 bg-gray-50 p-4 rounded-xl border border-gray-200">
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">
-                  Google Custom Search API Key (<code className="text-blue-700 bg-blue-50 px-1 py-0.5 rounded">GOOGLE_SEARCH_API_KEY</code>)
-                </label>
-                <div className="relative">
-                  <Key className="w-4 h-4 text-gray-400 absolute left-3 top-2.5" />
-                  <input
-                    type="password"
-                    placeholder="Enter Google Custom Search API Key..."
-                    value={apiKeyInput}
-                    onChange={(e) => setApiKeyInput(e.target.value)}
-                    className="w-full text-xs pl-9 pr-3 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">
-                  Search Engine ID / CX (<code className="text-blue-700 bg-blue-50 px-1 py-0.5 rounded">GOOGLE_SEARCH_ENGINE_ID</code>)
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. 0123456789abcdef:xyz"
-                  value={endpointInput}
-                  onChange={(e) => setEndpointInput(e.target.value)}
-                  className="w-full text-xs px-3 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
-                />
-              </div>
-
-              {/* Provider Capabilities Matrix */}
-              <div className="p-3 bg-white border border-gray-200 rounded-xl text-xs space-y-2">
-                <p className="font-bold text-gray-800">Google Custom Search Capabilities Matrix:</p>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
-                  <span className="text-emerald-700 font-semibold">✓ Job Titles</span>
-                  <span className="text-emerald-700 font-semibold">✓ Industry</span>
-                  <span className="text-emerald-700 font-semibold">✓ Country & City</span>
-                  <span className="text-emerald-700 font-semibold">✓ Seniority</span>
-                  <span className="text-amber-700 font-semibold">~ Company Size (Indirect)</span>
-                  <span className="text-emerald-700 font-semibold">✓ LinkedIn Profile URLs</span>
-                  <span className="text-red-600 font-semibold">✗ Activity Dates (N/A)</span>
-                  <span className="text-red-600 font-semibold">✗ Followers Count (N/A)</span>
-                </div>
-              </div>
-
-              {/* Server Env Doc Box */}
-              <div className="p-3 bg-blue-50/80 border border-blue-200 rounded-lg text-xs text-blue-900 space-y-1">
-                <p className="font-bold">Required Server Environment Variables:</p>
-                <div className="font-mono text-[11px] space-y-0.5 text-blue-800">
-                  <p>GOOGLE_SEARCH_API_KEY="AIzaSy..."</p>
-                  <p>GOOGLE_SEARCH_ENGINE_ID="cx-search-engine-id"</p>
-                </div>
-              </div>
-            </div>
-          )}
 
           <div className="flex items-center justify-between pt-2">
-            {providerSavedNotice ? (
-              <span className="text-xs text-emerald-600 font-bold flex items-center gap-1">
-                <CheckCircle2 className="w-4 h-4" /> Provider configuration saved.
-              </span>
-            ) : <span />}
             <button
-              type="submit"
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-all shadow-xs"
+              type="button"
+              onClick={handleRunHealthCheck}
+              disabled={isTestingHealth}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all shadow-xs"
             >
-              Save Provider Config
+              {isTestingHealth ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" /> Testing Provider Connection...
+                </>
+              ) : (
+                <>
+                  <Activity className="w-4 h-4" /> Run Live Provider Health Ping
+                </>
+              )}
             </button>
           </div>
-        </form>
+        </div>
       </div>
 
       {/* Card 2: Google Workspace OAuth Integration */}

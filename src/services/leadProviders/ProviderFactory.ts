@@ -1,13 +1,10 @@
 import { LeadProviderConfig } from '../../types';
 import { LeadProvider } from './LeadProvider';
-import { MockLeadProvider } from './MockLeadProvider';
-import { GoogleSearchLeadProvider } from './GoogleSearchLeadProvider';
 import { LeadOceanLeadProvider } from './LeadOceanLeadProvider';
-import { SerpApiLeadProvider } from './SerpApiLeadProvider';
-import { RealApiLeadProvider } from './RealApiLeadProvider';
+import { SerperSearchLeadProvider } from './SerperSearchLeadProvider';
 
 let currentConfig: LeadProviderConfig = {
-  providerType: 'mock',
+  providerType: 'serper',
   apiKey: '',
   customEndpoint: ''
 };
@@ -22,30 +19,33 @@ export class ProviderFactory {
   }
 
   static getProvider(): LeadProvider {
-    const leadOceanKey = process.env.LEADOCEAN_API_KEY || currentConfig.apiKey || process.env.LEAD_PROVIDER_API_KEY;
+    const serperKey =
+      process.env.SERPER_API_KEY ||
+      process.env.SERPER_SEARCH_API_KEY ||
+      (currentConfig.providerType === 'serper' ? currentConfig.apiKey : '');
 
-    if (currentConfig.providerType === 'leadocean' || leadOceanKey) {
+    const leadOceanKey =
+      process.env.LEADOCEAN_API_KEY ||
+      (currentConfig.providerType === 'leadocean' ? currentConfig.apiKey : '') ||
+      process.env.LEAD_PROVIDER_API_KEY;
+
+    // Prefer Serper if configured or explicitly selected
+    if (currentConfig.providerType === 'serper' && serperKey) {
+      return new SerperSearchLeadProvider(serperKey, currentConfig.customEndpoint);
+    }
+
+    if (currentConfig.providerType === 'leadocean' && leadOceanKey) {
       return new LeadOceanLeadProvider(leadOceanKey, currentConfig.customEndpoint);
     }
 
-    const googleKey = process.env.GOOGLE_SEARCH_API_KEY;
-    const googleCx = process.env.GOOGLE_SEARCH_ENGINE_ID;
-
-    if (currentConfig.providerType === 'google_search' || (googleKey && googleCx)) {
-      return new GoogleSearchLeadProvider(googleKey, googleCx);
+    if (serperKey) {
+      return new SerperSearchLeadProvider(serperKey, currentConfig.customEndpoint);
     }
 
-    if (currentConfig.providerType === 'rapidapi' || currentConfig.providerType === 'custom_proxy') {
-      if (currentConfig.customEndpoint && currentConfig.customEndpoint.includes('serpapi')) {
-        return new SerpApiLeadProvider(leadOceanKey);
-      }
-      if (leadOceanKey) {
-        return new LeadOceanLeadProvider(leadOceanKey, currentConfig.customEndpoint);
-      }
-      return new RealApiLeadProvider(leadOceanKey || '', currentConfig.customEndpoint);
+    if (leadOceanKey) {
+      return new LeadOceanLeadProvider(leadOceanKey, currentConfig.customEndpoint);
     }
-    
-    // Default fallback to Mock Lead Provider
-    return new MockLeadProvider();
+
+    throw new Error('Serper.dev public-web lead provider is not connected. Missing SERPER_API_KEY.');
   }
 }

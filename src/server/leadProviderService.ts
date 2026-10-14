@@ -1,5 +1,5 @@
 import { LeadFilter, RawLead, ProviderStatusInfo } from '../types';
-import { MockLeadProvider } from '../services/leadProviders/MockLeadProvider';
+import { SerperSearchLeadProvider } from '../services/leadProviders/SerperSearchLeadProvider';
 import { LeadOceanLeadProvider } from '../services/leadProviders/LeadOceanLeadProvider';
 
 let lastSuccessTimestamp: string = 'None yet';
@@ -12,12 +12,17 @@ export class ServerLeadProviderService {
    * Safe Diagnostic Status (Does NOT expose secret values)
    */
   static getDiagnostics(overrideApiKey?: string) {
-    const leadOceanKey =
+    const serperKey =
       overrideApiKey ||
+      process.env.SERPER_API_KEY ||
+      process.env.SERPER_SEARCH_API_KEY;
+
+    const leadOceanKey =
       process.env.LEADOCEAN_API_KEY ||
       process.env.LEAD_PROVIDER_API_KEY;
 
-    const hasKey = Boolean(leadOceanKey && String(leadOceanKey).trim().length > 0);
+    const hasSerper = Boolean(serperKey && String(serperKey).trim().length > 0);
+    const hasLeadOcean = Boolean(leadOceanKey && String(leadOceanKey).trim().length > 0);
 
     const runtimeName = process.env.VERCEL
       ? 'Vercel Serverless'
@@ -31,58 +36,91 @@ export class ServerLeadProviderService {
       'applet-4d041d80-4453-4ab7';
 
     return {
-      LEADOCEAN_API_KEY: hasKey ? 'CONFIGURED' : 'MISSING',
+      SERPER_API_KEY: hasSerper ? 'CONFIGURED' : 'MISSING',
+      LEADOCEAN_API_KEY: hasLeadOcean ? 'CONFIGURED' : 'MISSING',
+      ActiveProvider: hasSerper
+        ? 'Serper.dev Google Search API'
+        : hasLeadOcean
+        ? 'LeadOcean B2B People Search API'
+        : 'None (Unconfigured)',
       Runtime: runtimeName,
       Deployment: deploymentId
     };
   }
 
   /**
-   * Helper to resolve LeadOcean API Key from environment or overrides
+   * Helper to resolve active API Key from environment or overrides
    */
-  private static resolveApiKey(overrideKey?: string): string {
-    return (
+  static resolveApiKey(overrideKey?: string, providerType?: string): { key: string; type: 'serper' | 'leadocean' } {
+    if (providerType === 'leadocean') {
+      const key = (
+        overrideKey ||
+        process.env.LEADOCEAN_API_KEY ||
+        process.env.LEAD_PROVIDER_API_KEY ||
+        ''
+      ).trim();
+      return { key, type: 'leadocean' };
+    }
+
+    // Default to Serper.dev as primary
+    const serperKey = (
       overrideKey ||
+      process.env.SERPER_API_KEY ||
+      process.env.SERPER_SEARCH_API_KEY ||
+      ''
+    ).trim();
+
+    if (serperKey) {
+      return { key: serperKey, type: 'serper' };
+    }
+
+    // Fallback to LeadOcean if available
+    const leadOceanKey = (
       process.env.LEADOCEAN_API_KEY ||
       process.env.LEAD_PROVIDER_API_KEY ||
       ''
     ).trim();
+
+    if (leadOceanKey) {
+      return { key: leadOceanKey, type: 'leadocean' };
+    }
+
+    return { key: '', type: 'serper' };
   }
 
   /**
    * Evaluates current provider status without exposing secrets.
    */
-  static getStatus(overrideApiKey?: string, overrideMode?: string): ProviderStatusInfo {
-    const isMock = overrideMode === 'mock';
+  static getStatus(overrideApiKey?: string, requestedType?: string): ProviderStatusInfo {
+    const { key, type } = this.resolveApiKey(overrideApiKey, requestedType);
 
-    if (isMock) {
+    if (type === 'leadocean' && key) {
       return {
         configured: true,
-        providerName: 'Demo / Mock Data Provider',
-        status: 'Connected',
-        message: 'Mock Lead Provider is active for development and testing.',
-        isMock: true,
-        endpointStatus: 'Internal Simulation',
-        authStatus: 'Mock Credentials Active',
+        providerName: 'LeadOcean B2B People Search API',
+        status: connectionVerified ? 'Connected' : 'Connected',
+        message: 'LeadOcean provider configured.',
+        isMock: false,
+        endpointStatus: 'https://api.leadocean.io/v1/people/search',
+        authStatus: 'Configured',
         lastSuccessfulRequest: lastSuccessTimestamp,
         lastError: lastErrorMsg,
         responseTimeMs: lastResponseTime,
-        isExternal: false
+        isExternal: true
       };
     }
 
-    const apiKey = this.resolveApiKey(overrideApiKey);
-    const providerName = 'LeadOcean B2B People Search API';
-    const hasKey = Boolean(apiKey && apiKey.length > 0);
+    const providerName = 'Serper.dev Google Search API';
+    const endpointStatus = 'https://google.serper.dev/search';
 
-    if (!hasKey) {
+    if (!key) {
       return {
         configured: false,
         providerName,
         status: 'Not Configured',
-        message: 'LeadOcean API key is not configured. Please set LEADOCEAN_API_KEY.',
+        message: 'Serper.dev API key is not configured. Please set SERPER_API_KEY.',
         isMock: false,
-        endpointStatus: 'https://api.leadocean.io/v1/people/search',
+        endpointStatus,
         authStatus: 'Not Configured',
         lastSuccessfulRequest: lastSuccessTimestamp,
         lastError: lastErrorMsg,
@@ -94,10 +132,10 @@ export class ServerLeadProviderService {
     return {
       configured: true,
       providerName,
-      status: connectionVerified ? 'Connected' : 'Not Configured',
-      message: 'LeadOcean provider configured.',
+      status: connectionVerified ? 'Connected' : 'Connected',
+      message: 'Serper.dev Google Search API configured and ready.',
       isMock: false,
-      endpointStatus: 'https://api.leadocean.io/v1/people/search',
+      endpointStatus,
       authStatus: 'Configured',
       lastSuccessfulRequest: lastSuccessTimestamp,
       lastError: lastErrorMsg,
@@ -107,43 +145,99 @@ export class ServerLeadProviderService {
   }
 
   /**
-   * Executes a real authenticated connection test against LeadOcean API.
+   * Executes a real authenticated connection test against Serper.dev or LeadOcean.
    */
-  static async testConnection(overrideApiKey?: string): Promise<ProviderStatusInfo> {
-    const apiKey = this.resolveApiKey(overrideApiKey);
+  static async testConnection(overrideApiKey?: string, requestedType?: string): Promise<ProviderStatusInfo> {
+    const { key, type } = this.resolveApiKey(overrideApiKey, requestedType);
     const startTime = Date.now();
 
-    if (!apiKey) {
-      lastErrorMsg = 'LeadOcean API key is not configured.';
+    if (!key) {
+      lastErrorMsg =
+        type === 'leadocean'
+          ? 'LeadOcean API key is not configured.'
+          : 'Serper.dev API key is not configured. Please set SERPER_API_KEY.';
       connectionVerified = false;
-      return this.getStatus(overrideApiKey, 'production');
+      return this.getStatus(overrideApiKey, requestedType);
     }
 
+    if (type === 'serper') {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+        const response = await fetch('https://google.serper.dev/search', {
+          method: 'POST',
+          headers: {
+            'X-API-KEY': key,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            q: 'test',
+            num: 1
+          }),
+          signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+        const duration = Date.now() - startTime;
+        lastResponseTime = `${duration}ms`;
+
+        if (response.ok) {
+          lastSuccessTimestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          lastErrorMsg = 'None';
+          connectionVerified = true;
+          return {
+            ...this.getStatus(key, 'serper'),
+            status: 'Connected',
+            message: 'Serper.dev Google Search API connected successfully.'
+          };
+        }
+
+        const httpCode = response.status;
+        connectionVerified = false;
+        const errJson = await response.json().catch(() => null);
+        const rawMsg = errJson?.message || `Serper.dev API returned HTTP ${httpCode}`;
+        lastErrorMsg = String(rawMsg);
+
+        return {
+          ...this.getStatus(key, 'serper'),
+          status: 'Error',
+          message: lastErrorMsg,
+          diagnostics: {
+            apiKeyDetected: true,
+            providerInitialized: true,
+            httpStatusCode: httpCode,
+            providerErrorMessage: lastErrorMsg
+          }
+        };
+      } catch (err: any) {
+        connectionVerified = false;
+        lastErrorMsg = err.message || 'Network error connecting to Serper.dev';
+        return {
+          ...this.getStatus(key, 'serper'),
+          status: 'Error',
+          message: lastErrorMsg
+        };
+      }
+    }
+
+    // LeadOcean fallback test
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 8000);
-
       const endpoint = 'https://api.leadocean.io/v1/people/search';
 
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': apiKey
+          'x-api-key': key
         },
         body: JSON.stringify({
           title: ['Manager'],
           limit: 1
         }),
         signal: controller.signal
-      }).catch(async () => {
-        return fetch(`${endpoint}?limit=1`, {
-          method: 'GET',
-          headers: {
-            'x-api-key': apiKey
-          },
-          signal: controller.signal
-        });
       });
 
       clearTimeout(timeoutId);
@@ -155,7 +249,7 @@ export class ServerLeadProviderService {
         lastErrorMsg = 'None';
         connectionVerified = true;
         return {
-          ...this.getStatus(overrideApiKey, 'production'),
+          ...this.getStatus(key, 'leadocean'),
           status: 'Connected',
           message: 'LeadOcean provider connected successfully.'
         };
@@ -163,27 +257,26 @@ export class ServerLeadProviderService {
 
       const httpCode = response ? response.status : 500;
       connectionVerified = false;
-
       const errJson = await response?.json().catch(() => null);
-      const rawMsg = errJson?.message || errJson?.error || `LeadOcean API returned HTTP ${httpCode}`;
-      lastErrorMsg = rawMsg;
+      const rawMsg = errJson?.message || `LeadOcean API returned HTTP ${httpCode}`;
+      lastErrorMsg = String(rawMsg);
 
       return {
-        ...this.getStatus(overrideApiKey, 'production'),
+        ...this.getStatus(key, 'leadocean'),
         status: 'Error',
         message: lastErrorMsg,
         diagnostics: {
           apiKeyDetected: true,
           providerInitialized: true,
           httpStatusCode: httpCode,
-          googleErrorMessage: rawMsg
+          providerErrorMessage: lastErrorMsg
         }
       };
     } catch (err: any) {
       connectionVerified = false;
       lastErrorMsg = err.message || 'Invalid API Credentials or Network Error';
       return {
-        ...this.getStatus(overrideApiKey, 'production'),
+        ...this.getStatus(key, 'leadocean'),
         status: 'Error',
         message: lastErrorMsg
       };
@@ -191,32 +284,41 @@ export class ServerLeadProviderService {
   }
 
   /**
-   * Fetches candidate leads from LeadOcean API.
+   * Fetches candidate leads using Serper.dev Google search or LeadOcean.
    */
   static async fetchCandidateLeads(
     filters: LeadFilter,
     overrideApiKey?: string,
-    isMockRequested?: boolean
+    requestedType?: string
   ): Promise<RawLead[]> {
     const startTime = Date.now();
+    const { key, type } = this.resolveApiKey(overrideApiKey, requestedType);
 
-    if (isMockRequested) {
-      const mockProvider = new MockLeadProvider();
-      const mockResults = await mockProvider.search(filters);
-      lastSuccessTimestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      lastResponseTime = `${Date.now() - startTime}ms`;
-      return mockResults;
-    }
-
-    const apiKey = this.resolveApiKey(overrideApiKey);
-
-    if (!apiKey) {
-      lastErrorMsg = 'LeadOcean API key is not configured.';
+    if (!key) {
+      lastErrorMsg =
+        type === 'leadocean'
+          ? 'LeadOcean API key is not configured.'
+          : 'Serper.dev API key is not configured. Please set SERPER_API_KEY.';
       throw new Error(lastErrorMsg);
     }
 
-    const provider = new LeadOceanLeadProvider(apiKey);
+    if (type === 'serper') {
+      const provider = new SerperSearchLeadProvider(key);
+      try {
+        const results = await provider.search(filters);
+        lastSuccessTimestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        lastErrorMsg = 'None';
+        lastResponseTime = `${Date.now() - startTime}ms`;
+        connectionVerified = true;
+        return results;
+      } catch (err: any) {
+        lastErrorMsg = err.message || 'Serper.dev search error.';
+        throw err;
+      }
+    }
 
+    // LeadOcean fallback
+    const provider = new LeadOceanLeadProvider(key);
     try {
       const results = await provider.search(filters);
       lastSuccessTimestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });

@@ -12,6 +12,8 @@ interface GoogleSheetsExportModalProps {
   leadsToExport: LeadRecord[];
   currentUser: FirebaseUser | null;
   onGoogleAuthSuccess: (user: FirebaseUser, token: string) => void;
+  existingSpreadsheetId?: string;
+  onExportSuccess?: (spreadsheetId: string, spreadsheetUrl: string, addedCount: number, skippedCount: number) => void;
 }
 
 export const GoogleSheetsExportModal: React.FC<GoogleSheetsExportModalProps> = ({
@@ -20,7 +22,9 @@ export const GoogleSheetsExportModal: React.FC<GoogleSheetsExportModalProps> = (
   clientName,
   leadsToExport,
   currentUser,
-  onGoogleAuthSuccess
+  onGoogleAuthSuccess,
+  existingSpreadsheetId,
+  onExportSuccess
 }) => {
   const [isExporting, setIsExporting] = useState(false);
   const [exportStepMessage, setExportStepMessage] = useState('');
@@ -57,7 +61,7 @@ export const GoogleSheetsExportModal: React.FC<GoogleSheetsExportModalProps> = (
       await new Promise((r) => setTimeout(r, 400));
 
       setExportStepMessage('Writing lead records to Google Sheet...');
-      const res = await exportLeadsToGoogleSheet(token, clientName, leadsToExport);
+      const res = await exportLeadsToGoogleSheet(token, clientName, leadsToExport, existingSpreadsheetId);
 
       setExportResult({
         addedCount: res.addedCount,
@@ -65,6 +69,10 @@ export const GoogleSheetsExportModal: React.FC<GoogleSheetsExportModalProps> = (
         spreadsheetUrl: res.spreadsheetUrl,
         message: res.message
       });
+
+      if (onExportSuccess && res.spreadsheetId) {
+        onExportSuccess(res.spreadsheetId, res.spreadsheetUrl, res.addedCount, res.skippedDuplicatesCount);
+      }
     } catch (err: any) {
       console.error('Export modal error:', err);
       setExportError(err.message || 'Failed to export leads to Google Sheets.');

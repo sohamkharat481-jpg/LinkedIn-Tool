@@ -16,7 +16,7 @@ interface LeadFinderViewProps {
   onNavigateToLeads: () => void;
   onNavigateToSettings: () => void;
   providerStatus: ProviderStatusInfo;
-  onEnableMockMode: () => void;
+  onEnableMockMode?: () => void;
 }
 
 const SENIORITY_OPTIONS: SeniorityLevel[] = ['Entry', 'Manager', 'Senior', 'Director', 'VP', 'C-Level'];
@@ -262,7 +262,7 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
   const isNotConfigured = !providerStatus.isMock && providerStatus.status === 'Not Configured';
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto">
+    <div id="lead-finder-section" className="space-y-6 max-w-5xl mx-auto scroll-mt-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -301,26 +301,20 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
             <AlertTriangle className="w-6 h-6 text-amber-600 shrink-0 mt-0.5" />
             <div className="space-y-1">
               <h3 className="text-base font-bold text-amber-900">
-                No real lead provider is configured.
+                LeadOcean API key is not configured.
               </h3>
               <p className="text-xs text-amber-800">
-                To perform production searches, set <code className="bg-amber-100 font-mono px-1 py-0.5 rounded text-amber-900 font-bold">LEADOCEAN_API_KEY</code> in environment variables or enter your key in Settings. Alternatively, enable Demo / Mock Mode to test searching with sample leads.
+                To perform production lead searches, set <code className="bg-amber-100 font-mono px-1 py-0.5 rounded text-amber-900 font-bold">LEADOCEAN_API_KEY</code> in environment variables or enter your key in Settings.
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-3 pt-2">
             <button
-              onClick={onEnableMockMode}
-              className="flex items-center gap-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold px-4 py-2 rounded-xl transition-colors shadow-xs"
-            >
-              <Sparkles className="w-4 h-4" /> Switch to Demo / Mock Mode
-            </button>
-            <button
               onClick={onNavigateToSettings}
-              className="flex items-center gap-1.5 bg-white border border-amber-300 hover:bg-amber-100 text-amber-900 text-xs font-bold px-4 py-2 rounded-xl transition-colors shadow-xs"
+              className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded-xl transition-colors shadow-xs"
             >
-              <Settings className="w-4 h-4 text-amber-700" /> Configure API Key in Settings
+              <Settings className="w-4 h-4 text-white" /> Configure LeadOcean API Key in Settings
             </button>
           </div>
         </div>

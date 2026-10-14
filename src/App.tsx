@@ -12,7 +12,8 @@ import {
   ProviderStatusInfo
 } from './types';
 import { dbService } from './services/storage';
-import { initAuthListener, setCachedAccessToken } from './services/auth';
+import { SupabaseDataService } from './services/supabaseDataService';
+import { initAuthListener, setCachedAccessToken, googleSignIn, googleSignOut } from './services/auth';
 import { ProviderFactory } from './services/leadProviders/ProviderFactory';
 import { apiUrl } from './services/apiClient';
 
@@ -41,40 +42,42 @@ export default function App() {
   const [activeClient, setActiveClient] = useState<Client | null>(null);
   const [allLeads, setAllLeads] = useState<LeadRecord[]>([]);
   const [allSearches, setAllSearches] = useState<SearchHistoryRecord[]>([]);
+  const [isLoadingData, setIsLoadingData] = useState<boolean>(false);
+  const [supabaseError, setSupabaseError] = useState<string | null>(null);
 
   // Auth & Provider State
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
-  const [userEmail, setUserEmail] = useState<string>('sohamkharat481@gmail.com');
+  const [userEmail, setUserEmail] = useState<string>('anjanapadhi21@gmail.com');
   const [isGoogleConnected, setIsGoogleConnected] = useState<boolean>(false);
-  
+
   const [providerConfig, setProviderConfig] = useState<LeadProviderConfig>({
-    providerType: 'mock'
+    providerType: 'serper'
   });
 
   const [providerStatus, setProviderStatus] = useState<ProviderStatusInfo>({
-    configured: true,
-    providerName: 'Demo / Mock Data Provider',
-    status: 'Connected',
-    message: 'Mock Lead Provider active for development.',
-    isMock: true,
-    endpointStatus: 'Internal Simulation',
-    authStatus: 'Mock Credentials Active',
+    configured: false,
+    providerName: 'Serper.dev Google Search API',
+    status: 'Not Configured',
+    message: 'Serper.dev API key is not configured. Please set SERPER_API_KEY in Vercel environment variables.',
+    isMock: false,
+    endpointStatus: 'https://google.serper.dev/search',
+    authStatus: 'Not Configured',
     lastSuccessfulRequest: 'None yet',
     lastError: 'None',
     responseTimeMs: 'N/A',
-    isExternal: false
+    isExternal: true
   });
 
   // Modal Export State
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [exportTargetLeads, setExportTargetLeads] = useState<LeadRecord[]>([]);
   const [exportTargetClientName, setExportTargetClientName] = useState<string>('');
+  const [exportTargetClientId, setExportTargetClientId] = useState<string | undefined>(undefined);
 
   const fetchProviderStatus = async (cfg?: LeadProviderConfig) => {
     const activeCfg = cfg || providerConfig;
     try {
-      const modeParam = activeCfg.providerType === 'mock' ? '?mode=mock' : '';
-      const res = await fetch(apiUrl(`/api/provider-status${modeParam}`), {
+      const res = await fetch(apiUrl(`/api/provider-status?type=${activeCfg.providerType}`), {
         headers: {
           'X-Provider-Api-Key': activeCfg.apiKey || ''
         }
@@ -84,20 +87,50 @@ export default function App() {
         setProviderStatus(data);
       }
     } catch {
-      // Fallback
       setProviderStatus({
-        configured: activeCfg.providerType === 'mock',
-        providerName: activeCfg.providerType === 'mock' ? 'Demo Provider' : 'Production API Provider',
-        status: activeCfg.providerType === 'mock' ? 'Connected' : 'Not Configured',
-        message: activeCfg.providerType === 'mock' ? 'Demo mode active' : 'No real lead provider configured.',
-        isMock: activeCfg.providerType === 'mock',
-        endpointStatus: 'Internal Endpoint',
-        authStatus: activeCfg.apiKey ? 'Configured' : 'Missing Key',
+        configured: false,
+        providerName: activeCfg.providerType === 'leadocean' ? 'LeadOcean B2B People Search API' : 'Serper.dev Google Search API',
+        status: 'Not Configured',
+        message: activeCfg.providerType === 'leadocean' ? 'LeadOcean API key is not configured.' : 'Serper.dev API key is not configured. Please set SERPER_API_KEY.',
+        isMock: false,
+        endpointStatus: activeCfg.providerType === 'leadocean' ? 'https://api.leadocean.io/v1/people/search' : 'https://google.serper.dev/search',
+        authStatus: 'Missing Key',
         lastSuccessfulRequest: 'None yet',
         lastError: 'None',
         responseTimeMs: 'N/A',
-        isExternal: false
+        isExternal: true
       });
+    }
+  };
+
+  const refreshWorkspaceData = async (wsId: string) => {
+    setIsLoadingData(true);
+    setSupabaseError(null);
+    try {
+      const clientList = await SupabaseDataService.getClients(wsId);
+      setClients(clientList);
+
+      if (clientList.length > 0) {
+        setActiveClient((prev) => {
+          if (!prev || !clientList.some((c) => c.id === prev.id)) {
+            return clientList[0];
+          }
+          return clientList.find((c) => c.id === prev.id) || clientList[0];
+        });
+      } else {
+        setActiveClient(null);
+      }
+
+      const leads = await SupabaseDataService.getAllLeads(wsId);
+      setAllLeads(leads);
+
+      const searches = await SupabaseDataService.getSearches(wsId);
+      setAllSearches(searches);
+    } catch (err: any) {
+      console.warn('refreshWorkspaceData error:', err);
+      setSupabaseError(err.message || 'Database synchronization in progress.');
+    } finally {
+      setIsLoadingData(false);
     }
   };
 
@@ -112,15 +145,18 @@ export default function App() {
     refreshWorkspaceData(currentWs.id);
     fetchProviderStatus();
 
-    // Auth listener setup
+    // Auth listener setup with verified session restore
     const unsubscribe = initAuthListener(
-      (user, token) => {
+      (user, _token, accountInfo) => {
         setCurrentUser(user);
-        setUserEmail(user.email || 'sohamkharat481@gmail.com');
+        if (accountInfo?.email) {
+          setUserEmail(accountInfo.email);
+        } else if (user.email) {
+          setUserEmail(user.email);
+        }
         setIsGoogleConnected(true);
       },
       () => {
-        setCurrentUser(null);
         setIsGoogleConnected(false);
       }
     );
@@ -129,25 +165,6 @@ export default function App() {
       if (typeof unsubscribe === 'function') unsubscribe();
     };
   }, []);
-
-  const refreshWorkspaceData = (wsId: string) => {
-    const clientList = dbService.getClients(wsId);
-    setClients(clientList);
-
-    if (clientList.length > 0) {
-      if (!activeClient || !clientList.some((c) => c.id === activeClient.id)) {
-        setActiveClient(clientList[0]);
-      }
-    } else {
-      setActiveClient(null);
-    }
-
-    const leads = dbService.getAllLeads(wsId);
-    setAllLeads(leads);
-
-    const searches = dbService.getSearches(wsId);
-    setAllSearches(searches);
-  };
 
   const handleSelectWorkspace = (wsId: string) => {
     dbService.setActiveWorkspaceId(wsId);
@@ -172,23 +189,23 @@ export default function App() {
     }
   };
 
-  const handleCreateClient = (name: string, niche: string, notes: string) => {
-    const newClient = dbService.createClient(activeWorkspace.id, name, niche, notes);
-    refreshWorkspaceData(activeWorkspace.id);
+  const handleCreateClient = async (name: string, niche: string, notes: string) => {
+    const newClient = await SupabaseDataService.createClient(activeWorkspace.id, name, niche, notes);
+    await refreshWorkspaceData(activeWorkspace.id);
     setActiveClient(newClient);
   };
 
-  const handleUpdateClient = (
+  const handleUpdateClient = async (
     clientId: string,
     updates: { name?: string; niche?: string; notes?: string }
   ) => {
-    dbService.updateClient(activeWorkspace.id, clientId, updates);
-    refreshWorkspaceData(activeWorkspace.id);
+    await SupabaseDataService.updateClient(activeWorkspace.id, clientId, updates);
+    await refreshWorkspaceData(activeWorkspace.id);
   };
 
-  const handleDeleteClient = (clientId: string) => {
-    dbService.deleteClient(activeWorkspace.id, clientId);
-    refreshWorkspaceData(activeWorkspace.id);
+  const handleDeleteClient = async (clientId: string) => {
+    await SupabaseDataService.deleteClient(activeWorkspace.id, clientId);
+    await refreshWorkspaceData(activeWorkspace.id);
   };
 
   // Lead Search Execution handler
@@ -210,9 +227,7 @@ export default function App() {
         clientId: targetClient.id,
         workspaceId: activeWorkspace.id,
         providerType: providerConfig.providerType,
-        apiKey: providerConfig.apiKey,
-        customEndpoint: providerConfig.customEndpoint,
-        searchEngineId: providerConfig.customEndpoint
+        apiKey: providerConfig.apiKey
       })
     });
 
@@ -241,18 +256,18 @@ export default function App() {
       dateAdded: dateToday,
       status: 'Not Contacted',
       notes: '',
-      source: raw.source || 'Public Search API'
+      source: raw.source || 'LeadOcean B2B People Search API'
     }));
 
-    // Deduplicate against existing client leads and save
-    const saveResult = dbService.saveLeadsForClient(
+    // Deduplicate against existing client leads and save to Supabase
+    const saveResult = await SupabaseDataService.saveLeadsForClient(
       activeWorkspace.id,
       targetClient.id,
       newLeadRecords
     );
 
-    // Record Search Audit History
-    dbService.saveSearchRecord(
+    // Record Search Audit History to Supabase
+    await SupabaseDataService.saveSearchRecord(
       activeWorkspace.id,
       targetClient.id,
       targetClient.name,
@@ -264,7 +279,8 @@ export default function App() {
       userEmail
     );
 
-    refreshWorkspaceData(activeWorkspace.id);
+    // Immediate state refresh so the dashboard and tables update synchronously
+    await refreshWorkspaceData(activeWorkspace.id);
 
     return {
       uniqueLeads: rawLeads,
@@ -275,31 +291,36 @@ export default function App() {
   };
 
   // Lead Inline Updates
-  const handleUpdateLeadStatus = (leadId: string, status: LeadStatus) => {
-    dbService.updateLeadStatus(activeWorkspace.id, leadId, status);
-    refreshWorkspaceData(activeWorkspace.id);
+  const handleUpdateLeadStatus = async (leadId: string, status: LeadStatus) => {
+    await SupabaseDataService.updateLeadStatus(activeWorkspace.id, leadId, status);
+    await refreshWorkspaceData(activeWorkspace.id);
   };
 
-  const handleUpdateLeadNotes = (leadId: string, notes: string) => {
-    dbService.updateLeadNotes(activeWorkspace.id, leadId, notes);
-    refreshWorkspaceData(activeWorkspace.id);
+  const handleUpdateLeadNotes = async (leadId: string, notes: string) => {
+    await SupabaseDataService.updateLeadNotes(activeWorkspace.id, leadId, notes);
+    await refreshWorkspaceData(activeWorkspace.id);
   };
 
-  const handleDeleteLeads = (leadIds: string[]) => {
-    dbService.deleteSelectedLeads(activeWorkspace.id, leadIds);
-    refreshWorkspaceData(activeWorkspace.id);
+  const handleDeleteLeads = async (leadIds: string[]) => {
+    await SupabaseDataService.deleteSelectedLeads(activeWorkspace.id, leadIds);
+    await refreshWorkspaceData(activeWorkspace.id);
   };
 
   // Google Sheets Export Trigger
-  const handleOpenExportModal = (leadsToExport: LeadRecord[], clientName?: string) => {
+  const handleOpenExportModal = (leadsToExport: LeadRecord[], clientName?: string, clientId?: string) => {
+    const resolvedClientId =
+      clientId || (clientName ? clients.find((c) => c.name === clientName)?.id : activeClient?.id);
+    const resolvedClient = clients.find((c) => c.id === resolvedClientId) || activeClient;
+
+    setExportTargetClientId(resolvedClientId);
     setExportTargetLeads(
       leadsToExport.length > 0
         ? leadsToExport
-        : activeClient
-        ? dbService.getLeadsForClient(activeWorkspace.id, activeClient.id)
-        : []
+        : resolvedClient
+        ? allLeads.filter((l) => l.clientId === resolvedClient.id)
+        : allLeads
     );
-    setExportTargetClientName(clientName || activeClient?.name || 'General Agency Client');
+    setExportTargetClientName(clientName || resolvedClient?.name || 'General Agency Client');
     setIsExportModalOpen(true);
   };
 
@@ -310,8 +331,55 @@ export default function App() {
     fetchProviderStatus(updated);
   };
 
-  const handleEnableMockMode = () => {
-    handleUpdateProviderConfig({ providerType: 'mock' });
+  const [isConnectingSheets, setIsConnectingSheets] = useState<boolean>(false);
+  const [sheetsAuthError, setSheetsAuthError] = useState<string | null>(null);
+
+  const handleConnectSheets = async () => {
+    if (isConnectingSheets) return;
+    setIsConnectingSheets(true);
+    setSheetsAuthError(null);
+    try {
+      const res = await googleSignIn();
+      if (res) {
+        setCurrentUser(res.user);
+        setUserEmail(res.account.email);
+        setCachedAccessToken(res.accessToken);
+        setIsGoogleConnected(true);
+        setSheetsAuthError(null);
+      }
+    } catch (err: any) {
+      console.error('Google Sheets sign in error:', err);
+      setSheetsAuthError(err.message || 'Google Sheets authorization failed.');
+    } finally {
+      setIsConnectingSheets(false);
+    }
+  };
+
+  const handleDisconnectSheets = async () => {
+    try {
+      await googleSignOut();
+      setCurrentUser(null);
+      setIsGoogleConnected(false);
+      setSheetsAuthError(null);
+    } catch (e) {
+      console.error('Sign out error:', e);
+    }
+  };
+
+  const handleSignOut = async () => {
+    await handleDisconnectSheets();
+  };
+
+  const handleStartLeadSearchFromDashboard = () => {
+    if (activeTab !== 'finder') {
+      setActiveTab('finder');
+    }
+    setTimeout(() => {
+      const element = document.getElementById('lead-finder-section');
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 100);
   };
 
   return (
@@ -339,7 +407,7 @@ export default function App() {
           isGoogleConnected={isGoogleConnected}
           onGoogleAuthSuccess={(user, token) => {
             setCurrentUser(user);
-            setUserEmail(user.email || 'sohamkharat481@gmail.com');
+            setUserEmail(user.email || 'anjanapadhi21@gmail.com');
             setCachedAccessToken(token);
             setIsGoogleConnected(true);
           }}
@@ -360,7 +428,21 @@ export default function App() {
                   setActiveClient(client);
                   setActiveTab('clients');
                 }}
-                providerIsMock={providerStatus.isMock}
+                onSelectClient={handleSelectClient}
+                onStartLeadSearch={handleStartLeadSearchFromDashboard}
+                providerStatus={providerStatus}
+                isGoogleConnected={isGoogleConnected}
+                isConnectingSheets={isConnectingSheets}
+                sheetsAuthError={sheetsAuthError}
+                onConnectSheets={handleConnectSheets}
+                onDisconnectSheets={handleDisconnectSheets}
+                onOpenExportModal={(leads, cName) => handleOpenExportModal(leads, cName)}
+                userEmail={userEmail}
+                onSignOut={handleSignOut}
+                isLoadingData={isLoadingData}
+                supabaseError={supabaseError}
+                onRetryData={() => refreshWorkspaceData(activeWorkspace.id)}
+                onRefreshProviderStatus={() => fetchProviderStatus()}
               />
 
               <div className="pt-4 border-t border-gray-200">
@@ -372,7 +454,6 @@ export default function App() {
                   onNavigateToLeads={() => setActiveTab('clients')}
                   onNavigateToSettings={() => setActiveTab('settings')}
                   providerStatus={providerStatus}
-                  onEnableMockMode={handleEnableMockMode}
                 />
               </div>
             </div>
@@ -387,7 +468,7 @@ export default function App() {
               onCreateClient={handleCreateClient}
               onUpdateClient={handleUpdateClient}
               onDeleteClient={handleDeleteClient}
-              getLeadsForClient={(cId) => dbService.getLeadsForClient(activeWorkspace.id, cId)}
+              getLeadsForClient={(cId) => allLeads.filter((l) => l.clientId === cId)}
               getSearchesForClient={(cId) =>
                 allSearches.filter((s) => s.clientId === cId && s.workspaceId === activeWorkspace.id)
               }
@@ -415,7 +496,7 @@ export default function App() {
               isGoogleConnected={isGoogleConnected}
               onGoogleAuthSuccess={(user, token) => {
                 setCurrentUser(user);
-                setUserEmail(user.email || 'sohamkharat481@gmail.com');
+                setUserEmail(user.email || 'anjanapadhi21@gmail.com');
                 setCachedAccessToken(token);
                 setIsGoogleConnected(true);
               }}
@@ -433,11 +514,40 @@ export default function App() {
         clientName={exportTargetClientName}
         leadsToExport={exportTargetLeads}
         currentUser={currentUser}
+        existingSpreadsheetId={
+          exportTargetClientId
+            ? dbService.getGoogleIntegration(activeWorkspace.id, exportTargetClientId)?.spreadsheetId
+            : undefined
+        }
         onGoogleAuthSuccess={(user, token) => {
           setCurrentUser(user);
-          setUserEmail(user.email || 'sohamkharat481@gmail.com');
+          setUserEmail(user.email || 'user@example.com');
           setCachedAccessToken(token);
           setIsGoogleConnected(true);
+        }}
+        onExportSuccess={(sheetId, sheetUrl, addedCount, skippedCount) => {
+          if (exportTargetClientId) {
+            dbService.saveGoogleIntegration({
+              id: `gint-${Date.now()}`,
+              workspaceId: activeWorkspace.id,
+              clientId: exportTargetClientId,
+              spreadsheetId: sheetId,
+              spreadsheetUrl: sheetUrl,
+              sheetTitle: exportTargetClientName,
+              lastExportedAt: new Date().toISOString()
+            });
+            dbService.saveExportHistory({
+              id: `exp-${Date.now()}`,
+              workspaceId: activeWorkspace.id,
+              clientId: exportTargetClientId,
+              spreadsheetId: sheetId,
+              exportedLeadsCount: addedCount,
+              skippedDuplicatesCount: skippedCount,
+              exportedByEmail: userEmail,
+              createdAt: new Date().toISOString()
+            });
+            refreshWorkspaceData(activeWorkspace.id);
+          }
         }}
       />
     </div>

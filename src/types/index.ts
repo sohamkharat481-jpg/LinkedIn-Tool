@@ -114,7 +114,7 @@ export interface SearchProgressState {
 }
 
 export interface LeadProviderConfig {
-  providerType: 'mock' | 'rapidapi' | 'custom_proxy' | 'google_search' | 'leadocean';
+  providerType: 'mock' | 'rapidapi' | 'custom_proxy' | 'google_search' | 'leadocean' | 'serper';
   apiKey?: string;
   customEndpoint?: string;
 }
@@ -151,14 +151,9 @@ export interface ProviderStatusInfo {
   isExternal: boolean;
   diagnostics?: {
     apiKeyDetected?: boolean;
-    searchEngineIdDetected?: boolean;
     providerInitialized?: boolean;
-    apiEnabled?: string;
-    credentialsValid?: string;
-    apiRestrictionIssue?: string;
-    quotaBillingIssue?: string;
-    searchEngineValid?: string;
     httpStatusCode?: number;
+    providerErrorMessage?: string;
     googleErrorMessage?: string;
   };
 }

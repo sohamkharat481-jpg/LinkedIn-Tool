@@ -26,111 +26,11 @@ const DEFAULT_WORKSPACE: Workspace = {
   description: 'Primary agency workspace'
 };
 
-const SEED_CLIENTS: Client[] = [
-  {
-    id: 'client-dr-sharma',
-    workspaceId: 'ws-default-01',
-    name: 'Dr. Sharma',
-    niche: 'Doctor & Healthcare Clinics',
-    notes: 'Looking for Clinic Directors, Hospital Administrators, and Practice Owners.',
-    createdAt: new Date(Date.now() - 7 * 86400000).toISOString(),
-    updatedAt: new Date(Date.now() - 7 * 86400000).toISOString(),
-    leadsCount: 18,
-    searchesCount: 2
-  },
-  {
-    id: 'client-apex-tech',
-    workspaceId: 'ws-default-01',
-    name: 'Apex Software Labs',
-    niche: 'B2B Enterprise SaaS',
-    notes: 'Targeting CTOs, VPs of Engineering, and IT Directors in US/Canada.',
-    createdAt: new Date(Date.now() - 3 * 86400000).toISOString(),
-    updatedAt: new Date(Date.now() - 3 * 86400000).toISOString(),
-    leadsCount: 12,
-    searchesCount: 1
-  }
-];
+const SEED_CLIENTS: Client[] = [];
 
-const SEED_LEADS: LeadRecord[] = [
-  {
-    id: 'lead-01',
-    workspaceId: 'ws-default-01',
-    clientId: 'client-dr-sharma',
-    searchId: 'search-01',
-    fullName: 'Dr. Rajiv Malhotra',
-    headline: 'Medical Director at Apex Healthcare Systems | Clinical Operations Leader',
-    currentJobTitle: 'Medical Director',
-    companyName: 'Apex Healthcare Systems',
-    location: 'Chicago, United States',
-    profileUrl: 'https://www.linkedin.com/in/dr-rajiv-malhotra-md',
-    connectionsOrFollowers: '500+ connections',
-    lastActivityDate: '2 days ago',
-    dateAdded: new Date(Date.now() - 2 * 86400000).toISOString().split('T')[0],
-    status: 'Replied',
-    notes: 'Interested in clinic management software demo.',
-    source: 'LinkedIn Public Search'
-  },
-  {
-    id: 'lead-02',
-    workspaceId: 'ws-default-01',
-    clientId: 'client-dr-sharma',
-    searchId: 'search-01',
-    fullName: 'Dr. Sarah Jenkins',
-    headline: 'Founder & Chief Medical Officer at Horizon Pediatrics',
-    currentJobTitle: 'Chief Medical Officer',
-    companyName: 'Horizon Pediatrics',
-    location: 'Boston, United States',
-    profileUrl: 'https://www.linkedin.com/in/dr-sarah-jenkins-pediatrics',
-    connectionsOrFollowers: '1,240 connections',
-    lastActivityDate: 'Today',
-    dateAdded: new Date(Date.now() - 2 * 86400000).toISOString().split('T')[0],
-    status: 'Call Booked',
-    notes: 'Meeting scheduled for Thursday 2 PM EST.',
-    source: 'LinkedIn Public Search'
-  },
-  {
-    id: 'lead-03',
-    workspaceId: 'ws-default-01',
-    clientId: 'client-dr-sharma',
-    searchId: 'search-01',
-    fullName: 'Anil K. Varma',
-    headline: 'Vice President of Operations at Wellness First Hospitals',
-    currentJobTitle: 'VP of Operations',
-    companyName: 'Wellness First Hospitals',
-    location: 'New York, United States',
-    profileUrl: 'https://www.linkedin.com/in/anil-varma-healthcare',
-    connectionsOrFollowers: '500+ connections',
-    lastActivityDate: '5 days ago',
-    dateAdded: new Date(Date.now() - 1 * 86400000).toISOString().split('T')[0],
-    status: 'Request Sent',
-    notes: 'Sent connection request on LinkedIn.',
-    source: 'LinkedIn Public Search'
-  }
-];
+const SEED_LEADS: LeadRecord[] = [];
 
-const SEED_SEARCHES: SearchHistoryRecord[] = [
-  {
-    id: 'search-01',
-    workspaceId: 'ws-default-01',
-    clientId: 'client-dr-sharma',
-    clientName: 'Dr. Sharma',
-    searchDate: new Date(Date.now() - 2 * 86400000).toISOString(),
-    filters: {
-      jobTitles: ['Medical Director', 'Chief Medical Officer', 'VP of Operations'],
-      industry: ['Healthcare', 'Hospitals & Medical Practice'],
-      country: 'United States',
-      city: 'Metropolitan Area',
-      seniority: ['Director', 'VP', 'C-Level'],
-      companySize: ['51-200', '201-500'],
-      maxLeads: 20
-    },
-    candidatesFound: 25,
-    validLeads: 22,
-    duplicatesRemoved: 4,
-    finalLeadCount: 18,
-    createdBy: 'sohamkharat481@gmail.com'
-  }
-];
+const SEED_SEARCHES: SearchHistoryRecord[] = [];
 
 // In-Memory Storage & LocalStorage Synchronization
 class StorageService {
@@ -216,14 +116,19 @@ class StorageService {
   }
 
   createClient(workspaceId: string, name: string, niche: string, notes: string): Client {
+    const id = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `client-${Date.now()}`;
+    return this.createClientWithId(id, workspaceId, name, niche, notes);
+  }
+
+  createClientWithId(id: string, workspaceId: string, name: string, niche: string, notes: string, createdAt?: string): Client {
     const newClient: Client = {
-      id: `client-${Date.now()}`,
+      id,
       workspaceId,
       name,
       niche,
       notes,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      createdAt: createdAt || new Date().toISOString(),
+      updatedAt: createdAt || new Date().toISOString(),
       leadsCount: 0,
       searchesCount: 0
     };

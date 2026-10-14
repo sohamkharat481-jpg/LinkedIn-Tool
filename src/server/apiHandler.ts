@@ -60,23 +60,49 @@ apiRouter.get('/supabase-status', async (_req: Request, res: Response) => {
   res.json(diag);
 });
 
+// Comprehensive Environment & System Diagnostics Endpoint (Safe: Never reveals secrets)
+apiRouter.get('/diagnostics', async (req: Request, res: Response) => {
+  const apiKey = (req.headers['x-provider-api-key'] as string);
+  const providerDiag = ServerLeadProviderService.getDiagnostics(apiKey);
+  const supabaseDiag = await testSupabaseHealth();
+  
+  const hasViteSupabaseUrl = Boolean(process.env.VITE_SUPABASE_URL && process.env.VITE_SUPABASE_URL.trim());
+  const hasViteSupabaseAnonKey = Boolean(process.env.VITE_SUPABASE_ANON_KEY && process.env.VITE_SUPABASE_ANON_KEY.trim());
+  const hasGoogleClientId = Boolean(process.env.VITE_GOOGLE_CLIENT_ID && process.env.VITE_GOOGLE_CLIENT_ID.trim());
+
+  res.json({
+    timestamp: new Date().toISOString(),
+    environment: {
+      type: process.env.VERCEL ? 'Vercel Production' : 'AI Studio Preview / Development',
+      nodeEnv: process.env.NODE_ENV || 'development',
+      appUrl: process.env.APP_URL || process.env.VERCEL_URL || 'Google Cloud Run Dev Environment'
+    },
+    providers: {
+      SERPER_API_KEY: providerDiag.SERPER_API_KEY,
+      LEADOCEAN_API_KEY: providerDiag.LEADOCEAN_API_KEY,
+      activeProvider: providerDiag.ActiveProvider
+    },
+    database: {
+      SUPABASE_URL: supabaseDiag.SUPABASE_URL,
+      SUPABASE_ANON_KEY: supabaseDiag.SUPABASE_ANON_KEY,
+      VITE_SUPABASE_URL: hasViteSupabaseUrl ? 'CONFIGURED' : 'MISSING',
+      VITE_SUPABASE_ANON_KEY: hasViteSupabaseAnonKey ? 'CONFIGURED' : 'MISSING',
+      clientStatus: supabaseDiag.supabaseClientStatus,
+      queryStatus: supabaseDiag.databaseQueryStatus,
+      authStatus: supabaseDiag.authServiceStatus
+    },
+    integrations: {
+      googleSheetsOAuth: hasGoogleClientId ? 'CONFIGURED' : 'NOT TESTED (Client Flow)'
+    }
+  });
+});
+
 // 2. Provider Health / Status Endpoint (Does NOT expose secrets)
 apiRouter.get('/provider-status', (req: Request, res: Response) => {
-  const apiKey = (req.headers['x-provider-api-key'] as string) || process.env.LEADOCEAN_API_KEY || process.env.LEAD_PROVIDER_API_KEY;
-  
-  let isMock = false;
-  if (req.query && typeof req.query.mode === 'string') {
-    isMock = req.query.mode === 'mock';
-  } else {
-    try {
-      const urlObj = new URL(req.url || '', 'http://localhost');
-      isMock = urlObj.searchParams.get('mode') === 'mock';
-    } catch {
-      isMock = false;
-    }
-  }
+  const apiKey = (req.headers['x-provider-api-key'] as string);
+  const providerType = req.query?.type as string | undefined;
 
-  const statusInfo = ServerLeadProviderService.getStatus(apiKey, isMock ? 'mock' : 'production');
+  const statusInfo = ServerLeadProviderService.getStatus(apiKey, providerType);
   res.json(statusInfo);
 });
 
@@ -90,10 +116,9 @@ apiRouter.get('/provider-status/diagnostics', (req: Request, res: Response) => {
 
 // 3. Test Provider Connection
 apiRouter.post('/provider-status/test', async (req: Request, res: Response) => {
-  const { apiKey } = req.body;
-  const activeKey = apiKey || process.env.LEADOCEAN_API_KEY || process.env.LEAD_PROVIDER_API_KEY;
+  const { apiKey, providerType } = req.body;
 
-  const testResult = await ServerLeadProviderService.testConnection(activeKey);
+  const testResult = await ServerLeadProviderService.testConnection(apiKey, providerType);
   res.json(testResult);
 });
 
@@ -109,15 +134,14 @@ apiRouter.post('/search-leads', async (req: Request, res: Response) => {
 
     filters.maxLeads = Math.min(Math.max(Number(filters.maxLeads) || 50, 1), 500);
 
-    const isMock = providerType === 'mock';
-    const activeApiKey = apiKey || process.env.LEADOCEAN_API_KEY || process.env.LEAD_PROVIDER_API_KEY;
+    const resolved = ServerLeadProviderService.resolveApiKey(apiKey, providerType);
 
-    // Strict requirement: If not in mock mode and missing API key, return clear error
-    if (!isMock && (!activeApiKey || activeApiKey.trim() === '')) {
+    // Strict requirement: If missing API key, return clear configuration error (never fake leads)
+    if (!resolved.key || resolved.key.trim() === '') {
       res.status(422).json({
-        error: 'LeadOcean provider is not configured.',
+        error: 'Serper.dev provider is not configured.',
         code: 'NO_PROVIDER_CONFIGURED',
-        message: 'Please configure LEADOCEAN_API_KEY in environment variables or Settings page.'
+        message: 'Please configure SERPER_API_KEY in environment variables.'
       });
       return;
     }
@@ -125,19 +149,21 @@ apiRouter.post('/search-leads', async (req: Request, res: Response) => {
     // Step 1: Fetch raw candidate leads from server-side provider adapter
     const rawCandidates: RawLead[] = await ServerLeadProviderService.fetchCandidateLeads(
       filters as LeadFilter,
-      activeApiKey,
-      isMock
+      resolved.key,
+      resolved.type
     );
 
     // Step 2 & 3: Filtering & Deduplication Pipeline
     const dedupeResult = filterAndDeduplicateLeads(rawCandidates);
 
+    const isSerper = resolved.type === 'serper';
+
     res.json({
       success: true,
       provider: {
-        id: isMock ? 'mock-provider' : 'leadocean-b2b-provider',
-        name: isMock ? 'Demo / Mock Data Provider' : 'LeadOcean B2B People Search API',
-        isMock
+        id: isSerper ? 'serper-search-provider' : 'leadocean-b2b-provider',
+        name: isSerper ? 'Serper.dev Google Search API' : 'LeadOcean B2B People Search API',
+        isMock: false
       },
       metrics: {
         rawCandidatesCount: dedupeResult.rawCandidatesCount,
@@ -152,7 +178,7 @@ apiRouter.post('/search-leads', async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('API /search-leads error:', error);
     res.status(500).json({
-      error: error.message || 'LeadOcean provider temporarily unavailable.'
+      error: error.message || 'Lead provider temporarily unavailable.'
     });
   }
 });

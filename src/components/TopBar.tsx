@@ -104,13 +104,9 @@ export const TopBar: React.FC<TopBarProps> = ({
           
           {/* Provider Status Badge */}
           <div className="hidden lg:flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border">
-            {providerStatus.isMock ? (
-              <span className="flex items-center gap-1 text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full font-semibold">
-                <Sparkles className="w-3.5 h-3.5 text-blue-600" /> Provider: Demo / Mock
-              </span>
-            ) : providerStatus.status === 'Connected' ? (
+            {providerStatus.status === 'Connected' ? (
               <span className="flex items-center gap-1 text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full font-semibold">
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" /> Provider: Connected
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" /> Provider: {providerStatus.providerName.includes('Serper') ? 'Serper.dev' : 'LeadOcean'}
               </span>
             ) : providerStatus.status === 'Not Configured' ? (
               <span className="flex items-center gap-1 text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full font-semibold">
@@ -124,15 +120,28 @@ export const TopBar: React.FC<TopBarProps> = ({
           </div>
 
           {/* Google Sheets Auth Badge */}
-          <div className="hidden md:flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border">
+          <div className="hidden md:flex items-center">
             {isGoogleConnected ? (
-              <span className="flex items-center gap-1 text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full font-medium">
+              <span className="flex items-center gap-1 text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full text-xs font-medium">
                 <CheckCircle className="w-3.5 h-3.5 text-emerald-600" /> Google Sheets
               </span>
             ) : (
-              <span className="flex items-center gap-1 text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full font-medium">
-                <AlertCircle className="w-3.5 h-3.5 text-amber-600" /> Connect Sheets
-              </span>
+              <button
+                onClick={handleSignIn}
+                disabled={isSigningIn}
+                className="flex items-center gap-1 text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-300 px-2.5 py-1 rounded-full text-xs font-medium transition-colors cursor-pointer disabled:opacity-50"
+                title="Click to connect your Google account for Google Sheets export"
+              >
+                {isSigningIn ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 text-amber-600 animate-spin" /> Connecting...
+                  </>
+                ) : (
+                  <>
+                    <AlertCircle className="w-3.5 h-3.5 text-amber-600" /> Connect Sheets
+                  </>
+                )}
+              </button>
             )}
           </div>
 
