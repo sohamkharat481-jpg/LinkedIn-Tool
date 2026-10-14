@@ -56,62 +56,82 @@ apiRouter.get('/health', (_req: Request, res: Response) => {
 
 // Supabase Connection Diagnostics Endpoint (Does NOT reveal secret keys)
 apiRouter.get('/supabase-status', async (_req: Request, res: Response) => {
-  const diag = await testSupabaseHealth();
-  res.json(diag);
+  try {
+    const diag = await testSupabaseHealth();
+    res.json(diag);
+  } catch (error: any) {
+    console.error('API /supabase-status error:', error);
+    res.status(500).json({ error: error.message || 'Failed to check Supabase health.' });
+  }
 });
 
 // Comprehensive Environment & System Diagnostics Endpoint (Safe: Never reveals secrets)
 apiRouter.get('/diagnostics', async (req: Request, res: Response) => {
-  const apiKey = (req.headers['x-provider-api-key'] as string);
-  const providerDiag = ServerLeadProviderService.getDiagnostics(apiKey);
-  const supabaseDiag = await testSupabaseHealth();
-  
-  const hasViteSupabaseUrl = Boolean(process.env.VITE_SUPABASE_URL && process.env.VITE_SUPABASE_URL.trim());
-  const hasViteSupabaseAnonKey = Boolean(process.env.VITE_SUPABASE_ANON_KEY && process.env.VITE_SUPABASE_ANON_KEY.trim());
-  const hasGoogleClientId = Boolean(process.env.VITE_GOOGLE_CLIENT_ID && process.env.VITE_GOOGLE_CLIENT_ID.trim());
+  try {
+    const apiKey = (req.headers['x-provider-api-key'] as string);
+    const providerDiag = ServerLeadProviderService.getDiagnostics(apiKey);
+    const supabaseDiag = await testSupabaseHealth();
+    
+    const hasViteSupabaseUrl = Boolean(process.env.VITE_SUPABASE_URL && process.env.VITE_SUPABASE_URL.trim());
+    const hasViteSupabaseAnonKey = Boolean(process.env.VITE_SUPABASE_ANON_KEY && process.env.VITE_SUPABASE_ANON_KEY.trim());
+    const hasGoogleClientId = Boolean(process.env.VITE_GOOGLE_CLIENT_ID && process.env.VITE_GOOGLE_CLIENT_ID.trim());
 
-  res.json({
-    timestamp: new Date().toISOString(),
-    environment: {
-      type: process.env.VERCEL ? 'Vercel Production' : 'AI Studio Preview / Development',
-      nodeEnv: process.env.NODE_ENV || 'development',
-      appUrl: process.env.APP_URL || process.env.VERCEL_URL || 'Google Cloud Run Dev Environment'
-    },
-    providers: {
-      SERPER_API_KEY: providerDiag.SERPER_API_KEY,
-      LEADOCEAN_API_KEY: providerDiag.LEADOCEAN_API_KEY,
-      activeProvider: providerDiag.ActiveProvider
-    },
-    database: {
-      SUPABASE_URL: supabaseDiag.SUPABASE_URL,
-      SUPABASE_ANON_KEY: supabaseDiag.SUPABASE_ANON_KEY,
-      VITE_SUPABASE_URL: hasViteSupabaseUrl ? 'CONFIGURED' : 'MISSING',
-      VITE_SUPABASE_ANON_KEY: hasViteSupabaseAnonKey ? 'CONFIGURED' : 'MISSING',
-      clientStatus: supabaseDiag.supabaseClientStatus,
-      queryStatus: supabaseDiag.databaseQueryStatus,
-      authStatus: supabaseDiag.authServiceStatus
-    },
-    integrations: {
-      googleSheetsOAuth: hasGoogleClientId ? 'CONFIGURED' : 'NOT TESTED (Client Flow)'
-    }
-  });
+    res.json({
+      timestamp: new Date().toISOString(),
+      environment: {
+        type: process.env.VERCEL ? 'Vercel Production' : 'AI Studio Preview / Development',
+        nodeEnv: process.env.NODE_ENV || 'development',
+        appUrl: process.env.APP_URL || process.env.VERCEL_URL || 'Google Cloud Run Dev Environment'
+      },
+      providers: {
+        SERPER_API_KEY: providerDiag.SERPER_API_KEY,
+        LEADOCEAN_API_KEY: providerDiag.LEADOCEAN_API_KEY,
+        activeProvider: providerDiag.ActiveProvider
+      },
+      database: {
+        SUPABASE_URL: supabaseDiag.SUPABASE_URL,
+        SUPABASE_ANON_KEY: supabaseDiag.SUPABASE_ANON_KEY,
+        VITE_SUPABASE_URL: hasViteSupabaseUrl ? 'CONFIGURED' : 'MISSING',
+        VITE_SUPABASE_ANON_KEY: hasViteSupabaseAnonKey ? 'CONFIGURED' : 'MISSING',
+        clientStatus: supabaseDiag.supabaseClientStatus,
+        queryStatus: supabaseDiag.databaseQueryStatus,
+        authStatus: supabaseDiag.authServiceStatus
+      },
+      integrations: {
+        googleSheetsOAuth: hasGoogleClientId ? 'CONFIGURED' : 'NOT TESTED (Client Flow)'
+      }
+    });
+  } catch (error: any) {
+    console.error('API /diagnostics error:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch diagnostics.' });
+  }
 });
 
 // 2. Provider Health / Status Endpoint (Does NOT expose secrets)
 apiRouter.get('/provider-status', (req: Request, res: Response) => {
-  const apiKey = (req.headers['x-provider-api-key'] as string);
-  const providerType = req.query?.type as string | undefined;
+  try {
+    const apiKey = (req.headers['x-provider-api-key'] as string);
+    const providerType = req.query?.type as string | undefined;
 
-  const statusInfo = ServerLeadProviderService.getStatus(apiKey, providerType);
-  res.json(statusInfo);
+    const statusInfo = ServerLeadProviderService.getStatus(apiKey, providerType);
+    res.json(statusInfo);
+  } catch (error: any) {
+    console.error('API /provider-status error:', error);
+    res.status(500).json({ error: error.message || 'Failed to check provider status.' });
+  }
 });
 
 // Safe Diagnostic Endpoint (Reports CONFIGURED/MISSING status only)
 apiRouter.get('/provider-status/diagnostics', (req: Request, res: Response) => {
-  const apiKey = (req.headers['x-provider-api-key'] as string);
+  try {
+    const apiKey = (req.headers['x-provider-api-key'] as string);
 
-  const diag = ServerLeadProviderService.getDiagnostics(apiKey);
-  res.json(diag);
+    const diag = ServerLeadProviderService.getDiagnostics(apiKey);
+    res.json(diag);
+  } catch (error: any) {
+    console.error('API /provider-status/diagnostics error:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch provider diagnostics.' });
+  }
 });
 
 // 3. Test Provider Connection
