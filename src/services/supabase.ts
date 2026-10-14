@@ -6,13 +6,8 @@ export const getSupabaseUrl = (): string => {
   if (typeof process !== 'undefined' && process.env) {
     url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
   }
-  if (!url) {
-    try {
-      const meta = eval('typeof import.meta !== "undefined" ? import.meta : {}') as any;
-      url = meta?.env?.VITE_SUPABASE_URL || meta?.env?.SUPABASE_URL || '';
-    } catch {
-      url = '';
-    }
+  if (!url && typeof window !== 'undefined') {
+    url = (window as any).__SUPABASE_URL__ || (window as any)?.__ENV__?.VITE_SUPABASE_URL || '';
   }
   return (url || '').trim();
 };
@@ -25,16 +20,8 @@ export const getSupabaseAnonKey = (): string => {
       process.env.VITE_SUPABASE_ANON_KEY ||
       '';
   }
-  if (!key) {
-    try {
-      const meta = eval('typeof import.meta !== "undefined" ? import.meta : {}') as any;
-      key =
-        meta?.env?.VITE_SUPABASE_ANON_KEY ||
-        meta?.env?.SUPABASE_ANON_KEY ||
-        '';
-    } catch {
-      key = '';
-    }
+  if (!key && typeof window !== 'undefined') {
+    key = (window as any).__SUPABASE_ANON_KEY || (window as any)?.__ENV__?.VITE_SUPABASE_ANON_KEY || '';
   }
   return (key || '').trim();
 };

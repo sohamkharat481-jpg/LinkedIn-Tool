@@ -30,17 +30,11 @@ export class SerperSearchLeadProvider implements LeadProvider {
           '';
       }
       if ((!resolvedKey || resolvedKey.trim() === '') && typeof window !== 'undefined') {
-        try {
-          const meta = eval('typeof import.meta !== "undefined" ? import.meta : {}') as any;
-          resolvedKey =
-            meta?.env?.SERPER_API_KEY ||
-            meta?.env?.VITE_SERPER_API_KEY ||
-            meta?.env?.SERPER_SEARCH_API_KEY ||
-            meta?.env?.VITE_SERPER_SEARCH_API_KEY ||
-            '';
-        } catch {
-          // ignore
-        }
+        resolvedKey =
+          (window as any).__SERPER_API_KEY__ ||
+          (window as any)?.__ENV__?.VITE_SERPER_API_KEY ||
+          (window as any)?.__ENV__?.SERPER_API_KEY ||
+          '';
       }
     }
     this.apiKey = (resolvedKey || '').trim();

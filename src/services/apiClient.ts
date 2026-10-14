@@ -6,14 +6,17 @@
  * In local development or same-origin mode, it falls back to relative paths ('').
  */
 export const getApiBaseUrl = (): string => {
-  try {
-    const meta = eval('typeof import.meta !== "undefined" ? import.meta : {}') as any;
-    const customUrl = meta?.env?.VITE_API_BASE_URL;
+  if (typeof window !== 'undefined') {
+    const customUrl = (window as any).__VITE_API_BASE_URL__ || (window as any)?.__ENV__?.VITE_API_BASE_URL;
     if (customUrl && typeof customUrl === 'string' && customUrl.trim().length > 0) {
       return customUrl.trim().replace(/\/+$/, '');
     }
-  } catch {
-    // Fallback to relative routing
+  }
+  if (typeof process !== 'undefined' && process.env) {
+    const customUrl = process.env.VITE_API_BASE_URL;
+    if (customUrl && typeof customUrl === 'string' && customUrl.trim().length > 0) {
+      return customUrl.trim().replace(/\/+$/, '');
+    }
   }
   return '';
 };
