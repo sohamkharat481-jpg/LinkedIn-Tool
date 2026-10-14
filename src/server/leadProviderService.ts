@@ -12,8 +12,17 @@ export class ServerLeadProviderService {
    * Safe Diagnostic Status (Does NOT expose secret values)
    */
   static getDiagnostics(overrideApiKey?: string) {
+    const cleanedOverride =
+      overrideApiKey &&
+      typeof overrideApiKey === 'string' &&
+      overrideApiKey.trim() !== '' &&
+      overrideApiKey !== 'undefined' &&
+      overrideApiKey !== 'null'
+        ? overrideApiKey.trim()
+        : '';
+
     const serperKey =
-      overrideApiKey ||
+      cleanedOverride ||
       process.env.SERPER_API_KEY ||
       process.env.SERPER_SEARCH_API_KEY ||
       process.env.VITE_SERPER_API_KEY ||
@@ -21,7 +30,7 @@ export class ServerLeadProviderService {
       process.env.LEAD_PROVIDER_API_KEY;
 
     const leadOceanKey =
-      overrideApiKey ||
+      cleanedOverride ||
       process.env.LEADOCEAN_API_KEY ||
       process.env.LEAD_PROVIDER_API_KEY ||
       process.env.VITE_LEADOCEAN_API_KEY;
@@ -57,9 +66,18 @@ export class ServerLeadProviderService {
    * Helper to resolve active API Key from environment or overrides
    */
   static resolveApiKey(overrideKey?: string, providerType?: string): { key: string; type: 'serper' | 'leadocean' } {
+    const cleanedOverride =
+      overrideKey &&
+      typeof overrideKey === 'string' &&
+      overrideKey.trim() !== '' &&
+      overrideKey !== 'undefined' &&
+      overrideKey !== 'null'
+        ? overrideKey.trim()
+        : '';
+
     if (providerType === 'leadocean') {
       const key = (
-        overrideKey ||
+        cleanedOverride ||
         process.env.LEADOCEAN_API_KEY ||
         process.env.LEAD_PROVIDER_API_KEY ||
         process.env.VITE_LEADOCEAN_API_KEY ||
@@ -70,7 +88,7 @@ export class ServerLeadProviderService {
 
     // Default to Serper.dev as primary
     const serperKey = (
-      overrideKey ||
+      cleanedOverride ||
       process.env.SERPER_API_KEY ||
       process.env.SERPER_SEARCH_API_KEY ||
       process.env.VITE_SERPER_API_KEY ||
