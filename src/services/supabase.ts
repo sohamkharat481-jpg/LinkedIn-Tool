@@ -8,7 +8,8 @@ export const getSupabaseUrl = (): string => {
   }
   if (!url) {
     try {
-      url = (import.meta as any).env?.VITE_SUPABASE_URL || (import.meta as any).env?.SUPABASE_URL || '';
+      const meta = eval('typeof import.meta !== "undefined" ? import.meta : {}') as any;
+      url = meta?.env?.VITE_SUPABASE_URL || meta?.env?.SUPABASE_URL || '';
     } catch {
       url = '';
     }
@@ -26,9 +27,10 @@ export const getSupabaseAnonKey = (): string => {
   }
   if (!key) {
     try {
+      const meta = eval('typeof import.meta !== "undefined" ? import.meta : {}') as any;
       key =
-        (import.meta as any).env?.VITE_SUPABASE_ANON_KEY ||
-        (import.meta as any).env?.SUPABASE_ANON_KEY ||
+        meta?.env?.VITE_SUPABASE_ANON_KEY ||
+        meta?.env?.SUPABASE_ANON_KEY ||
         '';
     } catch {
       key = '';

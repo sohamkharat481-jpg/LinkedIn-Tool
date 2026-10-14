@@ -7,7 +7,8 @@
  */
 export const getApiBaseUrl = (): string => {
   try {
-    const customUrl = (import.meta as any).env?.VITE_API_BASE_URL;
+    const meta = eval('typeof import.meta !== "undefined" ? import.meta : {}') as any;
+    const customUrl = meta?.env?.VITE_API_BASE_URL;
     if (customUrl && typeof customUrl === 'string' && customUrl.trim().length > 0) {
       return customUrl.trim().replace(/\/+$/, '');
     }
