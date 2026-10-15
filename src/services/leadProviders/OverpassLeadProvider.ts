@@ -3,10 +3,15 @@ import { LeadProvider } from './LeadProvider';
 
 const OVERPASS_ENDPOINT = 'https://overpass-api.de/api/interpreter';
 const MAX_RESULTS = 500;
-const REQUEST_TIMEOUT_MS = 25000;
+const REQUEST_TIMEOUT_MS = 15000;
 const MIN_REQUEST_INTERVAL_MS = 10000;
 const MAX_DAILY_REQUESTS_PER_INSTANCE = 90;
 const CACHE_TTL_MS = 15 * 60 * 1000;
+const MAX_REQUEST_ATTEMPTS = 3;
+const INITIAL_RETRY_DELAY_MS = 500;
+const MAX_RETRY_DELAY_MS = 2000;
+const MAX_RETRY_AFTER_MS = 15000;
+const RETRYABLE_HTTP_STATUSES = new Set([429, 500, 502, 503, 504]);
 
 type OsmElement = {
   type: 'node' | 'way' | 'relation';
@@ -74,7 +79,7 @@ export function buildOverpassQuery(filters: LeadFilter, limit = MAX_RESULTS): st
   const cityName = escapeOverpassString(city);
 
   return [
-    '[out:json][timeout:20][maxsize:67108864];',
+    '[out:json][timeout:12][maxsize:67108864];',
     `area["name"=${countryName}]["boundary"="administrative"]["admin_level"="2"]->.country;`,
     `rel(area.country)["name"=${cityName}]["boundary"="administrative"]["admin_level"~"^(6|7|8|9|10)$"]->.city;`,
     '.city map_to_area -> .searchArea;',
@@ -213,76 +218,89 @@ export class OverpassLeadProvider implements LeadProvider {
   private static dailyRequestDate = '';
   private static dailyRequestCount = 0;
 
+  private readonly waitForSlot: () => Promise<void>;
+
   constructor(
     private readonly endpoint = OVERPASS_ENDPOINT,
-    private readonly fetcher: typeof fetch = fetch
-  ) {}
+    private readonly fetcher: typeof fetch = fetch,
+    waitForSlot?: () => Promise<void>,
+    private readonly delay: (milliseconds: number) => Promise<void> = milliseconds =>
+      new Promise(resolve => setTimeout(resolve, milliseconds))
+  ) {
+    this.waitForSlot = waitForSlot ?? this.waitForRequestSlot.bind(this);
+  }
 
-  async search(filters: LeadFilter): Promise<RawLead[]> {
-    const query = buildOverpassQuery(filters);
+  async search(filters: LeadFilter, queryResultLimit = MAX_RESULTS): Promise<RawLead[]> {
+    const query = buildOverpassQuery(filters, queryResultLimit);
     const cached = OverpassLeadProvider.cache.get(query);
     if (cached && cached.expiresAt > Date.now()) {
       return cached.leads.slice(0, normalizeResultLimit(filters.maxLeads));
     }
 
-    await this.waitForRequestSlot();
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    let data: OverpassResponse | undefined;
+    for (let attempt = 1; attempt <= MAX_REQUEST_ATTEMPTS; attempt++) {
+      await this.waitForSlot();
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      let response: Response | undefined;
 
-    let response: Response;
-    try {
-      response = await this.fetcher(this.endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'User-Agent': 'LinkedInLeadFinder/1.0 (OpenStreetMap Overpass business search)'
-        },
-        body: `data=${encodeURIComponent(query)}`,
-        signal: controller.signal
-      });
-    } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') {
-        throw new OverpassApiError('OpenStreetMap Overpass request timed out (25s limit).');
+      try {
+        response = await this.fetcher(this.endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'User-Agent': 'LinkedInLeadFinder/1.0 (OpenStreetMap Overpass business search)'
+          },
+          body: `data=${encodeURIComponent(query)}`,
+          signal: controller.signal
+        });
+
+        if (response.ok) {
+          const parsed: unknown = await response.json();
+          if (
+            parsed === null ||
+            typeof parsed !== 'object' ||
+            !Array.isArray((parsed as { elements?: unknown }).elements)
+          ) {
+            throw new OverpassApiError('OpenStreetMap Overpass returned malformed JSON or an invalid response.');
+          }
+          data = parsed as OverpassResponse;
+          break;
+        }
+      } catch (error) {
+        if (error instanceof OverpassApiError) throw error;
+
+        const timedOut = error instanceof Error && error.name === 'AbortError';
+        clearTimeout(timeoutId);
+        const isMalformedResponse = response?.ok === true;
+        if (!timedOut && isMalformedResponse) {
+          throw new OverpassApiError('OpenStreetMap Overpass returned malformed JSON or an invalid response.');
+        }
+        if (attempt === MAX_REQUEST_ATTEMPTS) {
+          throw new OverpassApiError(
+            timedOut
+              ? `OpenStreetMap Overpass request timed out (${REQUEST_TIMEOUT_MS / 1000}s limit).`
+              : 'Network error connecting to the public OpenStreetMap Overpass API.'
+          );
+        }
+        await this.delay(this.retryDelay(attempt));
+        continue;
+      } finally {
+        clearTimeout(timeoutId);
       }
-      throw new OverpassApiError('Network error connecting to the public OpenStreetMap Overpass API.');
-    } finally {
-      clearTimeout(timeoutId);
+
+      if (response && !response.ok) {
+        const canRetry = RETRYABLE_HTTP_STATUSES.has(response.status);
+        const retryAfterMs = this.retryAfterDelay(response.headers.get('Retry-After'));
+        if (canRetry && attempt < MAX_REQUEST_ATTEMPTS && retryAfterMs <= MAX_RETRY_AFTER_MS) {
+          await this.delay(Math.max(this.retryDelay(attempt), retryAfterMs));
+          continue;
+        }
+        throw this.httpError(response.status);
+      }
     }
 
-    if (!response.ok) {
-      if (response.status === 429) {
-        throw new OverpassApiError(
-          'OpenStreetMap Overpass is rate-limiting requests (HTTP 429). Wait before searching again.',
-          429
-        );
-      }
-      if (response.status >= 500) {
-        throw new OverpassApiError(
-          `OpenStreetMap Overpass is temporarily unavailable (HTTP ${response.status}). Try again later.`,
-          response.status
-        );
-      }
-      throw new OverpassApiError(
-        `OpenStreetMap Overpass rejected the query (HTTP ${response.status}).`,
-        response.status
-      );
-    }
-
-    let data: OverpassResponse;
-    try {
-      const parsed: unknown = await response.json();
-      if (
-        parsed === null ||
-        typeof parsed !== 'object' ||
-        !Array.isArray((parsed as { elements?: unknown }).elements)
-      ) {
-        throw new Error('Unexpected response structure');
-      }
-      data = parsed as OverpassResponse;
-    } catch {
-      throw new OverpassApiError('OpenStreetMap Overpass returned malformed JSON or an invalid response.');
-    }
-
+    if (!data) throw new OverpassApiError('OpenStreetMap Overpass returned no response.');
     const leads = deduplicateBusinessLeads(
       data.elements
         .map(mapOsmElementToLead)
@@ -296,6 +314,39 @@ export class OverpassLeadProvider implements LeadProvider {
       if (oldestKey) OverpassLeadProvider.cache.delete(oldestKey);
     }
     return leads.slice(0, normalizeResultLimit(filters.maxLeads));
+  }
+
+  private retryDelay(attempt: number): number {
+    return Math.min(INITIAL_RETRY_DELAY_MS * 2 ** (attempt - 1), MAX_RETRY_DELAY_MS);
+  }
+
+  private retryAfterDelay(value: string | null): number {
+    if (!value) return 0;
+    const trimmed = value.trim();
+    if (/^\d+(?:\.\d+)?$/.test(trimmed)) {
+      return Math.max(0, Math.ceil(Number(trimmed) * 1000));
+    }
+    const retryAt = Date.parse(trimmed);
+    return Number.isNaN(retryAt) ? 0 : Math.max(0, retryAt - Date.now());
+  }
+
+  private httpError(status: number): OverpassApiError {
+    if (status === 429) {
+      return new OverpassApiError(
+        'OpenStreetMap Overpass is rate-limiting requests (HTTP 429). Wait before searching again.',
+        429
+      );
+    }
+    if (status >= 500) {
+      return new OverpassApiError(
+        `OpenStreetMap Overpass is temporarily unavailable (HTTP ${status}). Try again later.`,
+        status
+      );
+    }
+    return new OverpassApiError(
+      `OpenStreetMap Overpass rejected the query (HTTP ${status}).`,
+      status
+    );
   }
 
   private async waitForRequestSlot(): Promise<void> {

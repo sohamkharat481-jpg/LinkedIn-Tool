@@ -401,7 +401,7 @@ export class ServerLeadProviderService {
           seniority: [],
           companySize: [],
           maxLeads: 1
-        });
+        }, 1);
         const duration = Date.now() - startTime;
         overpassConnectionVerified = true;
         overpassLastSuccessTimestamp = new Date().toISOString();

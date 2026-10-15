@@ -36,11 +36,25 @@ const cafeElement = {
   }
 };
 
+const createTestProvider = (
+  fetcher: typeof fetch,
+  delays: number[] = []
+): OverpassLeadProvider =>
+  new OverpassLeadProvider(
+    'https://overpass-api.de/api/interpreter',
+    fetcher,
+    async () => {},
+    async milliseconds => {
+      delays.push(milliseconds);
+    }
+  );
+
 test('builds bounded city/country queries with capped output', () => {
   assert.throws(() => buildOverpassQuery({ ...filters, city: '' }), /requires both a city and country/);
   const query = buildOverpassQuery({ ...filters, city: 'London"]->.x; out;' }, 10000);
   assert.match(query, /\["admin_level"="2"\]/);
   assert.match(query, /\["admin_level"~"\^\(6\|7\|8\|9\|10\)\$"\]/);
+  assert.match(query, /\[timeout:12\]/);
   assert.match(query, /out tags center 500;/);
   assert.ok(!query.includes('London"]->.x; out;'));
 });
@@ -94,14 +108,14 @@ test('validates and deduplicates business records by OSM id and named address', 
 });
 
 test('surfaces Overpass HTTP 429 without pretending the search succeeded', async () => {
-  const provider = new OverpassLeadProvider(
-    'https://overpass-api.de/api/interpreter',
-    async (_input, init) => {
-      assert.equal(init?.method, 'POST');
-      assert.equal(new Headers(init?.headers).get('User-Agent')?.startsWith('LinkedInLeadFinder/'), true);
-      return new Response('rate limited', { status: 429 });
-    }
-  );
+  let calls = 0;
+  const delays: number[] = [];
+  const provider = createTestProvider(async (_input, init) => {
+    calls++;
+    assert.equal(init?.method, 'POST');
+    assert.equal(new Headers(init?.headers).get('User-Agent')?.startsWith('LinkedInLeadFinder/'), true);
+    return new Response('rate limited', { status: 429 });
+  }, delays);
 
   await assert.rejects(provider.search(filters), (error: unknown) => {
     assert.ok(error instanceof OverpassApiError);
@@ -109,4 +123,116 @@ test('surfaces Overpass HTTP 429 without pretending the search succeeded', async
     assert.match(error.message, /rate-limiting/);
     return true;
   });
+  assert.equal(calls, 3);
+  assert.deepEqual(delays, [500, 1000]);
+});
+
+test('retries HTTP 502 with bounded exponential backoff and accepts a successful response', async () => {
+  let calls = 0;
+  const delays: number[] = [];
+  const provider = createTestProvider(async () => {
+    calls++;
+    if (calls === 1) return new Response('upstream error', { status: 502 });
+    return new Response(JSON.stringify({ elements: [cafeElement] }), { status: 200 });
+  }, delays);
+
+  const leads = await provider.search({ ...filters, city: '502 retry test' });
+  assert.equal(calls, 2);
+  assert.deepEqual(delays, [500]);
+  assert.equal(leads.length, 1);
+  assert.equal(leads[0].companyName, 'Example Cafe');
+});
+
+test('honors Retry-After when retrying HTTP 503', async () => {
+  let calls = 0;
+  const delays: number[] = [];
+  const provider = createTestProvider(async () => {
+    calls++;
+    if (calls === 1) {
+      return new Response('temporarily unavailable', {
+        status: 503,
+        headers: { 'Retry-After': '3' }
+      });
+    }
+    return new Response(JSON.stringify({ elements: [] }), { status: 200 });
+  }, delays);
+
+  const leads = await provider.search({ ...filters, city: 'retry after test' });
+  assert.equal(calls, 2);
+  assert.deepEqual(delays, [3000]);
+  assert.deepEqual(leads, []);
+});
+
+test('does not retry before an excessive Retry-After value', async () => {
+  let calls = 0;
+  const delays: number[] = [];
+  const provider = createTestProvider(async () => {
+    calls++;
+    return new Response('temporarily unavailable', {
+      status: 503,
+      headers: { 'Retry-After': '60' }
+    });
+  }, delays);
+
+  await assert.rejects(provider.search({ ...filters, city: 'long retry after test' }), (error: unknown) => {
+    assert.ok(error instanceof OverpassApiError);
+    assert.equal(error.httpStatus, 503);
+    return true;
+  });
+  assert.equal(calls, 1);
+  assert.deepEqual(delays, []);
+});
+
+test('bounds retries for request timeouts', async () => {
+  let calls = 0;
+  const delays: number[] = [];
+  const provider = createTestProvider(async () => {
+    calls++;
+    const error = new Error('aborted');
+    error.name = 'AbortError';
+    throw error;
+  }, delays);
+
+  await assert.rejects(provider.search({ ...filters, city: 'timeout retry test' }), (error: unknown) => {
+    assert.ok(error instanceof OverpassApiError);
+    assert.match(error.message, /timed out \(15s limit\)/);
+    return true;
+  });
+  assert.equal(calls, 3);
+  assert.deepEqual(delays, [500, 1000]);
+});
+
+test('keeps the timeout active while reading the response body', async () => {
+  let calls = 0;
+  const delays: number[] = [];
+  const provider = createTestProvider(async () => {
+    calls++;
+    const response = new Response('{}', { status: 200 });
+    response.json = async () => {
+      const error = new Error('aborted while reading body');
+      error.name = 'AbortError';
+      throw error;
+    };
+    return response;
+  }, delays);
+
+  await assert.rejects(provider.search({ ...filters, city: 'body timeout test' }), (error: unknown) => {
+    assert.ok(error instanceof OverpassApiError);
+    assert.match(error.message, /timed out \(15s limit\)/);
+    return true;
+  });
+  assert.equal(calls, 3);
+  assert.deepEqual(delays, [500, 1000]);
+});
+
+test('returns a genuine empty result without retries', async () => {
+  let calls = 0;
+  const provider = createTestProvider(async () => {
+    calls++;
+    return new Response(JSON.stringify({ elements: [] }), { status: 200 });
+  });
+
+  const leads = await provider.search({ ...filters, city: 'empty result test' });
+  assert.deepEqual(leads, []);
+  assert.equal(calls, 1);
 });
