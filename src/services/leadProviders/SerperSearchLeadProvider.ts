@@ -187,12 +187,15 @@ export class SerperSearchLeadProvider implements LeadProvider {
           const response = await fetch(this.endpoint, {
             method: 'POST',
             headers: {
-              'X-API-KEY': this.apiKey,
+              'X-API-KEY': this.apiKey.trim(),
               'Content-Type': 'application/json'
             },
             body: JSON.stringify(payload),
             signal: controller.signal
           });
+
+          console.log(`Serper request to ${this.endpoint} with status: ${response.status}`);
+
 
           clearTimeout(timeoutId);
 
