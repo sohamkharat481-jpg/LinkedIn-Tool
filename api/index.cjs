@@ -603,7 +603,8 @@ var ServerLeadProviderService = class {
    * Helper to resolve active API Key from environment or overrides
    */
   static resolveApiKey(overrideKey, providerType) {
-    const cleanedOverride = overrideKey && typeof overrideKey === "string" && overrideKey.trim() !== "" && overrideKey !== "undefined" && overrideKey !== "null" ? overrideKey.trim() : "";
+    const isProduction = Boolean(process.env.VERCEL || process.env.NODE_ENV === "production");
+    const cleanedOverride = isProduction ? "" : overrideKey && typeof overrideKey === "string" && overrideKey.trim() !== "" && overrideKey !== "undefined" && overrideKey !== "null" ? overrideKey.trim() : "";
     if (providerType === "serper") {
       const key = (cleanedOverride || process.env.SERPER_API_KEY || process.env.SERPER_SEARCH_API_KEY || process.env.VITE_SERPER_API_KEY || "").trim();
       return { key, type: "serper" };
