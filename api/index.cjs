@@ -243,12 +243,13 @@ var SerperSearchLeadProvider = class {
           const response = await fetch(this.endpoint, {
             method: "POST",
             headers: {
-              "X-API-KEY": this.apiKey,
+              "X-API-KEY": this.apiKey.trim(),
               "Content-Type": "application/json"
             },
             body: JSON.stringify(payload),
             signal: controller.signal
           });
+          console.log(`Serper request to ${this.endpoint} with status: ${response.status}`);
           clearTimeout(timeoutId);
           if (response.status === 401 || response.status === 403) {
             throw new Error("Invalid or unauthorized Serper.dev API Key. Please verify SERPER_API_KEY.");
@@ -445,7 +446,8 @@ var ServerLeadProviderService = class {
       LEADOCEAN_API_KEY: hasLeadOcean ? "CONFIGURED" : "MISSING",
       ActiveProvider: hasSerper ? "Serper.dev Google Search API" : hasLeadOcean ? "LeadOcean B2B People Search API" : "None (Unconfigured)",
       Runtime: runtimeName,
-      Deployment: deploymentId
+      Deployment: deploymentId,
+      DetectedEnvKeys: Object.keys(process.env).filter((key) => key.includes("SERPER") || key.includes("LEAD_PROVIDER"))
     };
   }
   /**
