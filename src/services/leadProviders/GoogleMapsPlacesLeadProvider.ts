@@ -126,7 +126,7 @@ export class GoogleMapsPlacesLeadProvider implements LeadProvider {
             if (errCode === 403) {
               if (errMsg.includes('caller does not have permission') || errMsg.includes('PERMISSION_DENIED')) {
                 errMsg =
-                  'Google Maps Places API (New) permission denied. Ensure "Places API (New)" is enabled in your Google Cloud Console and billing is active for this API key.';
+                  'Google Maps Places API (New) permission denied (HTTP 403: PERMISSION_DENIED). "The caller does not have permission". In Google Cloud Console: 1) Verify API key restrictions under APIs & Services > Credentials (ensure "Places API (New)" is allowed or select "Don\'t restrict key"); 2) Ensure Application restrictions are set to "None" (server-side calls from Vercel are blocked if restricted to HTTP referrers); 3) Confirm the key belongs to the Google Cloud project where Places API (New) is enabled and linked to your Paid billing account.';
               } else if (errMsg.includes('API_KEY_INVALID') || errMsg.includes('not valid')) {
                 errMsg = 'Invalid Google Maps API Key. Please verify GOOGLE_MAPS_API_KEY.';
               }
