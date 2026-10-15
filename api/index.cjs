@@ -67,7 +67,9 @@ function isValidLeadRecord(lead) {
   const hasName = Boolean(lead.fullName && lead.fullName.trim().length >= 2);
   const hasJobTitle = Boolean(lead.currentJobTitle && lead.currentJobTitle.trim().length >= 2);
   const hasCompany = Boolean(lead.companyName && lead.companyName.trim().length >= 1);
-  const hasUrl = Boolean(lead.profileUrl && lead.profileUrl.trim().toLowerCase().includes("linkedin.com"));
+  const hasUrl = Boolean(
+    lead.profileUrl && (lead.profileUrl.trim().toLowerCase().includes("linkedin.com") || lead.profileUrl.trim().toLowerCase().includes("google.com/maps") || lead.profileUrl.trim().toLowerCase().includes("maps.google.com") || lead.profileUrl.trim().toLowerCase().startsWith("http://") || lead.profileUrl.trim().toLowerCase().startsWith("https://"))
+  );
   return hasName && hasJobTitle && hasCompany && hasUrl;
 }
 function filterAndDeduplicateLeads(candidates) {
@@ -110,6 +112,147 @@ function filterAndDeduplicateLeads(candidates) {
     finalUniqueLeads
   };
 }
+
+// src/services/leadProviders/GoogleMapsPlacesLeadProvider.ts
+var GoogleMapsPlacesLeadProvider = class {
+  constructor(apiKey) {
+    this.providerId = "google-maps-places-provider";
+    this.providerName = "Google Maps Platform Places API (New)";
+    this.isMock = false;
+    this.endpoint = "https://places.googleapis.com/v1/places:searchText";
+    this.apiKey = apiKey || process.env.GOOGLE_MAPS_API_KEY || process.env.VITE_GOOGLE_MAPS_API_KEY || process.env.PLACES_API_KEY || "";
+  }
+  /**
+   * Translates client lead discovery filters into relevant Google Maps Places text queries.
+   * e.g. "Technology companies in Mumbai, India"
+   */
+  generateQueries(filters) {
+    const industries = filters.industry && filters.industry.length > 0 ? filters.industry : [];
+    const jobTitles = filters.jobTitles && filters.jobTitles.length > 0 ? filters.jobTitles : [];
+    const city = filters.city ? filters.city.trim() : "";
+    const country = filters.country ? filters.country.trim() : "";
+    const keywords = filters.keywords ? filters.keywords.trim() : "";
+    const locationPart = [city, country].filter(Boolean).join(", ");
+    const terms = [];
+    if (keywords) {
+      terms.push(keywords);
+    }
+    if (industries.length > 0) {
+      for (const ind of industries) {
+        if (!terms.includes(ind)) {
+          terms.push(ind.includes("companies") || ind.includes("services") || ind.includes("agencies") ? ind : `${ind} companies`);
+        }
+      }
+    }
+    if (terms.length === 0 && jobTitles.length > 0) {
+      for (const title of jobTitles) {
+        terms.push(`${title} businesses`);
+      }
+    }
+    if (terms.length === 0) {
+      terms.push("Companies");
+    }
+    return terms.map((term) => locationPart ? `${term} in ${locationPart}` : term);
+  }
+  /**
+   * Searches for genuine business entities via Google Maps Places API (New) Text Search
+   */
+  async search(filters) {
+    if (!this.apiKey || this.apiKey.trim() === "") {
+      throw new Error(
+        "Google Maps API key is not configured. Please set GOOGLE_MAPS_API_KEY or VITE_GOOGLE_MAPS_API_KEY in environment variables."
+      );
+    }
+    const targetLimit = Math.min(Math.max(filters.maxLeads || 50, 1), 500);
+    const queries = this.generateQueries(filters);
+    const allLeads = [];
+    const seenIds = /* @__PURE__ */ new Set();
+    for (const query of queries) {
+      if (allLeads.length >= targetLimit) break;
+      let nextPageToken = void 0;
+      let pageCount = 0;
+      const maxPagesPerQuery = 3;
+      do {
+        pageCount++;
+        const pageSize = Math.min(20, targetLimit - allLeads.length);
+        const requestBody = {
+          textQuery: query,
+          pageSize
+        };
+        if (nextPageToken) {
+          requestBody.pageToken = nextPageToken;
+        }
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 12e3);
+        try {
+          const response = await fetch(this.endpoint, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Goog-Api-Key": this.apiKey,
+              "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.websiteUri,places.internationalPhoneNumber,places.nationalPhoneNumber,places.googleMapsUri,places.primaryType,places.primaryTypeDisplayName,places.location,places.rating,places.userRatingCount",
+              "X-Goog-Maps-Solution-ID": "gmp_mcp_codeassist_v1_aistudio"
+            },
+            body: JSON.stringify(requestBody),
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+          if (!response.ok) {
+            const errData = await response.json().catch(() => null);
+            const errCode = response.status;
+            let errMsg = errData?.error?.message || `Google Places API returned HTTP ${errCode}`;
+            if (errCode === 403) {
+              if (errMsg.includes("caller does not have permission") || errMsg.includes("PERMISSION_DENIED")) {
+                errMsg = 'Google Maps Places API (New) permission denied. Ensure "Places API (New)" is enabled in your Google Cloud Console and billing is active for this API key.';
+              } else if (errMsg.includes("API_KEY_INVALID") || errMsg.includes("not valid")) {
+                errMsg = "Invalid Google Maps API Key. Please verify GOOGLE_MAPS_API_KEY.";
+              }
+            }
+            throw new Error(errMsg);
+          }
+          const data = await response.json();
+          const places = Array.isArray(data.places) ? data.places : [];
+          for (const place of places) {
+            const placeId = place.id || place.displayName?.text || "";
+            if (placeId && seenIds.has(placeId)) continue;
+            if (placeId) seenIds.add(placeId);
+            const businessName = place.displayName?.text || place.displayName || "Unnamed Business";
+            const primaryCategory = place.primaryTypeDisplayName?.text || (place.primaryType ? place.primaryType.replace(/_/g, " ") : "") || filters.industry?.[0] || "Business";
+            const rating = place.rating;
+            const reviewCount = place.userRatingCount || 0;
+            const ratingText = rating ? `${rating}\u2605 (${reviewCount} reviews)` : "";
+            const phone = place.internationalPhoneNumber || place.nationalPhoneNumber || "";
+            const address = place.formattedAddress || (filters.city ? `${filters.city}, ${filters.country}` : filters.country || "Location Available");
+            const profileUrl = place.websiteUri || place.googleMapsUri || (place.id ? `https://www.google.com/maps/place/?q=place_id:${place.id}` : "https://maps.google.com");
+            const headlineParts = [primaryCategory];
+            if (ratingText) headlineParts.push(ratingText);
+            if (address) headlineParts.push(address);
+            allLeads.push({
+              fullName: businessName,
+              companyName: businessName,
+              currentJobTitle: primaryCategory,
+              headline: headlineParts.join(" \u2022 "),
+              location: address,
+              profileUrl,
+              connectionsOrFollowers: ratingText || phone || "Google Maps Verified",
+              lastActivityDate: "N/A",
+              source: "Google Maps Places API (New)"
+            });
+            if (allLeads.length >= targetLimit) break;
+          }
+          nextPageToken = data.nextPageToken;
+        } catch (err) {
+          clearTimeout(timeoutId);
+          if (err.name === "AbortError") {
+            throw new Error("Google Places API request timed out (12s limit).");
+          }
+          throw err;
+        }
+      } while (nextPageToken && allLeads.length < targetLimit && pageCount < maxPagesPerQuery);
+    }
+    return allLeads;
+  }
+};
 
 // src/services/leadProviders/SerperSearchLeadProvider.ts
 var SerperSearchLeadProvider = class {
@@ -435,19 +578,24 @@ var ServerLeadProviderService = class {
    */
   static getDiagnostics(overrideApiKey) {
     const cleanedOverride = overrideApiKey && typeof overrideApiKey === "string" && overrideApiKey.trim() !== "" && overrideApiKey !== "undefined" && overrideApiKey !== "null" ? overrideApiKey.trim() : "";
+    const googleMapsKey = cleanedOverride || process.env.GOOGLE_MAPS_API_KEY || process.env.VITE_GOOGLE_MAPS_API_KEY || process.env.PLACES_API_KEY;
     const serperKey = cleanedOverride || process.env.SERPER_API_KEY || process.env.SERPER_SEARCH_API_KEY || process.env.VITE_SERPER_API_KEY || process.env.VITE_SERPER_SEARCH_API_KEY || process.env.LEAD_PROVIDER_API_KEY;
     const leadOceanKey = cleanedOverride || process.env.LEADOCEAN_API_KEY || process.env.LEAD_PROVIDER_API_KEY || process.env.VITE_LEADOCEAN_API_KEY;
+    const hasGoogleMaps = Boolean(googleMapsKey && String(googleMapsKey).trim().length > 0);
     const hasSerper = Boolean(serperKey && String(serperKey).trim().length > 0);
     const hasLeadOcean = Boolean(leadOceanKey && String(leadOceanKey).trim().length > 0);
     const runtimeName = process.env.VERCEL ? "Vercel Serverless" : process.env.K_SERVICE ? "Google Cloud Run / Node Runtime" : "Node.js Express Server";
     const deploymentId = process.env.VERCEL_DEPLOYMENT_ID || process.env.APP_URL || "applet-4d041d80-4453-4ab7";
     return {
+      GOOGLE_MAPS_API_KEY: hasGoogleMaps ? "CONFIGURED" : "MISSING",
       SERPER_API_KEY: hasSerper ? "CONFIGURED" : "MISSING",
       LEADOCEAN_API_KEY: hasLeadOcean ? "CONFIGURED" : "MISSING",
-      ActiveProvider: hasSerper ? "Serper.dev Google Search API" : hasLeadOcean ? "LeadOcean B2B People Search API" : "None (Unconfigured)",
+      ActiveProvider: hasGoogleMaps ? "Google Maps Platform Places API (New)" : hasSerper ? "Serper.dev Google Search API" : hasLeadOcean ? "LeadOcean B2B People Search API" : "None (Unconfigured)",
       Runtime: runtimeName,
       Deployment: deploymentId,
-      DetectedEnvKeys: Object.keys(process.env).filter((key) => key.includes("SERPER") || key.includes("LEAD_PROVIDER"))
+      DetectedEnvKeys: Object.keys(process.env).filter(
+        (key) => key.includes("MAPS") || key.includes("PLACES") || key.includes("SERPER") || key.includes("LEAD_PROVIDER")
+      )
     };
   }
   /**
@@ -455,11 +603,19 @@ var ServerLeadProviderService = class {
    */
   static resolveApiKey(overrideKey, providerType) {
     const cleanedOverride = overrideKey && typeof overrideKey === "string" && overrideKey.trim() !== "" && overrideKey !== "undefined" && overrideKey !== "null" ? overrideKey.trim() : "";
+    if (providerType === "serper") {
+      const key = (cleanedOverride || process.env.SERPER_API_KEY || process.env.SERPER_SEARCH_API_KEY || process.env.VITE_SERPER_API_KEY || "").trim();
+      return { key, type: "serper" };
+    }
     if (providerType === "leadocean") {
       const key = (cleanedOverride || process.env.LEADOCEAN_API_KEY || process.env.LEAD_PROVIDER_API_KEY || process.env.VITE_LEADOCEAN_API_KEY || "").trim();
       return { key, type: "leadocean" };
     }
-    const serperKey = (cleanedOverride || process.env.SERPER_API_KEY || process.env.SERPER_SEARCH_API_KEY || process.env.VITE_SERPER_API_KEY || process.env.VITE_SERPER_SEARCH_API_KEY || process.env.LEAD_PROVIDER_API_KEY || "").trim();
+    const googleMapsKey = (cleanedOverride || process.env.GOOGLE_MAPS_API_KEY || process.env.VITE_GOOGLE_MAPS_API_KEY || process.env.PLACES_API_KEY || "").trim();
+    if (googleMapsKey) {
+      return { key: googleMapsKey, type: "google_places" };
+    }
+    const serperKey = (process.env.SERPER_API_KEY || process.env.SERPER_SEARCH_API_KEY || process.env.VITE_SERPER_API_KEY || process.env.VITE_SERPER_SEARCH_API_KEY || process.env.LEAD_PROVIDER_API_KEY || "").trim();
     if (serperKey) {
       return { key: serperKey, type: "serper" };
     }
@@ -467,21 +623,70 @@ var ServerLeadProviderService = class {
     if (leadOceanKey) {
       return { key: leadOceanKey, type: "leadocean" };
     }
-    return { key: "", type: "serper" };
+    return { key: "", type: "google_places" };
   }
   /**
    * Evaluates current provider status without exposing secrets.
    */
   static getStatus(overrideApiKey, requestedType) {
     const { key, type } = this.resolveApiKey(overrideApiKey, requestedType);
-    if (type === "leadocean" && key) {
+    if (type === "google_places") {
+      const providerName2 = "Google Maps Platform Places API (New)";
+      const endpointStatus2 = "https://places.googleapis.com/v1/places:searchText";
+      if (!key) {
+        return {
+          configured: false,
+          providerName: providerName2,
+          status: "Not Configured",
+          message: "Google Maps API key is not configured. Please set GOOGLE_MAPS_API_KEY or VITE_GOOGLE_MAPS_API_KEY.",
+          isMock: false,
+          endpointStatus: endpointStatus2,
+          authStatus: "Not Configured",
+          lastSuccessfulRequest: lastSuccessTimestamp,
+          lastError: lastErrorMsg,
+          responseTimeMs: lastResponseTime,
+          isExternal: true
+        };
+      }
       return {
         configured: true,
-        providerName: "LeadOcean B2B People Search API",
+        providerName: providerName2,
+        status: connectionVerified ? "Connected" : "Connected",
+        message: "Google Maps Platform Places API (New) configured and ready.",
+        isMock: false,
+        endpointStatus: endpointStatus2,
+        authStatus: "Configured",
+        lastSuccessfulRequest: lastSuccessTimestamp,
+        lastError: lastErrorMsg,
+        responseTimeMs: lastResponseTime,
+        isExternal: true
+      };
+    }
+    if (type === "leadocean") {
+      const providerName2 = "LeadOcean B2B People Search API";
+      const endpointStatus2 = "https://api.leadocean.io/v1/people/search";
+      if (!key) {
+        return {
+          configured: false,
+          providerName: providerName2,
+          status: "Not Configured",
+          message: "LeadOcean API key is not configured.",
+          isMock: false,
+          endpointStatus: endpointStatus2,
+          authStatus: "Not Configured",
+          lastSuccessfulRequest: lastSuccessTimestamp,
+          lastError: lastErrorMsg,
+          responseTimeMs: lastResponseTime,
+          isExternal: true
+        };
+      }
+      return {
+        configured: true,
+        providerName: providerName2,
         status: connectionVerified ? "Connected" : "Connected",
         message: "LeadOcean provider configured.",
         isMock: false,
-        endpointStatus: "https://api.leadocean.io/v1/people/search",
+        endpointStatus: endpointStatus2,
         authStatus: "Configured",
         lastSuccessfulRequest: lastSuccessTimestamp,
         lastError: lastErrorMsg,
@@ -521,15 +726,84 @@ var ServerLeadProviderService = class {
     };
   }
   /**
-   * Executes a real authenticated connection test against Serper.dev or LeadOcean.
+   * Executes a real authenticated connection test against Google Maps Places API (New), Serper.dev, or LeadOcean.
    */
   static async testConnection(overrideApiKey, requestedType) {
     const { key, type } = this.resolveApiKey(overrideApiKey, requestedType);
     const startTime = Date.now();
     if (!key) {
-      lastErrorMsg = type === "leadocean" ? "LeadOcean API key is not configured." : "Serper.dev API key is not configured. Please set SERPER_API_KEY.";
+      lastErrorMsg = type === "google_places" ? "Google Maps API key is not configured. Please set GOOGLE_MAPS_API_KEY or VITE_GOOGLE_MAPS_API_KEY." : type === "leadocean" ? "LeadOcean API key is not configured." : "Serper.dev API key is not configured. Please set SERPER_API_KEY.";
       connectionVerified = false;
       return this.getStatus(overrideApiKey, requestedType);
+    }
+    if (type === "google_places") {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8e3);
+        const response = await fetch("https://places.googleapis.com/v1/places:searchText", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Goog-Api-Key": key,
+            "X-Goog-FieldMask": "places.id,places.displayName",
+            "X-Goog-Maps-Solution-ID": "gmp_mcp_codeassist_v1_aistudio"
+          },
+          body: JSON.stringify({
+            textQuery: "test",
+            pageSize: 1
+          }),
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        const duration = Date.now() - startTime;
+        lastResponseTime = `${duration}ms`;
+        if (response.ok) {
+          lastSuccessTimestamp = (/* @__PURE__ */ new Date()).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit"
+          });
+          lastErrorMsg = "None";
+          connectionVerified = true;
+          return {
+            ...this.getStatus(key, "google_places"),
+            status: "Connected",
+            message: "Google Maps Platform Places API (New) connected successfully."
+          };
+        }
+        const httpCode = response.status;
+        connectionVerified = false;
+        const errJson = await response.json().catch(() => null);
+        let rawMsg = errJson?.error?.message || `Google Places API returned HTTP ${httpCode}`;
+        if (httpCode === 403) {
+          if (rawMsg.includes("caller does not have permission") || rawMsg.includes("PERMISSION_DENIED")) {
+            rawMsg = 'Google Maps Places API (New) permission denied. Ensure "Places API (New)" is enabled in your Google Cloud Console and billing is active for this API key.';
+          } else if (rawMsg.includes("API_KEY_INVALID") || rawMsg.includes("not valid")) {
+            rawMsg = "Invalid Google Maps API Key. Please verify GOOGLE_MAPS_API_KEY.";
+          }
+        }
+        lastErrorMsg = String(rawMsg);
+        return {
+          ...this.getStatus(key, "google_places"),
+          status: "Error",
+          message: lastErrorMsg,
+          diagnostics: {
+            apiKeyDetected: true,
+            providerInitialized: true,
+            httpStatusCode: httpCode,
+            providerErrorMessage: lastErrorMsg,
+            googleErrorMessage: errJson?.error?.status || `HTTP_${httpCode}`
+          }
+        };
+      } catch (err) {
+        connectionVerified = false;
+        lastErrorMsg = err.message || "Network error connecting to Google Maps Places API";
+        return {
+          ...this.getStatus(key, "google_places"),
+          status: "Error",
+          message: lastErrorMsg
+        };
+      }
     }
     if (type === "serper") {
       try {
@@ -551,7 +825,11 @@ var ServerLeadProviderService = class {
         const duration = Date.now() - startTime;
         lastResponseTime = `${duration}ms`;
         if (response.ok) {
-          lastSuccessTimestamp = (/* @__PURE__ */ new Date()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+          lastSuccessTimestamp = (/* @__PURE__ */ new Date()).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit"
+          });
           lastErrorMsg = "None";
           connectionVerified = true;
           return {
@@ -606,7 +884,11 @@ var ServerLeadProviderService = class {
       const duration = Date.now() - startTime;
       lastResponseTime = `${duration}ms`;
       if (response && response.ok) {
-        lastSuccessTimestamp = (/* @__PURE__ */ new Date()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+        lastSuccessTimestamp = (/* @__PURE__ */ new Date()).toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit"
+        });
         lastErrorMsg = "None";
         connectionVerified = true;
         return {
@@ -642,20 +924,42 @@ var ServerLeadProviderService = class {
     }
   }
   /**
-   * Fetches candidate leads using Serper.dev Google search or LeadOcean.
+   * Fetches candidate leads using Google Maps Places API (New) or fallback providers.
    */
   static async fetchCandidateLeads(filters, overrideApiKey, requestedType) {
     const startTime = Date.now();
     const { key, type } = this.resolveApiKey(overrideApiKey, requestedType);
     if (!key) {
-      lastErrorMsg = type === "leadocean" ? "LeadOcean API key is not configured." : "Serper.dev API key is not configured. Please set SERPER_API_KEY.";
+      lastErrorMsg = type === "google_places" ? "Google Maps API key is not configured. Please set GOOGLE_MAPS_API_KEY or VITE_GOOGLE_MAPS_API_KEY." : type === "leadocean" ? "LeadOcean API key is not configured." : "Serper.dev API key is not configured. Please set SERPER_API_KEY.";
       throw new Error(lastErrorMsg);
+    }
+    if (type === "google_places") {
+      const provider2 = new GoogleMapsPlacesLeadProvider(key);
+      try {
+        const results = await provider2.search(filters);
+        lastSuccessTimestamp = (/* @__PURE__ */ new Date()).toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit"
+        });
+        lastErrorMsg = "None";
+        lastResponseTime = `${Date.now() - startTime}ms`;
+        connectionVerified = true;
+        return results;
+      } catch (err) {
+        lastErrorMsg = err.message || "Google Maps Places API search error.";
+        throw err;
+      }
     }
     if (type === "serper") {
       const provider2 = new SerperSearchLeadProvider(key);
       try {
         const results = await provider2.search(filters);
-        lastSuccessTimestamp = (/* @__PURE__ */ new Date()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+        lastSuccessTimestamp = (/* @__PURE__ */ new Date()).toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit"
+        });
         lastErrorMsg = "None";
         lastResponseTime = `${Date.now() - startTime}ms`;
         connectionVerified = true;
@@ -668,7 +972,11 @@ var ServerLeadProviderService = class {
     const provider = new LeadOceanLeadProvider(key);
     try {
       const results = await provider.search(filters);
-      lastSuccessTimestamp = (/* @__PURE__ */ new Date()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      lastSuccessTimestamp = (/* @__PURE__ */ new Date()).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit"
+      });
       lastErrorMsg = "None";
       lastResponseTime = `${Date.now() - startTime}ms`;
       connectionVerified = true;
@@ -841,6 +1149,7 @@ apiRouter.get("/diagnostics", async (req, res) => {
         appUrl: process.env.APP_URL || process.env.VERCEL_URL || "Google Cloud Run Dev Environment"
       },
       providers: {
+        GOOGLE_MAPS_API_KEY: providerDiag.GOOGLE_MAPS_API_KEY,
         SERPER_API_KEY: providerDiag.SERPER_API_KEY,
         LEADOCEAN_API_KEY: providerDiag.LEADOCEAN_API_KEY,
         activeProvider: providerDiag.ActiveProvider
@@ -900,9 +1209,9 @@ apiRouter.post("/search-leads", async (req, res) => {
     const resolved = ServerLeadProviderService.resolveApiKey(apiKey, providerType);
     if (!resolved.key || resolved.key.trim() === "") {
       res.status(422).json({
-        error: "Serper.dev provider is not configured.",
+        error: "Google Maps Places provider is not configured.",
         code: "NO_PROVIDER_CONFIGURED",
-        message: "Please configure SERPER_API_KEY in environment variables."
+        message: "Please configure GOOGLE_MAPS_API_KEY or VITE_GOOGLE_MAPS_API_KEY in environment variables."
       });
       return;
     }
@@ -912,12 +1221,13 @@ apiRouter.post("/search-leads", async (req, res) => {
       resolved.type
     );
     const dedupeResult = filterAndDeduplicateLeads(rawCandidates);
+    const isGooglePlaces = resolved.type === "google_places";
     const isSerper = resolved.type === "serper";
     res.json({
       success: true,
       provider: {
-        id: isSerper ? "serper-search-provider" : "leadocean-b2b-provider",
-        name: isSerper ? "Serper.dev Google Search API" : "LeadOcean B2B People Search API",
+        id: isGooglePlaces ? "google-maps-places-provider" : isSerper ? "serper-search-provider" : "leadocean-b2b-provider",
+        name: isGooglePlaces ? "Google Maps Platform Places API (New)" : isSerper ? "Serper.dev Google Search API" : "LeadOcean B2B People Search API",
         isMock: false
       },
       metrics: {
