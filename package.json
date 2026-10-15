@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
-    "build": "vite build && esbuild api/index.ts --bundle --platform=node --format=esm --target=node20 --outfile=api/index.js",
-    "vercel-build": "vite build && esbuild api/index.ts --bundle --platform=node --format=esm --target=node20 --outfile=api/index.js",
+    "build": "vite build && esbuild api/index.ts --bundle --platform=node --format=cjs --target=node20 --external:express --external:@google/genai --external:@supabase/supabase-js --external:firebase --external:dotenv --external:lucide-react --external:motion --external:react --external:react-dom --outfile=api/index.cjs",
+    "vercel-build": "npm run build",
     "start": "tsx server.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
