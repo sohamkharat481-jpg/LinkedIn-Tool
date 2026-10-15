@@ -8,6 +8,30 @@ let lastErrorMsg: string = 'None';
 let lastResponseTime: number | string = 'N/A';
 let connectionVerified = false;
 
+export interface ProviderDiagnosticTestResult {
+  success: boolean;
+  httpStatus: number;
+  provider: string;
+  endpoint: string;
+  placesReturned: number;
+  responseTime: string;
+  responseTimeMs: number;
+  configured: boolean;
+  status: 'Connected' | 'Not Configured' | 'Error';
+  authStatus: string;
+  message: string;
+  sanitizedProviderError: string | null;
+  timestamp: string;
+  diagnostics?: {
+    apiKeyDetected?: boolean;
+    providerInitialized?: boolean;
+    httpStatusCode?: number;
+    placesReturned?: number;
+    providerErrorMessage?: string;
+    googleErrorMessage?: string;
+  };
+}
+
 export class ServerLeadProviderService {
   /**
    * Safe Diagnostic Status (Does NOT expose secret values)
@@ -70,6 +94,7 @@ export class ServerLeadProviderService {
         : 'None (Unconfigured)',
       Runtime: runtimeName,
       Deployment: deploymentId,
+      connectionVerified,
       DetectedEnvKeys: Object.keys(process.env).filter(
         key =>
           key.includes('MAPS') ||
@@ -87,14 +112,16 @@ export class ServerLeadProviderService {
     overrideKey?: string,
     providerType?: string
   ): { key: string; type: 'google_places' | 'serper' | 'leadocean' } {
-    const cleanedOverride =
+    const isProduction = Boolean(process.env.VERCEL || process.env.NODE_ENV === 'production');
+    const cleanedOverride = isProduction ? '' : (
       overrideKey &&
       typeof overrideKey === 'string' &&
       overrideKey.trim() !== '' &&
       overrideKey !== 'undefined' &&
       overrideKey !== 'null'
         ? overrideKey.trim()
-        : '';
+        : ''
+    );
 
     if (providerType === 'serper') {
       const key = (
@@ -162,6 +189,7 @@ export class ServerLeadProviderService {
 
   /**
    * Evaluates current provider status without exposing secrets.
+   * Accurately distinguishes between configured and verified live connection.
    */
   static getStatus(overrideApiKey?: string, requestedType?: string): ProviderStatusInfo {
     const { key, type } = this.resolveApiKey(overrideApiKey, requestedType);
@@ -175,7 +203,7 @@ export class ServerLeadProviderService {
           configured: false,
           providerName,
           status: 'Not Configured',
-          message: 'Google Maps API key is not configured. Please set GOOGLE_MAPS_API_KEY or VITE_GOOGLE_MAPS_API_KEY.',
+          message: 'Google Maps API key is not configured. Please set GOOGLE_MAPS_API_KEY in environment variables.',
           isMock: false,
           endpointStatus,
           authStatus: 'Not Configured',
@@ -186,14 +214,47 @@ export class ServerLeadProviderService {
         };
       }
 
+      // Distinguish tested connection from untested configuration
+      if (connectionVerified) {
+        return {
+          configured: true,
+          providerName,
+          status: 'Connected',
+          message: 'Google Maps Platform Places API (New) verified and connected.',
+          isMock: false,
+          endpointStatus,
+          authStatus: 'Verified',
+          lastSuccessfulRequest: lastSuccessTimestamp,
+          lastError: 'None',
+          responseTimeMs: lastResponseTime,
+          isExternal: true
+        };
+      }
+
+      if (lastErrorMsg !== 'None') {
+        return {
+          configured: true,
+          providerName,
+          status: 'Error',
+          message: lastErrorMsg,
+          isMock: false,
+          endpointStatus,
+          authStatus: 'Test Failed',
+          lastSuccessfulRequest: lastSuccessTimestamp,
+          lastError: lastErrorMsg,
+          responseTimeMs: lastResponseTime,
+          isExternal: true
+        };
+      }
+
       return {
         configured: true,
         providerName,
-        status: connectionVerified ? 'Connected' : 'Connected',
-        message: 'Google Maps Platform Places API (New) configured and ready.',
+        status: 'Not Configured',
+        message: 'Google Maps API key is configured. Run live connection test to verify.',
         isMock: false,
         endpointStatus,
-        authStatus: 'Configured',
+        authStatus: 'Configured (Untested)',
         lastSuccessfulRequest: lastSuccessTimestamp,
         lastError: lastErrorMsg,
         responseTimeMs: lastResponseTime,
@@ -224,11 +285,13 @@ export class ServerLeadProviderService {
       return {
         configured: true,
         providerName,
-        status: connectionVerified ? 'Connected' : 'Connected',
-        message: 'LeadOcean provider configured.',
+        status: connectionVerified ? 'Connected' : 'Not Configured',
+        message: connectionVerified
+          ? 'LeadOcean provider verified and connected.'
+          : 'LeadOcean API key is configured (Untested).',
         isMock: false,
         endpointStatus,
-        authStatus: 'Configured',
+        authStatus: connectionVerified ? 'Verified' : 'Configured (Untested)',
         lastSuccessfulRequest: lastSuccessTimestamp,
         lastError: lastErrorMsg,
         responseTimeMs: lastResponseTime,
@@ -258,11 +321,13 @@ export class ServerLeadProviderService {
     return {
       configured: true,
       providerName,
-      status: connectionVerified ? 'Connected' : 'Connected',
-      message: 'Serper.dev Google Search API configured and ready.',
+      status: connectionVerified ? 'Connected' : 'Not Configured',
+      message: connectionVerified
+        ? 'Serper.dev Google Search API verified and connected.'
+        : 'Serper.dev API key is configured (Untested).',
       isMock: false,
       endpointStatus,
-      authStatus: 'Configured',
+      authStatus: connectionVerified ? 'Verified' : 'Configured (Untested)',
       lastSuccessfulRequest: lastSuccessTimestamp,
       lastError: lastErrorMsg,
       responseTimeMs: lastResponseTime,
@@ -272,38 +337,68 @@ export class ServerLeadProviderService {
 
   /**
    * Executes a real authenticated connection test against Google Maps Places API (New), Serper.dev, or LeadOcean.
+   * Returns sanitized diagnostic information without exposing API keys or secrets.
    */
-  static async testConnection(overrideApiKey?: string, requestedType?: string): Promise<ProviderStatusInfo> {
+  static async testConnection(
+    overrideApiKey?: string,
+    requestedType?: string
+  ): Promise<ProviderDiagnosticTestResult> {
     const { key, type } = this.resolveApiKey(overrideApiKey, requestedType);
     const startTime = Date.now();
 
     if (!key) {
       lastErrorMsg =
         type === 'google_places'
-          ? 'Google Maps API key is not configured. Please set GOOGLE_MAPS_API_KEY or VITE_GOOGLE_MAPS_API_KEY.'
+          ? 'Google Maps API key is not configured. Please set GOOGLE_MAPS_API_KEY in environment variables.'
           : type === 'leadocean'
           ? 'LeadOcean API key is not configured.'
           : 'Serper.dev API key is not configured. Please set SERPER_API_KEY.';
       connectionVerified = false;
-      return this.getStatus(overrideApiKey, requestedType);
+      const duration = Date.now() - startTime;
+
+      return {
+        success: false,
+        httpStatus: 401,
+        provider:
+          type === 'google_places'
+            ? 'Google Maps Platform Places API (New)'
+            : type === 'leadocean'
+            ? 'LeadOcean B2B People Search API'
+            : 'Serper.dev Google Search API',
+        endpoint:
+          type === 'google_places'
+            ? 'https://places.googleapis.com/v1/places:searchText'
+            : type === 'leadocean'
+            ? 'https://api.leadocean.io/v1/people/search'
+            : 'https://google.serper.dev/search',
+        placesReturned: 0,
+        responseTime: `${duration}ms`,
+        responseTimeMs: duration,
+        configured: false,
+        status: 'Not Configured',
+        authStatus: 'Missing Key',
+        message: lastErrorMsg,
+        sanitizedProviderError: 'API key is missing or blank',
+        timestamp: new Date().toISOString()
+      };
     }
 
     if (type === 'google_places') {
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 8000);
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
 
         const response = await fetch('https://places.googleapis.com/v1/places:searchText', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'X-Goog-Api-Key': key,
-            'X-Goog-FieldMask': 'places.id,places.displayName',
+            'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress',
             'X-Goog-Maps-Solution-ID': 'gmp_mcp_codeassist_v1_aistudio'
           },
           body: JSON.stringify({
-            textQuery: 'test',
-            pageSize: 1
+            textQuery: 'software companies in Mumbai, India',
+            pageSize: 2
           }),
           signal: controller.signal
         });
@@ -311,8 +406,11 @@ export class ServerLeadProviderService {
         clearTimeout(timeoutId);
         const duration = Date.now() - startTime;
         lastResponseTime = `${duration}ms`;
+        const httpStatus = response.status;
 
         if (response.ok) {
+          const data = await response.json();
+          const places = Array.isArray(data.places) ? data.places : [];
           lastSuccessTimestamp = new Date().toLocaleTimeString([], {
             hour: '2-digit',
             minute: '2-digit',
@@ -320,48 +418,112 @@ export class ServerLeadProviderService {
           });
           lastErrorMsg = 'None';
           connectionVerified = true;
+
           return {
-            ...this.getStatus(key, 'google_places'),
+            success: true,
+            httpStatus: 200,
+            provider: 'Google Maps Platform Places API (New)',
+            endpoint: 'https://places.googleapis.com/v1/places:searchText',
+            placesReturned: places.length,
+            responseTime: `${duration}ms`,
+            responseTimeMs: duration,
+            configured: true,
             status: 'Connected',
-            message: 'Google Maps Platform Places API (New) connected successfully.'
+            authStatus: 'Verified',
+            message: `Google Maps Platform Places API (New) connected successfully. Verified ${places.length} real places returned.`,
+            sanitizedProviderError: null,
+            timestamp: new Date().toISOString(),
+            diagnostics: {
+              apiKeyDetected: true,
+              providerInitialized: true,
+              httpStatusCode: 200,
+              placesReturned: places.length
+            }
           };
         }
 
-        const httpCode = response.status;
+        // Sanitized error handling for all HTTP statuses
         connectionVerified = false;
         const errJson = await response.json().catch(() => null);
-        let rawMsg = errJson?.error?.message || `Google Places API returned HTTP ${httpCode}`;
+        const rawStatus = errJson?.error?.status || '';
+        const rawMessage = errJson?.error?.message || '';
 
-        if (httpCode === 403) {
-          if (rawMsg.includes('caller does not have permission') || rawMsg.includes('PERMISSION_DENIED')) {
-            rawMsg =
-              'Google Maps Places API (New) permission denied. Ensure "Places API (New)" is enabled in your Google Cloud Console and billing is active for this API key.';
-          } else if (rawMsg.includes('API_KEY_INVALID') || rawMsg.includes('not valid')) {
-            rawMsg = 'Invalid Google Maps API Key. Please verify GOOGLE_MAPS_API_KEY.';
+        let sanitizedError = `Google Places API returned HTTP ${httpStatus}`;
+
+        if (httpStatus === 400) {
+          sanitizedError = `Malformed request to Google Places API (HTTP 400). Details: ${rawMessage || 'Bad Request'}`;
+        } else if (httpStatus === 401) {
+          sanitizedError = 'Unauthorized Google Maps API Key (HTTP 401). Please check that the key exists and is valid.';
+        } else if (httpStatus === 403) {
+          if (rawMessage.includes('caller does not have permission') || rawStatus === 'PERMISSION_DENIED') {
+            sanitizedError =
+              'Google Maps Places API (New) permission denied (HTTP 403: PERMISSION_DENIED). "The caller does not have permission". Common causes: 1) API Key Restrictions: Under Google Cloud Console > APIs & Services > Credentials, ensure the key allows "Places API (New)" or select "Don\'t restrict key"; 2) Application Restrictions: Ensure application restrictions are set to "None" (server-side calls from Vercel are blocked if restricted to HTTP referrers); 3) Project Link: Confirm the API key was created in the exact same Google Cloud project that has "Places API (New)" enabled and is linked to the Paid billing account.';
+          } else if (rawMessage.includes('API_KEY_INVALID') || rawStatus === 'API_KEY_INVALID') {
+            sanitizedError =
+              'Invalid Google Maps API Key (HTTP 403: API_KEY_INVALID). Please verify GOOGLE_MAPS_API_KEY in environment variables.';
+          } else {
+            sanitizedError = `Google Maps Places API forbidden (HTTP 403: ${rawStatus || 'FORBIDDEN'}). ${rawMessage ? 'Reason: ' + rawMessage : 'Check API restrictions and billing.'}`;
           }
+        } else if (httpStatus === 429) {
+          sanitizedError =
+            'Google Maps Places API rate limit or quota exceeded (HTTP 429). Please check quota settings in Google Cloud Console.';
+        } else if (httpStatus >= 500) {
+          sanitizedError = `Google Maps upstream server error (HTTP ${httpStatus}). Please retry shortly.`;
         }
 
-        lastErrorMsg = String(rawMsg);
+        lastErrorMsg = sanitizedError;
 
         return {
-          ...this.getStatus(key, 'google_places'),
+          success: false,
+          httpStatus,
+          provider: 'Google Maps Platform Places API (New)',
+          endpoint: 'https://places.googleapis.com/v1/places:searchText',
+          placesReturned: 0,
+          responseTime: `${duration}ms`,
+          responseTimeMs: duration,
+          configured: true,
           status: 'Error',
-          message: lastErrorMsg,
+          authStatus: 'Authentication/Permission Error',
+          message: sanitizedError,
+          sanitizedProviderError: sanitizedError,
+          timestamp: new Date().toISOString(),
           diagnostics: {
             apiKeyDetected: true,
             providerInitialized: true,
-            httpStatusCode: httpCode,
-            providerErrorMessage: lastErrorMsg,
-            googleErrorMessage: errJson?.error?.status || `HTTP_${httpCode}`
+            httpStatusCode: httpStatus,
+            providerErrorMessage: sanitizedError,
+            googleErrorMessage: rawStatus || `HTTP_${httpStatus}`
           }
         };
       } catch (err: any) {
         connectionVerified = false;
-        lastErrorMsg = err.message || 'Network error connecting to Google Maps Places API';
+        const duration = Date.now() - startTime;
+        const isTimeout = err.name === 'AbortError';
+        const sanitizedError = isTimeout
+          ? 'Network timeout (10s limit) connecting to Google Places API.'
+          : 'Network error connecting to Google Maps Places API endpoint.';
+        lastErrorMsg = sanitizedError;
+
         return {
-          ...this.getStatus(key, 'google_places'),
+          success: false,
+          httpStatus: isTimeout ? 504 : 502,
+          provider: 'Google Maps Platform Places API (New)',
+          endpoint: 'https://places.googleapis.com/v1/places:searchText',
+          placesReturned: 0,
+          responseTime: `${duration}ms`,
+          responseTimeMs: duration,
+          configured: true,
           status: 'Error',
-          message: lastErrorMsg
+          authStatus: 'Network Error',
+          message: sanitizedError,
+          sanitizedProviderError: sanitizedError,
+          timestamp: new Date().toISOString(),
+          diagnostics: {
+            apiKeyDetected: true,
+            providerInitialized: true,
+            httpStatusCode: isTimeout ? 504 : 502,
+            providerErrorMessage: sanitizedError
+          }
         };
       }
     }
@@ -378,8 +540,8 @@ export class ServerLeadProviderService {
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            q: 'test',
-            num: 1
+            q: 'software companies in Mumbai, India',
+            num: 2
           }),
           signal: controller.signal
         });
@@ -397,9 +559,19 @@ export class ServerLeadProviderService {
           lastErrorMsg = 'None';
           connectionVerified = true;
           return {
-            ...this.getStatus(key, 'serper'),
+            success: true,
+            httpStatus: 200,
+            provider: 'Serper.dev Google Search API',
+            endpoint: 'https://google.serper.dev/search',
+            placesReturned: 2,
+            responseTime: `${duration}ms`,
+            responseTimeMs: duration,
+            configured: true,
             status: 'Connected',
-            message: 'Serper.dev Google Search API connected successfully.'
+            authStatus: 'Verified',
+            message: 'Serper.dev Google Search API connected successfully.',
+            sanitizedProviderError: null,
+            timestamp: new Date().toISOString()
           };
         }
 
@@ -410,23 +582,38 @@ export class ServerLeadProviderService {
         lastErrorMsg = String(rawMsg);
 
         return {
-          ...this.getStatus(key, 'serper'),
+          success: false,
+          httpStatus: httpCode,
+          provider: 'Serper.dev Google Search API',
+          endpoint: 'https://google.serper.dev/search',
+          placesReturned: 0,
+          responseTime: `${duration}ms`,
+          responseTimeMs: duration,
+          configured: true,
           status: 'Error',
+          authStatus: 'Authentication Error',
           message: lastErrorMsg,
-          diagnostics: {
-            apiKeyDetected: true,
-            providerInitialized: true,
-            httpStatusCode: httpCode,
-            providerErrorMessage: lastErrorMsg
-          }
+          sanitizedProviderError: lastErrorMsg,
+          timestamp: new Date().toISOString()
         };
       } catch (err: any) {
         connectionVerified = false;
+        const duration = Date.now() - startTime;
         lastErrorMsg = err.message || 'Network error connecting to Serper.dev';
         return {
-          ...this.getStatus(key, 'serper'),
+          success: false,
+          httpStatus: 502,
+          provider: 'Serper.dev Google Search API',
+          endpoint: 'https://google.serper.dev/search',
+          placesReturned: 0,
+          responseTime: `${duration}ms`,
+          responseTimeMs: duration,
+          configured: true,
           status: 'Error',
-          message: lastErrorMsg
+          authStatus: 'Network Error',
+          message: lastErrorMsg,
+          sanitizedProviderError: lastErrorMsg,
+          timestamp: new Date().toISOString()
         };
       }
     }
@@ -463,9 +650,19 @@ export class ServerLeadProviderService {
         lastErrorMsg = 'None';
         connectionVerified = true;
         return {
-          ...this.getStatus(key, 'leadocean'),
+          success: true,
+          httpStatus: 200,
+          provider: 'LeadOcean B2B People Search API',
+          endpoint,
+          placesReturned: 1,
+          responseTime: `${duration}ms`,
+          responseTimeMs: duration,
+          configured: true,
           status: 'Connected',
-          message: 'LeadOcean provider connected successfully.'
+          authStatus: 'Verified',
+          message: 'LeadOcean provider connected successfully.',
+          sanitizedProviderError: null,
+          timestamp: new Date().toISOString()
         };
       }
 
@@ -476,23 +673,38 @@ export class ServerLeadProviderService {
       lastErrorMsg = String(rawMsg);
 
       return {
-        ...this.getStatus(key, 'leadocean'),
+        success: false,
+        httpStatus: httpCode,
+        provider: 'LeadOcean B2B People Search API',
+        endpoint,
+        placesReturned: 0,
+        responseTime: `${duration}ms`,
+        responseTimeMs: duration,
+        configured: true,
         status: 'Error',
+        authStatus: 'Authentication Error',
         message: lastErrorMsg,
-        diagnostics: {
-          apiKeyDetected: true,
-          providerInitialized: true,
-          httpStatusCode: httpCode,
-          providerErrorMessage: lastErrorMsg
-        }
+        sanitizedProviderError: lastErrorMsg,
+        timestamp: new Date().toISOString()
       };
     } catch (err: any) {
       connectionVerified = false;
+      const duration = Date.now() - startTime;
       lastErrorMsg = err.message || 'Invalid API Credentials or Network Error';
       return {
-        ...this.getStatus(key, 'leadocean'),
+        success: false,
+        httpStatus: 502,
+        provider: 'LeadOcean B2B People Search API',
+        endpoint: 'https://api.leadocean.io/v1/people/search',
+        placesReturned: 0,
+        responseTime: `${duration}ms`,
+        responseTimeMs: duration,
+        configured: true,
         status: 'Error',
-        message: lastErrorMsg
+        authStatus: 'Network Error',
+        message: lastErrorMsg,
+        sanitizedProviderError: lastErrorMsg,
+        timestamp: new Date().toISOString()
       };
     }
   }
