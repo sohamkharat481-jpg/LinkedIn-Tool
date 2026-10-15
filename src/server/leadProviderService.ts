@@ -3,7 +3,11 @@ import { GoogleMapsPlacesLeadProvider } from '../services/leadProviders/GoogleMa
 import { diagnoseGooglePlacesFailure } from '../services/leadProviders/googlePlacesErrors';
 import { SerperSearchLeadProvider } from '../services/leadProviders/SerperSearchLeadProvider';
 import { LeadOceanLeadProvider } from '../services/leadProviders/LeadOceanLeadProvider';
-import { OverpassApiError, OverpassLeadProvider } from '../services/leadProviders/OverpassLeadProvider';
+import {
+  OverpassApiError,
+  OverpassLeadProvider,
+  OverpassRequestDiagnostics
+} from '../services/leadProviders/OverpassLeadProvider';
 
 let lastSuccessTimestamp: string = 'None yet';
 let lastErrorMsg: string = 'None';
@@ -13,7 +17,7 @@ let overpassConnectionVerified = false;
 let overpassLastSuccessTimestamp = 'None yet';
 let overpassLastError = 'None';
 let overpassLastResponseTime: number | string = 'N/A';
-let overpassLastDiagnostics: OverpassApiError['diagnostics'] = {};
+let overpassLastDiagnostics: OverpassRequestDiagnostics = {};
 
 const isProductionRuntime = () => Boolean(process.env.VERCEL || process.env.NODE_ENV === 'production');
 
@@ -93,6 +97,14 @@ export interface ProviderDiagnosticTestResult {
     attemptCount?: number;
     elapsedMs?: number;
     timeoutReason?: string;
+    requestStartedAt?: string;
+    requestStartedElapsedMs?: number;
+    responseHeadersElapsedMs?: number;
+    httpStatus?: number;
+    responseBodyCompletedElapsedMs?: number;
+    jsonParsingCompletedElapsedMs?: number;
+    jsonParsingDurationMs?: number;
+    failurePhase?: OverpassRequestDiagnostics['failurePhase'];
     apiKeyDetected?: boolean;
     providerInitialized?: boolean;
     httpStatusCode?: number;
@@ -264,7 +276,15 @@ export class ServerLeadProviderService {
           upstreamHttpStatus: overpassLastDiagnostics.upstreamHttpStatus,
           attemptCount: overpassLastDiagnostics.attemptCount,
           elapsedMs: overpassLastDiagnostics.elapsedMs,
-          timeoutReason: overpassLastDiagnostics.timeoutReason
+          timeoutReason: overpassLastDiagnostics.timeoutReason,
+          requestStartedAt: overpassLastDiagnostics.requestStartedAt,
+          requestStartedElapsedMs: overpassLastDiagnostics.requestStartedElapsedMs,
+          responseHeadersElapsedMs: overpassLastDiagnostics.responseHeadersElapsedMs,
+          httpStatus: overpassLastDiagnostics.httpStatus,
+          responseBodyCompletedElapsedMs: overpassLastDiagnostics.responseBodyCompletedElapsedMs,
+          jsonParsingCompletedElapsedMs: overpassLastDiagnostics.jsonParsingCompletedElapsedMs,
+          jsonParsingDurationMs: overpassLastDiagnostics.jsonParsingDurationMs,
+          failurePhase: overpassLastDiagnostics.failurePhase
         }
       };
     }
@@ -423,6 +443,7 @@ export class ServerLeadProviderService {
 
     if (type === 'overpass') {
       const healthCheckBudgetMs = getOverpassHealthCheckBudgetMs();
+      let healthDiagnostics: OverpassRequestDiagnostics = {};
       try {
         const leads = await new OverpassLeadProvider().search({
           jobTitles: [],
@@ -434,11 +455,16 @@ export class ServerLeadProviderService {
           maxLeads: 1
         }, {
           bypassCache: true,
+          healthCheck: true,
           maxResults: 1,
           maxAttempts: 1,
-          totalBudgetMs: healthCheckBudgetMs
+          totalBudgetMs: healthCheckBudgetMs,
+          onDiagnostics: diagnostics => {
+            healthDiagnostics = diagnostics;
+          }
         });
         const duration = Date.now() - startTime;
+        overpassLastDiagnostics = healthDiagnostics;
         if (leads.length === 0) {
           overpassConnectionVerified = false;
           overpassLastError = 'Overpass returned no named business data for the bounded health check.';
@@ -446,7 +472,8 @@ export class ServerLeadProviderService {
           overpassLastDiagnostics = {
             attemptCount: 1,
             elapsedMs: duration,
-            upstreamHttpStatus: 200
+            upstreamHttpStatus: healthDiagnostics.upstreamHttpStatus ?? 200,
+            ...healthDiagnostics
           };
           return {
             success: false,
@@ -468,7 +495,8 @@ export class ServerLeadProviderService {
             diagnostics: {
               attemptCount: 1,
               elapsedMs: duration,
-              upstreamHttpStatus: 200
+              upstreamHttpStatus: healthDiagnostics.upstreamHttpStatus ?? 200,
+              ...healthDiagnostics
             }
           };
         }
@@ -479,7 +507,8 @@ export class ServerLeadProviderService {
         overpassLastDiagnostics = {
           attemptCount: 1,
           elapsedMs: duration,
-          upstreamHttpStatus: 200
+          upstreamHttpStatus: healthDiagnostics.upstreamHttpStatus ?? 200,
+          ...healthDiagnostics
         };
         return {
           success: true,
@@ -492,7 +521,7 @@ export class ServerLeadProviderService {
           configured: true,
           status: 'Connected',
           authStatus: 'No API key required',
-          message: `Overpass accepted a bounded London test query; ${leads.length} named business result(s) matched the test.`,
+          message: `Overpass returned ${leads.length} named business result(s) from the bounded central London test query.`,
           sanitizedProviderError: null,
           timestamp: new Date().toISOString(),
           attemptCount: 1,
@@ -501,7 +530,8 @@ export class ServerLeadProviderService {
           diagnostics: {
             attemptCount: 1,
             elapsedMs: duration,
-            upstreamHttpStatus: 200
+            upstreamHttpStatus: healthDiagnostics.upstreamHttpStatus ?? 200,
+            ...healthDiagnostics
           }
         };
       } catch (error) {
@@ -509,7 +539,7 @@ export class ServerLeadProviderService {
         const message = error instanceof Error ? error.message : 'Overpass connection test failed.';
         const diagnostics =
           error instanceof OverpassApiError
-            ? error.diagnostics
+            ? { ...healthDiagnostics, ...error.diagnostics }
             : { attemptCount: 0, elapsedMs: duration };
         const upstreamHttpStatus =
           diagnostics.upstreamHttpStatus ?? (error instanceof OverpassApiError ? error.httpStatus : undefined);
@@ -545,7 +575,15 @@ export class ServerLeadProviderService {
             attemptCount: diagnostics.attemptCount,
             elapsedMs: diagnostics.elapsedMs ?? duration,
             upstreamHttpStatus,
-            timeoutReason: diagnostics.timeoutReason
+            timeoutReason: diagnostics.timeoutReason,
+            requestStartedAt: diagnostics.requestStartedAt,
+            requestStartedElapsedMs: diagnostics.requestStartedElapsedMs,
+            responseHeadersElapsedMs: diagnostics.responseHeadersElapsedMs,
+            httpStatus: diagnostics.httpStatus,
+            responseBodyCompletedElapsedMs: diagnostics.responseBodyCompletedElapsedMs,
+            jsonParsingCompletedElapsedMs: diagnostics.jsonParsingCompletedElapsedMs,
+            jsonParsingDurationMs: diagnostics.jsonParsingDurationMs,
+            failurePhase: diagnostics.failurePhase
           }
         };
       }

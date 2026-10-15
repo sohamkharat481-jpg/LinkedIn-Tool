@@ -180,6 +180,20 @@ export interface ProviderStatusInfo {
     attemptCount?: number;
     elapsedMs?: number;
     timeoutReason?: string;
+    requestStartedAt?: string;
+    requestStartedElapsedMs?: number;
+    responseHeadersElapsedMs?: number;
+    httpStatus?: number;
+    responseBodyCompletedElapsedMs?: number;
+    jsonParsingCompletedElapsedMs?: number;
+    jsonParsingDurationMs?: number;
+    failurePhase?:
+      | 'request'
+      | 'http_status'
+      | 'response_body'
+      | 'json_parse'
+      | 'result_mapping'
+      | 'rate_limit_wait';
     providerErrorMessage?: string;
     googleErrorMessage?: string;
     credentialSource?: string;

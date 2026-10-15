@@ -16,9 +16,32 @@ const DEFAULT_TOTAL_BUDGET_MS = 60000;
 
 export interface OverpassSearchOptions {
   bypassCache?: boolean;
+  healthCheck?: boolean;
   maxResults?: number;
   maxAttempts?: number;
   totalBudgetMs?: number;
+  onDiagnostics?: (diagnostics: OverpassRequestDiagnostics) => void;
+}
+
+export interface OverpassRequestDiagnostics {
+  attemptCount?: number;
+  elapsedMs?: number;
+  timeoutReason?: string;
+  upstreamHttpStatus?: number;
+  requestStartedAt?: string;
+  requestStartedElapsedMs?: number;
+  responseHeadersElapsedMs?: number;
+  httpStatus?: number;
+  responseBodyCompletedElapsedMs?: number;
+  jsonParsingCompletedElapsedMs?: number;
+  jsonParsingDurationMs?: number;
+  failurePhase?:
+    | 'request'
+    | 'http_status'
+    | 'response_body'
+    | 'json_parse'
+    | 'result_mapping'
+    | 'rate_limit_wait';
 }
 
 type OsmElement = {
@@ -40,12 +63,7 @@ export class OverpassApiError extends Error {
   constructor(
     message: string,
     readonly httpStatus?: number,
-    readonly diagnostics: {
-      attemptCount?: number;
-      elapsedMs?: number;
-      timeoutReason?: string;
-      upstreamHttpStatus?: number;
-    } = {}
+    readonly diagnostics: OverpassRequestDiagnostics = {}
   ) {
     super(message);
     this.name = 'OverpassApiError';
@@ -104,6 +122,23 @@ export function buildOverpassQuery(filters: LeadFilter, limit = MAX_RESULTS): st
     `nwr["name"]["amenity"~"${BUSINESS_AMENITIES}"](area.searchArea);`,
     `nwr["name"]["tourism"~"${BUSINESS_TOURISM}"](area.searchArea);`,
     `nwr["name"]["healthcare"](area.searchArea);`,
+    ');',
+    `out tags center ${safeLimit};`
+  ].join('\n');
+}
+
+export function buildOverpassHealthCheckQuery(limit = 1): string {
+  const safeLimit = Math.min(Math.max(Math.floor(limit) || 1, 1), MAX_RESULTS);
+  const around = '(around:100,51.5152,-0.1419)';
+  return [
+    '[out:json][timeout:6];',
+    '(',
+    `nwr${around}["name"]["shop"];`,
+    `nwr${around}["name"]["office"];`,
+    `nwr${around}["name"]["craft"];`,
+    `nwr${around}["name"]["amenity"~"${BUSINESS_AMENITIES}"];`,
+    `nwr${around}["name"]["tourism"~"${BUSINESS_TOURISM}"];`,
+    `nwr${around}["name"]["healthcare"];`,
     ');',
     `out tags center ${safeLimit};`
   ].join('\n');
@@ -245,7 +280,9 @@ export class OverpassLeadProvider implements LeadProvider {
   }
 
   async search(filters: LeadFilter, options: OverpassSearchOptions = {}): Promise<RawLead[]> {
-    const query = buildOverpassQuery(filters, options.maxResults ?? MAX_RESULTS);
+    const query = options.healthCheck
+      ? buildOverpassHealthCheckQuery(options.maxResults ?? 1)
+      : buildOverpassQuery(filters, options.maxResults ?? MAX_RESULTS);
     const cached = OverpassLeadProvider.cache.get(query);
     if (!options.bypassCache && cached && cached.expiresAt > Date.now()) {
       return cached.leads.slice(0, normalizeResultLimit(filters.maxLeads));
@@ -257,10 +294,19 @@ export class OverpassLeadProvider implements LeadProvider {
     const maxAttempts = normalizeAttempts(options.maxAttempts);
     let attemptCount = 0;
     let lastUpstreamStatus: number | undefined;
+    let phaseDiagnostics: OverpassRequestDiagnostics = {};
 
     try {
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        await this.awaitWithinBudget(this.waitForSlot(), deadline);
+        try {
+          await this.awaitWithinBudget(this.waitForSlot(), deadline);
+        } catch (error) {
+          phaseDiagnostics = {
+            ...phaseDiagnostics,
+            failurePhase: 'rate_limit_wait'
+          };
+          throw error;
+        }
 
         const remainingMs = deadline - Date.now();
         if (remainingMs <= 0) throw this.totalBudgetError(totalBudgetMs);
@@ -272,6 +318,12 @@ export class OverpassLeadProvider implements LeadProvider {
             : `Overpass request timed out (${REQUEST_TIMEOUT_MS / 1000}s per-attempt limit).`;
         const controller = new AbortController();
         attemptCount = attempt;
+        const requestStartedAt = Date.now();
+        phaseDiagnostics = {
+          requestStartedAt: new Date(requestStartedAt).toISOString(),
+          requestStartedElapsedMs: requestStartedAt - startedAt,
+          failurePhase: 'request'
+        };
         let response: Response | { response: Response; data: OverpassResponse };
         try {
           response = await this.withRequestTimeout(
@@ -285,17 +337,38 @@ export class OverpassLeadProvider implements LeadProvider {
                 body: `data=${encodeURIComponent(query)}`,
                 signal: controller.signal
               });
+              lastUpstreamStatus = result.status;
+              phaseDiagnostics = {
+                ...phaseDiagnostics,
+                responseHeadersElapsedMs: Date.now() - requestStartedAt,
+                httpStatus: result.status,
+                failurePhase: result.ok ? 'response_body' : 'http_status'
+              };
               if (!result.ok) return result;
 
               const responseText = await result.text();
-              if (Date.now() >= deadline) throw this.totalBudgetError(totalBudgetMs);
+              const responseBodyCompletedAt = Date.now();
+              phaseDiagnostics = {
+                ...phaseDiagnostics,
+                responseBodyCompletedElapsedMs: responseBodyCompletedAt - requestStartedAt,
+                failurePhase: 'response_body'
+              };
+              if (responseBodyCompletedAt >= deadline) throw this.totalBudgetError(totalBudgetMs);
+              phaseDiagnostics = { ...phaseDiagnostics, failurePhase: 'json_parse' };
               let parsed: unknown;
+              const parsingStartedAt = Date.now();
               try {
                 parsed = JSON.parse(responseText);
               } catch {
                 throw new OverpassApiError(
                   'OpenStreetMap Overpass returned malformed JSON or an invalid response.'
                 );
+              } finally {
+                phaseDiagnostics = {
+                  ...phaseDiagnostics,
+                  jsonParsingCompletedElapsedMs: Date.now() - requestStartedAt,
+                  jsonParsingDurationMs: Date.now() - parsingStartedAt
+                };
               }
               if (
                 parsed === null ||
@@ -307,11 +380,13 @@ export class OverpassLeadProvider implements LeadProvider {
                 );
               }
               if (Date.now() >= deadline) throw this.totalBudgetError(totalBudgetMs);
+              phaseDiagnostics = { ...phaseDiagnostics, failurePhase: 'result_mapping' };
               return { response: result, data: parsed as OverpassResponse };
             },
             requestTimeoutMs,
             controller,
-            timeoutReason
+            timeoutReason,
+            () => phaseDiagnostics
           );
         } catch (error) {
           const timedOut = error instanceof Error && error.name === 'AbortError';
@@ -329,7 +404,12 @@ export class OverpassLeadProvider implements LeadProvider {
           const canRetryNetwork =
             requestError.message === 'Network error connecting to the public OpenStreetMap Overpass API.' &&
             attempt < maxAttempts;
-          if (!canRetryTimeout && !canRetryNetwork) throw requestError;
+          if (!canRetryTimeout && !canRetryNetwork) {
+            if (requestError.diagnostics.failurePhase) {
+              phaseDiagnostics = requestError.diagnostics;
+            }
+            throw requestError;
+          }
           await this.awaitWithinBudget(
             this.delay(this.retryDelay(attempt)),
             deadline,
@@ -346,7 +426,15 @@ export class OverpassLeadProvider implements LeadProvider {
               .filter(lead => matchesBusinessFilters(lead, filters))
           );
           if (Date.now() >= deadline) throw this.totalBudgetError(totalBudgetMs);
+          phaseDiagnostics = { ...phaseDiagnostics, failurePhase: undefined };
 
+          const diagnostics = {
+            ...phaseDiagnostics,
+            attemptCount,
+            elapsedMs: Date.now() - startedAt,
+            upstreamHttpStatus: lastUpstreamStatus
+          };
+          options.onDiagnostics?.(diagnostics);
           OverpassLeadProvider.cache.set(query, { expiresAt: Date.now() + CACHE_TTL_MS, leads });
           if (OverpassLeadProvider.cache.size > 100) {
             const oldestKey = OverpassLeadProvider.cache.keys().next().value;
@@ -356,6 +444,10 @@ export class OverpassLeadProvider implements LeadProvider {
         }
 
         lastUpstreamStatus = response.status;
+        phaseDiagnostics = {
+          ...phaseDiagnostics,
+          failurePhase: 'http_status'
+        };
         const canRetry =
           RETRYABLE_HTTP_STATUSES.has(response.status) && attempt < maxAttempts;
         if (!canRetry) throw this.httpError(response.status);
@@ -376,12 +468,15 @@ export class OverpassLeadProvider implements LeadProvider {
         error instanceof OverpassApiError
           ? error
           : new OverpassApiError('Network error connecting to the public OpenStreetMap Overpass API.');
-      throw new OverpassApiError(failure.message, failure.httpStatus, {
+      const diagnostics = {
+        ...phaseDiagnostics,
+        ...failure.diagnostics,
         attemptCount,
         elapsedMs,
-        timeoutReason: failure.diagnostics.timeoutReason,
-        upstreamHttpStatus: lastUpstreamStatus
-      });
+        upstreamHttpStatus: lastUpstreamStatus ?? failure.diagnostics.upstreamHttpStatus ?? failure.httpStatus
+      };
+      options.onDiagnostics?.(diagnostics);
+      throw new OverpassApiError(failure.message, failure.httpStatus, diagnostics);
     }
   }
 
@@ -389,13 +484,19 @@ export class OverpassLeadProvider implements LeadProvider {
     operation: () => Promise<T>,
     timeoutMs: number,
     controller: AbortController,
-    timeoutReason: string
+    timeoutReason: string,
+    getDiagnostics: () => OverpassRequestDiagnostics
   ): Promise<T> {
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
       timeoutId = setTimeout(() => {
         controller.abort();
-        reject(new OverpassApiError(timeoutReason, undefined, { timeoutReason }));
+        reject(
+          new OverpassApiError(timeoutReason, undefined, {
+            ...getDiagnostics(),
+            timeoutReason
+          })
+        );
       }, timeoutMs);
     });
     try {

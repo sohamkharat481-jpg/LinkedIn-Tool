@@ -2,10 +2,13 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { filterAndDeduplicateLeads, isValidLeadRecord } from '../src/services/deduplication';
 import {
+  buildOverpassHealthCheckQuery,
   buildOverpassQuery,
   mapOsmElementToLead,
   OverpassApiError,
-  OverpassLeadProvider
+  OverpassLeadProvider,
+  OverpassRequestDiagnostics,
+  OverpassSearchOptions
 } from '../src/services/leadProviders/OverpassLeadProvider';
 import { ServerLeadProviderService } from '../src/server/leadProviderService';
 import { LeadFilter } from '../src/types';
@@ -59,6 +62,29 @@ test('builds bounded city/country queries with capped output', () => {
   assert.match(query, /\[timeout:12\]/);
   assert.match(query, /out tags center 500;/);
   assert.ok(!query.includes('London"]->.x; out;'));
+});
+
+test('builds a tiny read-only health query around a bounded central London point', () => {
+  const query = buildOverpassHealthCheckQuery();
+  assert.match(query, /^\[out:json\]\[timeout:6\];/);
+  assert.match(query, /nwr\(around:100,51\.5152,-0\.1419\)\["name"\]\["shop"\]/);
+  assert.match(query, /out tags center 1;/);
+  assert.ok(!query.includes('area['));
+  assert.ok(!query.includes('map_to_area'));
+  assert.ok(!query.includes('out body'));
+});
+
+test('uses the tiny health query only when health-check mode is requested', async () => {
+  let requestBody = '';
+  const provider = createTestProvider(async (_input, init) => {
+    if (typeof init?.body === 'string') requestBody = init.body;
+    return new Response(JSON.stringify({ elements: [cafeElement] }), { status: 200 });
+  });
+
+  await provider.search(filters, { healthCheck: true, maxResults: 1 });
+  const query = new URLSearchParams(requestBody).get('data') || '';
+  assert.match(query, /around:100,51\.5152,-0\.1419/);
+  assert.ok(!query.includes('area['));
 });
 
 test('maps only present business fields and retains OSM identity', () => {
@@ -132,17 +158,27 @@ test('surfaces Overpass HTTP 429 without pretending the search succeeded', async
 test('retries HTTP 502 with bounded exponential backoff and accepts a successful response', async () => {
   let calls = 0;
   const delays: number[] = [];
+  let completedDiagnostics: OverpassRequestDiagnostics | undefined;
   const provider = createTestProvider(async () => {
     calls++;
     if (calls === 1) return new Response('upstream error', { status: 502 });
     return new Response(JSON.stringify({ elements: [cafeElement] }), { status: 200 });
   }, delays);
 
-  const leads = await provider.search({ ...filters, city: '502 retry test' });
+  const leads = await provider.search({ ...filters, city: '502 retry test' }, {
+    onDiagnostics: diagnostics => {
+      completedDiagnostics = diagnostics;
+    }
+  });
   assert.equal(calls, 2);
   assert.deepEqual(delays, [500]);
   assert.equal(leads.length, 1);
   assert.equal(leads[0].companyName, 'Example Cafe');
+  assert.equal(completedDiagnostics?.httpStatus, 200);
+  assert.equal(typeof completedDiagnostics?.requestStartedAt, 'string');
+  assert.equal(typeof completedDiagnostics?.responseHeadersElapsedMs, 'number');
+  assert.equal(typeof completedDiagnostics?.responseBodyCompletedElapsedMs, 'number');
+  assert.equal(typeof completedDiagnostics?.jsonParsingCompletedElapsedMs, 'number');
 });
 
 test('preserves upstream HTTP 500, 502, and 504 with attempt and elapsed diagnostics', async () => {
@@ -154,6 +190,10 @@ test('preserves upstream HTTP 500, 502, and 504 with attempt and elapsed diagnos
         assert.ok(error instanceof OverpassApiError);
         assert.equal(error.httpStatus, status);
         assert.equal(error.diagnostics.upstreamHttpStatus, status);
+        assert.equal(error.diagnostics.httpStatus, status);
+        assert.equal(error.diagnostics.failurePhase, 'http_status');
+        assert.equal(typeof error.diagnostics.responseHeadersElapsedMs, 'number');
+        assert.equal(error.diagnostics.responseBodyCompletedElapsedMs, undefined);
         assert.equal(error.diagnostics.attemptCount, 1);
         assert.ok(typeof error.diagnostics.elapsedMs === 'number');
         return true;
@@ -235,6 +275,9 @@ test('aborts a stalled request when its total time budget expires', async () => 
       assert.match(error.message, /Total request budget exceeded \(30ms\)/);
       assert.equal(error.diagnostics.attemptCount, 1);
       assert.equal(error.diagnostics.timeoutReason, 'Total request budget exceeded (30ms).');
+      assert.equal(error.diagnostics.failurePhase, 'request');
+      assert.equal(typeof error.diagnostics.requestStartedAt, 'string');
+      assert.equal(error.diagnostics.responseHeadersElapsedMs, undefined);
       assert.ok((error.diagnostics.elapsedMs ?? 0) < 500);
       return true;
     }
@@ -303,11 +346,54 @@ test('keeps a response-body read inside the request timeout and retries it safel
     (error: unknown) => {
       assert.ok(error instanceof OverpassApiError);
       assert.match(error.message, /Total request budget exceeded \(25ms\)/);
+      assert.equal(error.diagnostics.failurePhase, 'response_body');
+      assert.equal(error.diagnostics.httpStatus, 200);
+      assert.equal(typeof error.diagnostics.responseHeadersElapsedMs, 'number');
+      assert.equal(error.diagnostics.responseBodyCompletedElapsedMs, undefined);
       return true;
     }
   );
   assert.equal(calls, 1);
   assert.equal(lastSignal?.aborted, true);
+});
+
+test('records body-read failures separately from response-header failures', async () => {
+  const provider = createTestProvider(async () => {
+    const response = new Response('');
+    response.text = async () => {
+      throw new Error('body read failed');
+    };
+    return response;
+  });
+
+  await assert.rejects(
+    provider.search({ ...filters, city: 'body phase failure test' }, { maxAttempts: 1 }),
+    (error: unknown) => {
+      assert.ok(error instanceof OverpassApiError);
+      assert.equal(error.diagnostics.failurePhase, 'response_body');
+      assert.equal(error.diagnostics.httpStatus, 200);
+      assert.equal(typeof error.diagnostics.responseHeadersElapsedMs, 'number');
+      assert.equal(error.diagnostics.responseBodyCompletedElapsedMs, undefined);
+      return true;
+    }
+  );
+});
+
+test('records JSON parsing failures after the response body completes', async () => {
+  const provider = createTestProvider(async () => new Response('{not json', { status: 200 }));
+
+  await assert.rejects(
+    provider.search({ ...filters, city: 'json parse phase failure test' }, { maxAttempts: 1 }),
+    (error: unknown) => {
+      assert.ok(error instanceof OverpassApiError);
+      assert.equal(error.diagnostics.failurePhase, 'json_parse');
+      assert.equal(error.diagnostics.httpStatus, 200);
+      assert.equal(typeof error.diagnostics.responseHeadersElapsedMs, 'number');
+      assert.equal(typeof error.diagnostics.responseBodyCompletedElapsedMs, 'number');
+      assert.equal(typeof error.diagnostics.jsonParsingCompletedElapsedMs, 'number');
+      return true;
+    }
+  );
 });
 
 test('returns a genuine empty result without retries', async () => {
@@ -346,12 +432,21 @@ test('bypasses cached data when performing an explicitly fresh check', async () 
 test('health checks use a configurable single-request budget and do not pass on empty data', async () => {
   const searchDescriptor = Object.getOwnPropertyDescriptor(OverpassLeadProvider.prototype, 'search');
   const originalBudget = process.env.OVERPASS_HEALTH_CHECK_BUDGET_MS;
-  let searchOptions: unknown;
+  let searchOptions: OverpassSearchOptions | undefined;
 
   Object.defineProperty(OverpassLeadProvider.prototype, 'search', {
     configurable: true,
-    value: async (_filters: LeadFilter, options: unknown) => {
+    value: async (_filters: LeadFilter, options: OverpassSearchOptions) => {
       searchOptions = options;
+      options.onDiagnostics?.({
+        attemptCount: 1,
+        elapsedMs: 30,
+        requestStartedAt: '2026-10-16T00:00:00.000Z',
+        responseHeadersElapsedMs: 15,
+        httpStatus: 200,
+        responseBodyCompletedElapsedMs: 25,
+        jsonParsingCompletedElapsedMs: 1
+      });
       return [];
     }
   });
@@ -359,17 +454,19 @@ test('health checks use a configurable single-request budget and do not pass on 
 
   try {
     const result = await ServerLeadProviderService.testConnection(undefined, 'overpass');
-    assert.deepEqual(searchOptions, {
-      bypassCache: true,
-      maxResults: 1,
-      maxAttempts: 1,
-      totalBudgetMs: 12000
-    });
+    assert.equal(searchOptions?.bypassCache, true);
+    assert.equal(searchOptions?.healthCheck, true);
+    assert.equal(searchOptions?.maxResults, 1);
+    assert.equal(searchOptions?.maxAttempts, 1);
+    assert.equal(searchOptions?.totalBudgetMs, 12000);
     assert.equal(result.success, false);
     assert.equal(result.httpStatus, 503);
     assert.equal(result.upstreamHttpStatus, 200);
     assert.equal(result.placesReturned, 0);
     assert.match(result.message, /no named business data/);
+    assert.equal(result.diagnostics?.httpStatus, 200);
+    assert.equal(typeof result.diagnostics?.responseBodyCompletedElapsedMs, 'number');
+    assert.equal(typeof result.diagnostics?.jsonParsingCompletedElapsedMs, 'number');
     assert.equal(ServerLeadProviderService.getStatus(undefined, 'overpass').status, 'Error');
   } finally {
     if (searchDescriptor) {
@@ -394,7 +491,12 @@ test('health diagnostics preserve sanitized upstream status, attempts, elapsed t
           attemptCount: 2,
           elapsedMs: 734,
           upstreamHttpStatus: 502,
-          timeoutReason: 'Retry budget would exceed the health-check deadline.'
+          timeoutReason: 'Retry budget would exceed the health-check deadline.',
+          requestStartedAt: '2026-10-16T00:00:00.000Z',
+          requestStartedElapsedMs: 0,
+          responseHeadersElapsedMs: 733,
+          httpStatus: 502,
+          failurePhase: 'http_status'
         }
       );
     }
@@ -408,12 +510,13 @@ test('health diagnostics preserve sanitized upstream status, attempts, elapsed t
     assert.equal(result.attemptCount, 2);
     assert.equal(result.elapsedMs, 734);
     assert.equal(result.timeoutReason, 'Retry budget would exceed the health-check deadline.');
-    assert.deepEqual(result.diagnostics, {
-      attemptCount: 2,
-      elapsedMs: 734,
-      upstreamHttpStatus: 502,
-      timeoutReason: 'Retry budget would exceed the health-check deadline.'
-    });
+    assert.equal(result.diagnostics?.attemptCount, 2);
+    assert.equal(result.diagnostics?.elapsedMs, 734);
+    assert.equal(result.diagnostics?.upstreamHttpStatus, 502);
+    assert.equal(result.diagnostics?.timeoutReason, 'Retry budget would exceed the health-check deadline.');
+    assert.equal(result.diagnostics?.failurePhase, 'http_status');
+    assert.equal(result.diagnostics?.httpStatus, 502);
+    assert.equal(typeof result.diagnostics?.responseHeadersElapsedMs, 'number');
     const status = ServerLeadProviderService.getStatus(undefined, 'overpass');
     assert.equal(status.diagnostics?.upstreamHttpStatus, 502);
     assert.equal(status.diagnostics?.attemptCount, 2);

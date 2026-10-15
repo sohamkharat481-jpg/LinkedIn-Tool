@@ -58,7 +58,7 @@ OpenStreetMap Overpass is an optional, keyless business provider. Google Maps re
 
 Then open **Settings → Lead Discovery Data Provider**, select **OpenStreetMap Overpass**, and save. No API key is required. This selection applies to the current app session; after a page reload, Google Maps remains the default until Overpass is selected again. Search with both a city and country. Results contain only business tags present in OpenStreetMap; absent phone, website, address, city, and country values remain empty. Overpass availability and coverage vary, and searches may time out or be rate limited. Attribute OpenStreetMap when using or redistributing its data.
 
-The provider health check uses a single live request and an 8-second total budget. Operators may optionally set `OVERPASS_HEALTH_CHECK_BUDGET_MS` to a value from 1,000 to 15,000 milliseconds; this is a diagnostics timeout setting, not an API credential.
+The provider health check uses a single live, read-only request within 100 metres of a fixed central London point and an 8-second total budget. It reports connected only when Overpass returns a named business record. Failures include sanitized phase timings for request start, response headers and status, response-body completion, and JSON parsing. Operators may optionally set `OVERPASS_HEALTH_CHECK_BUDGET_MS` to a value from 1,000 to 15,000 milliseconds; this is a diagnostics timeout setting, not an API credential.
 
 ---
 
