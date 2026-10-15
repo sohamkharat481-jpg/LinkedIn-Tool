@@ -1,5 +1,6 @@
 import { LeadFilter, RawLead } from '../../types';
 import { LeadProvider } from './LeadProvider';
+import { diagnoseGooglePlacesFailure, GooglePlacesApiError } from './googlePlacesErrors';
 
 /**
  * Google Maps Platform Places API (New) Lead Provider Adapter
@@ -18,11 +19,11 @@ export class GoogleMapsPlacesLeadProvider implements LeadProvider {
   private endpoint = 'https://places.googleapis.com/v1/places:searchText';
 
   constructor(apiKey?: string) {
+    const isProduction = Boolean(process.env.VERCEL || process.env.NODE_ENV === 'production');
     this.apiKey =
       apiKey ||
       process.env.GOOGLE_MAPS_API_KEY ||
-      process.env.VITE_GOOGLE_MAPS_API_KEY ||
-      process.env.PLACES_API_KEY ||
+      (!isProduction ? process.env.VITE_GOOGLE_MAPS_API_KEY || process.env.PLACES_API_KEY : '') ||
       '';
   }
 
@@ -109,8 +110,7 @@ export class GoogleMapsPlacesLeadProvider implements LeadProvider {
               'Content-Type': 'application/json',
               'X-Goog-Api-Key': this.apiKey,
               'X-Goog-FieldMask':
-                'places.id,places.displayName,places.formattedAddress,places.websiteUri,places.internationalPhoneNumber,places.nationalPhoneNumber,places.googleMapsUri,places.primaryType,places.primaryTypeDisplayName,places.location,places.rating,places.userRatingCount',
-              'X-Goog-Maps-Solution-ID': 'gmp_mcp_codeassist_v1_aistudio'
+                'places.id,places.displayName,places.formattedAddress,places.websiteUri,places.internationalPhoneNumber,places.nationalPhoneNumber,places.googleMapsUri,places.primaryType,places.primaryTypeDisplayName,places.location,places.rating,places.userRatingCount'
             },
             body: JSON.stringify(requestBody),
             signal: controller.signal
@@ -119,20 +119,14 @@ export class GoogleMapsPlacesLeadProvider implements LeadProvider {
           clearTimeout(timeoutId);
 
           if (!response.ok) {
-            const errData = await response.json().catch(() => null);
-            const errCode = response.status;
-            let errMsg = errData?.error?.message || `Google Places API returned HTTP ${errCode}`;
-
-            if (errCode === 403) {
-              if (errMsg.includes('caller does not have permission') || errMsg.includes('PERMISSION_DENIED')) {
-                errMsg =
-                  'Google Maps Places API (New) permission denied (HTTP 403: PERMISSION_DENIED). "The caller does not have permission". In Google Cloud Console: 1) Verify API key restrictions under APIs & Services > Credentials (ensure "Places API (New)" is allowed or select "Don\'t restrict key"); 2) Ensure Application restrictions are set to "None" (server-side calls from Vercel are blocked if restricted to HTTP referrers); 3) Confirm the key belongs to the Google Cloud project where Places API (New) is enabled and linked to your Paid billing account.';
-              } else if (errMsg.includes('API_KEY_INVALID') || errMsg.includes('not valid')) {
-                errMsg = 'Invalid Google Maps API Key. Please verify GOOGLE_MAPS_API_KEY.';
-              }
-            }
-
-            throw new Error(errMsg);
+            const diagnostics = diagnoseGooglePlacesFailure(await response.text(), response.status, this.apiKey);
+            throw new GooglePlacesApiError(
+              response.status,
+              diagnostics,
+              response.status === 403
+                ? diagnostics.permissionDiagnosis.action
+                : diagnostics.googleError.message
+            );
           }
 
           const data = await response.json();

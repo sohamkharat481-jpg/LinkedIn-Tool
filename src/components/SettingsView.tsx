@@ -252,6 +252,35 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <span>Overall Status Message: <span className="font-bold text-white">{activeDiagnostics.message}</span></span>
           <span className="text-[10px] bg-slate-700 px-2 py-0.5 rounded text-slate-300 font-mono">Secrets Hidden</span>
         </div>
+        {activeDiagnostics.diagnostics?.googleError && (
+          <details className="p-3 bg-slate-950/70 rounded-xl border border-slate-700 text-xs text-slate-300">
+            <summary className="font-semibold cursor-pointer">Google Places structured error (secret values redacted)</summary>
+            {activeDiagnostics.diagnostics.permissionDiagnosis && (
+              <div className="mt-3 space-y-1">
+                <p>
+                  <span className="font-semibold text-white">Reason:</span>{' '}
+                  {activeDiagnostics.diagnostics.permissionDiagnosis.reason ||
+                    activeDiagnostics.diagnostics.permissionDiagnosis.category}
+                  {activeDiagnostics.diagnostics.permissionDiagnosis.consumerProject
+                    ? ` — consumer ${activeDiagnostics.diagnostics.permissionDiagnosis.consumerProject}`
+                    : ''}
+                </p>
+                <p className="text-slate-200">{activeDiagnostics.diagnostics.permissionDiagnosis.action}</p>
+              </div>
+            )}
+            <pre className="mt-3 overflow-x-auto whitespace-pre-wrap break-words text-[11px] text-slate-300">
+              {JSON.stringify(
+                {
+                  credentialSource: activeDiagnostics.diagnostics.credentialSource,
+                  request: activeDiagnostics.diagnostics.request,
+                  googleError: activeDiagnostics.diagnostics.googleError
+                },
+                null,
+                2
+              )}
+            </pre>
+          </details>
+        )}
       </div>
 
       {/* Card 1: Lead Discovery Provider Abstraction */}

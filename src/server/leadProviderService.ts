@@ -1,5 +1,6 @@
 import { LeadFilter, RawLead, ProviderStatusInfo } from '../types';
 import { GoogleMapsPlacesLeadProvider } from '../services/leadProviders/GoogleMapsPlacesLeadProvider';
+import { diagnoseGooglePlacesFailure } from '../services/leadProviders/googlePlacesErrors';
 import { SerperSearchLeadProvider } from '../services/leadProviders/SerperSearchLeadProvider';
 import { LeadOceanLeadProvider } from '../services/leadProviders/LeadOceanLeadProvider';
 
@@ -7,6 +8,47 @@ let lastSuccessTimestamp: string = 'None yet';
 let lastErrorMsg: string = 'None';
 let lastResponseTime: number | string = 'N/A';
 let connectionVerified = false;
+
+const isProductionRuntime = () => Boolean(process.env.VERCEL || process.env.NODE_ENV === 'production');
+
+const googleMapsApiKey = () =>
+  process.env.GOOGLE_MAPS_API_KEY ||
+  (!isProductionRuntime()
+    ? process.env.VITE_GOOGLE_MAPS_API_KEY || process.env.PLACES_API_KEY
+    : '');
+
+const googlePlacesTestRequest = {
+  method: 'POST',
+  url: 'https://places.googleapis.com/v1/places:searchText',
+  headers: {
+    contentType: 'application/json',
+    apiKey: 'X-Goog-Api-Key (value redacted)',
+    fieldMask: 'places.id,places.displayName,places.formattedAddress'
+  },
+  body: {
+    textQuery: 'software companies in Mumbai, India',
+    pageSize: 2
+  }
+};
+
+const googleAuthStatus = (category: string) => {
+  switch (category) {
+    case 'invalid_api_key':
+      return 'Invalid API Key';
+    case 'api_key_restriction':
+      return 'API Key Restriction Error';
+    case 'api_not_enabled':
+      return 'Places API Not Enabled';
+    case 'billing_disabled':
+      return 'Billing Disabled';
+    case 'google_cloud_project':
+      return 'Google Cloud Project Error';
+    case 'iam_or_service_permission':
+      return 'IAM/Service Permission Error';
+    default:
+      return 'Permission Denied (Reason Unclassified)';
+  }
+};
 
 export interface ProviderDiagnosticTestResult {
   success: boolean;
@@ -29,6 +71,20 @@ export interface ProviderDiagnosticTestResult {
     placesReturned?: number;
     providerErrorMessage?: string;
     googleErrorMessage?: string;
+    credentialSource?: string;
+    request?: typeof googlePlacesTestRequest;
+    googleError?: {
+      code?: number;
+      status?: string;
+      message: string;
+      details: unknown[];
+    };
+    permissionDiagnosis?: {
+      category: string;
+      reason?: string;
+      action: string;
+      consumerProject?: string;
+    };
   };
 }
 
@@ -37,20 +93,17 @@ export class ServerLeadProviderService {
    * Safe Diagnostic Status (Does NOT expose secret values)
    */
   static getDiagnostics(overrideApiKey?: string) {
+    const safeOverride = isProductionRuntime() ? '' : overrideApiKey;
     const cleanedOverride =
-      overrideApiKey &&
-      typeof overrideApiKey === 'string' &&
-      overrideApiKey.trim() !== '' &&
-      overrideApiKey !== 'undefined' &&
-      overrideApiKey !== 'null'
-        ? overrideApiKey.trim()
+      safeOverride &&
+      typeof safeOverride === 'string' &&
+      safeOverride.trim() !== '' &&
+      safeOverride !== 'undefined' &&
+      safeOverride !== 'null'
+        ? safeOverride.trim()
         : '';
 
-    const googleMapsKey =
-      cleanedOverride ||
-      process.env.GOOGLE_MAPS_API_KEY ||
-      process.env.VITE_GOOGLE_MAPS_API_KEY ||
-      process.env.PLACES_API_KEY;
+    const googleMapsKey = cleanedOverride || googleMapsApiKey();
 
     const serperKey =
       cleanedOverride ||
@@ -87,11 +140,7 @@ export class ServerLeadProviderService {
       LEADOCEAN_API_KEY: hasLeadOcean ? 'CONFIGURED' : 'MISSING',
       ActiveProvider: hasGoogleMaps
         ? 'Google Maps Platform Places API (New)'
-        : hasSerper
-        ? 'Serper.dev Google Search API'
-        : hasLeadOcean
-        ? 'LeadOcean B2B People Search API'
-        : 'None (Unconfigured)',
+        : 'None (Google Maps Places API not configured)',
       Runtime: runtimeName,
       Deployment: deploymentId,
       connectionVerified,
@@ -112,8 +161,7 @@ export class ServerLeadProviderService {
     overrideKey?: string,
     providerType?: string
   ): { key: string; type: 'google_places' | 'serper' | 'leadocean' } {
-    const isProduction = Boolean(process.env.VERCEL || process.env.NODE_ENV === 'production');
-    const cleanedOverride = isProduction ? '' : (
+    const cleanedOverride = isProductionRuntime() ? '' : (
       overrideKey &&
       typeof overrideKey === 'string' &&
       overrideKey.trim() !== '' &&
@@ -146,42 +194,10 @@ export class ServerLeadProviderService {
     }
 
     // Default primary provider: Google Maps Platform Places API (New)
-    const googleMapsKey = (
-      cleanedOverride ||
-      process.env.GOOGLE_MAPS_API_KEY ||
-      process.env.VITE_GOOGLE_MAPS_API_KEY ||
-      process.env.PLACES_API_KEY ||
-      ''
-    ).trim();
+    const googleMapsKey = (cleanedOverride || googleMapsApiKey() || '').trim();
 
     if (googleMapsKey) {
       return { key: googleMapsKey, type: 'google_places' };
-    }
-
-    // Fallback to Serper.dev if Google Maps not configured
-    const serperKey = (
-      process.env.SERPER_API_KEY ||
-      process.env.SERPER_SEARCH_API_KEY ||
-      process.env.VITE_SERPER_API_KEY ||
-      process.env.VITE_SERPER_SEARCH_API_KEY ||
-      process.env.LEAD_PROVIDER_API_KEY ||
-      ''
-    ).trim();
-
-    if (serperKey) {
-      return { key: serperKey, type: 'serper' };
-    }
-
-    // Fallback to LeadOcean if available
-    const leadOceanKey = (
-      process.env.LEADOCEAN_API_KEY ||
-      process.env.LEAD_PROVIDER_API_KEY ||
-      process.env.VITE_LEADOCEAN_API_KEY ||
-      ''
-    ).trim();
-
-    if (leadOceanKey) {
-      return { key: leadOceanKey, type: 'leadocean' };
     }
 
     return { key: '', type: 'google_places' };
@@ -393,13 +409,9 @@ export class ServerLeadProviderService {
           headers: {
             'Content-Type': 'application/json',
             'X-Goog-Api-Key': key,
-            'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress',
-            'X-Goog-Maps-Solution-ID': 'gmp_mcp_codeassist_v1_aistudio'
+            'X-Goog-FieldMask': googlePlacesTestRequest.headers.fieldMask
           },
-          body: JSON.stringify({
-            textQuery: 'software companies in Mumbai, India',
-            pageSize: 2
-          }),
+          body: JSON.stringify(googlePlacesTestRequest.body),
           signal: controller.signal
         });
 
@@ -437,38 +449,32 @@ export class ServerLeadProviderService {
               apiKeyDetected: true,
               providerInitialized: true,
               httpStatusCode: 200,
-              placesReturned: places.length
+              placesReturned: places.length,
+              credentialSource: 'GOOGLE_MAPS_API_KEY',
+              request: googlePlacesTestRequest
             }
           };
         }
 
         // Sanitized error handling for all HTTP statuses
         connectionVerified = false;
-        const errJson = await response.json().catch(() => null);
-        const rawStatus = errJson?.error?.status || '';
-        const rawMessage = errJson?.error?.message || '';
+        const errorBody = await response.text();
+        const googleFailure = diagnoseGooglePlacesFailure(errorBody, httpStatus, key);
+        const rawStatus = googleFailure.googleError.status || '';
+        const rawMessage = googleFailure.googleError.message;
 
         let sanitizedError = `Google Places API returned HTTP ${httpStatus}`;
 
         if (httpStatus === 400) {
-          sanitizedError = `Malformed request to Google Places API (HTTP 400). Details: ${rawMessage || 'Bad Request'}`;
+          sanitizedError = `Malformed request to Google Places API (HTTP 400). ${rawMessage}`;
         } else if (httpStatus === 401) {
-          sanitizedError = 'Unauthorized Google Maps API Key (HTTP 401). Please check that the key exists and is valid.';
+          sanitizedError = `Unauthorized Google Maps API Key (HTTP 401). ${rawMessage}`;
         } else if (httpStatus === 403) {
-          if (rawMessage.includes('caller does not have permission') || rawStatus === 'PERMISSION_DENIED') {
-            sanitizedError =
-              'Google Maps Places API (New) permission denied (HTTP 403: PERMISSION_DENIED). "The caller does not have permission". Common causes: 1) API Key Restrictions: Under Google Cloud Console > APIs & Services > Credentials, ensure the key allows "Places API (New)" or select "Don\'t restrict key"; 2) Application Restrictions: Ensure application restrictions are set to "None" (server-side calls from Vercel are blocked if restricted to HTTP referrers); 3) Project Link: Confirm the API key was created in the exact same Google Cloud project that has "Places API (New)" enabled and is linked to the Paid billing account.';
-          } else if (rawMessage.includes('API_KEY_INVALID') || rawStatus === 'API_KEY_INVALID') {
-            sanitizedError =
-              'Invalid Google Maps API Key (HTTP 403: API_KEY_INVALID). Please verify GOOGLE_MAPS_API_KEY in environment variables.';
-          } else {
-            sanitizedError = `Google Maps Places API forbidden (HTTP 403: ${rawStatus || 'FORBIDDEN'}). ${rawMessage ? 'Reason: ' + rawMessage : 'Check API restrictions and billing.'}`;
-          }
+          sanitizedError = googleFailure.permissionDiagnosis.action;
         } else if (httpStatus === 429) {
-          sanitizedError =
-            'Google Maps Places API rate limit or quota exceeded (HTTP 429). Please check quota settings in Google Cloud Console.';
+          sanitizedError = `Google Maps Places API rate limit or quota exceeded (HTTP 429). ${rawMessage}`;
         } else if (httpStatus >= 500) {
-          sanitizedError = `Google Maps upstream server error (HTTP ${httpStatus}). Please retry shortly.`;
+          sanitizedError = `Google Maps upstream server error (HTTP ${httpStatus}). ${rawMessage}`;
         }
 
         lastErrorMsg = sanitizedError;
@@ -483,7 +489,7 @@ export class ServerLeadProviderService {
           responseTimeMs: duration,
           configured: true,
           status: 'Error',
-          authStatus: 'Authentication/Permission Error',
+          authStatus: googleAuthStatus(googleFailure.permissionDiagnosis.category),
           message: sanitizedError,
           sanitizedProviderError: sanitizedError,
           timestamp: new Date().toISOString(),
@@ -492,7 +498,11 @@ export class ServerLeadProviderService {
             providerInitialized: true,
             httpStatusCode: httpStatus,
             providerErrorMessage: sanitizedError,
-            googleErrorMessage: rawStatus || `HTTP_${httpStatus}`
+            googleErrorMessage: rawStatus || `HTTP_${httpStatus}`,
+            credentialSource: 'GOOGLE_MAPS_API_KEY',
+            request: googlePlacesTestRequest,
+            googleError: googleFailure.googleError,
+            permissionDiagnosis: googleFailure.permissionDiagnosis
           }
         };
       } catch (err: any) {
@@ -522,7 +532,9 @@ export class ServerLeadProviderService {
             apiKeyDetected: true,
             providerInitialized: true,
             httpStatusCode: isTimeout ? 504 : 502,
-            providerErrorMessage: sanitizedError
+            providerErrorMessage: sanitizedError,
+            credentialSource: 'GOOGLE_MAPS_API_KEY',
+            request: googlePlacesTestRequest
           }
         };
       }

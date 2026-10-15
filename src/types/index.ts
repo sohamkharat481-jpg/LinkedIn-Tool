@@ -155,5 +155,31 @@ export interface ProviderStatusInfo {
     httpStatusCode?: number;
     providerErrorMessage?: string;
     googleErrorMessage?: string;
+    credentialSource?: string;
+    request?: {
+      method: string;
+      url: string;
+      headers: {
+        contentType: string;
+        apiKey: string;
+        fieldMask: string;
+      };
+      body: {
+        textQuery: string;
+        pageSize: number;
+      };
+    };
+    googleError?: {
+      code?: number;
+      status?: string;
+      message: string;
+      details: unknown[];
+    };
+    permissionDiagnosis?: {
+      category: string;
+      reason?: string;
+      action: string;
+      consumerProject?: string;
+    };
   };
 }

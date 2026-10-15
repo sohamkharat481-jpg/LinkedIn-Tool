@@ -3,6 +3,7 @@ import { LeadFilter, RawLead } from '../types';
 import { filterAndDeduplicateLeads } from '../services/deduplication';
 import { ServerLeadProviderService } from './leadProviderService';
 import { testSupabaseHealth } from '../services/supabase';
+import { GooglePlacesApiError } from '../services/leadProviders/googlePlacesErrors';
 
 export const apiRouter = express.Router();
 
@@ -229,6 +230,17 @@ const executeLeadSearch = async (filters: LeadFilter, providerType?: string, api
     };
   } catch (error: any) {
     console.error('API lead search error:', error);
+    if (error instanceof GooglePlacesApiError) {
+      return {
+        status: 502,
+        body: {
+          error: error.message,
+          code: 'GOOGLE_PLACES_API_ERROR',
+          providerHttpStatus: error.httpStatus,
+          ...error.diagnostics
+        }
+      };
+    }
     return {
       status: 502,
       body: {
