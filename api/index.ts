@@ -1,5 +1,5 @@
 import express from 'express';
-import apiApp from '../src/server/lambda';
+import apiApp from '../server-build/lambda.js';
 
 const app = express();
 const originalApiPathParameter = '__vercel_api_path';

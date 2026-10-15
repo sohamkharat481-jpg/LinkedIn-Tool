@@ -16,7 +16,7 @@ This guide details how to deploy the **LinkedIn Lead Finder** full-stack applica
 ## 2. Project Structure for Vercel
 
 - **Frontend**: React + TypeScript + Vite built into `/dist`.
-- **Backend**: `api/index.ts` is the single Vercel serverless function entry point and invokes the Express app from `src/server/lambda.ts`.
+- **Backend**: `api/index.ts` is the single Vercel serverless function entry point. The production build bundles `src/server/lambda.ts` and its local TypeScript imports into `server-build/lambda.js`; Vercel traces that generated module into the function.
 - **Routing**: `vercel.json` rewrites `/api` and `/api/*` to that function while preserving the original API path for Express. The function restores the path before Express routing; the SPA fallback excludes API paths and sends other client-side routes to the built `index.html`.
 
 ---
@@ -24,7 +24,7 @@ This guide details how to deploy the **LinkedIn Lead Finder** full-stack applica
 ## 3. Step-by-Step Deployment Instructions
 
 1. **Push your code to GitHub**:
-   Ensure your latest repository commit includes `vercel.json`, `api/index.ts`, and `src/server/lambda.ts`. Vercel builds the function from this tracked entry point; Vite builds the frontend into `dist/`.
+   Ensure your latest repository commit includes `vercel.json`, `api/index.ts`, `src/server/lambda.ts`, and `package-lock.json`. `npm ci` installs the locked dependencies; the build creates the API bundle and Vite builds the frontend into `dist/`.
 
 2. **Import Project into Vercel**:
    - Go to the [Vercel Dashboard](https://vercel.com/dashboard).
@@ -35,7 +35,7 @@ This guide details how to deploy the **LinkedIn Lead Finder** full-stack applica
    - **Framework Preset**: Vite
    - **Build Command**: `npm run build`
    - **Output Directory**: `dist`
-   - **Install Command**: `npm install`
+   - **Install Command**: `npm ci --include=dev` (also set in `vercel.json` so Vite, TypeScript, and esbuild are available during build; `package-lock.json` is authoritative)
 
 4. **Configure Environment Variables**:
    In the Vercel project settings under **Environment Variables** (Select Target: **Production**):
