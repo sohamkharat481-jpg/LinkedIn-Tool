@@ -52,7 +52,15 @@ This guide details how to deploy the **LinkedIn Lead Finder** full-stack applica
 
 ---
 
-## 4. Verification
+## 4. Enable OpenStreetMap Overpass
+
+OpenStreetMap Overpass is an optional, keyless business provider. Google Maps remains the default provider. To use Overpass with an existing Supabase database, first apply [`supabase_migrations/20260607_add_osm_business_leads.sql`](./supabase_migrations/20260607_add_osm_business_leads.sql) in the Supabase SQL Editor. This only adds nullable business and OSM identity columns and an index; do not apply it to production without reviewing and approving the database change.
+
+Then open **Settings → Lead Discovery Data Provider**, select **OpenStreetMap Overpass**, and save. No API key is required. This selection applies to the current app session; after a page reload, Google Maps remains the default until Overpass is selected again. Search with both a city and country. Results contain only business tags present in OpenStreetMap; absent phone, website, address, city, and country values remain empty. Overpass availability and coverage vary, and searches may time out or be rate limited. Attribute OpenStreetMap when using or redistributing its data.
+
+---
+
+## 5. Verification
 
 Once deployed, verify your production deployment at your assigned Vercel domain (`https://your-project.vercel.app`):
 - `GET /api/health` -> Returns service status (`ok`).

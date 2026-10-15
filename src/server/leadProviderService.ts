@@ -3,11 +3,16 @@ import { GoogleMapsPlacesLeadProvider } from '../services/leadProviders/GoogleMa
 import { diagnoseGooglePlacesFailure } from '../services/leadProviders/googlePlacesErrors';
 import { SerperSearchLeadProvider } from '../services/leadProviders/SerperSearchLeadProvider';
 import { LeadOceanLeadProvider } from '../services/leadProviders/LeadOceanLeadProvider';
+import { OverpassApiError, OverpassLeadProvider } from '../services/leadProviders/OverpassLeadProvider';
 
 let lastSuccessTimestamp: string = 'None yet';
 let lastErrorMsg: string = 'None';
 let lastResponseTime: number | string = 'N/A';
 let connectionVerified = false;
+let overpassConnectionVerified = false;
+let overpassLastSuccessTimestamp = 'None yet';
+let overpassLastError = 'None';
+let overpassLastResponseTime: number | string = 'N/A';
 
 const isProductionRuntime = () => Boolean(process.env.VERCEL || process.env.NODE_ENV === 'production');
 
@@ -160,7 +165,11 @@ export class ServerLeadProviderService {
   static resolveApiKey(
     overrideKey?: string,
     providerType?: string
-  ): { key: string; type: 'google_places' | 'serper' | 'leadocean' } {
+  ): { key: string; type: 'google_places' | 'serper' | 'leadocean' | 'overpass' } {
+    if (providerType === 'overpass') {
+      return { key: '', type: 'overpass' };
+    }
+
     const cleanedOverride = isProductionRuntime() ? '' : (
       overrideKey &&
       typeof overrideKey === 'string' &&
@@ -209,6 +218,26 @@ export class ServerLeadProviderService {
    */
   static getStatus(overrideApiKey?: string, requestedType?: string): ProviderStatusInfo {
     const { key, type } = this.resolveApiKey(overrideApiKey, requestedType);
+
+    if (type === 'overpass') {
+      return {
+        configured: true,
+        providerName: 'OpenStreetMap Overpass API',
+        status: overpassConnectionVerified ? 'Connected' : overpassLastError !== 'None' ? 'Error' : 'Not Tested',
+        message: overpassConnectionVerified
+          ? 'A live Overpass query succeeded.'
+          : overpassLastError !== 'None'
+          ? overpassLastError
+          : 'No API key required. Run a live test to verify public Overpass access.',
+        isMock: false,
+        endpointStatus: 'https://overpass-api.de/api/interpreter',
+        authStatus: 'No API key required',
+        lastSuccessfulRequest: overpassLastSuccessTimestamp,
+        lastError: overpassLastError,
+        responseTimeMs: overpassLastResponseTime,
+        isExternal: true
+      };
+    }
 
     if (type === 'google_places') {
       const providerName = 'Google Maps Platform Places API (New)';
@@ -361,6 +390,68 @@ export class ServerLeadProviderService {
   ): Promise<ProviderDiagnosticTestResult> {
     const { key, type } = this.resolveApiKey(overrideApiKey, requestedType);
     const startTime = Date.now();
+
+    if (type === 'overpass') {
+      try {
+        const leads = await new OverpassLeadProvider().search({
+          jobTitles: [],
+          industry: [],
+          country: 'United Kingdom',
+          city: 'London',
+          seniority: [],
+          companySize: [],
+          maxLeads: 1
+        });
+        const duration = Date.now() - startTime;
+        overpassConnectionVerified = true;
+        overpassLastSuccessTimestamp = new Date().toISOString();
+        overpassLastError = 'None';
+        overpassLastResponseTime = `${duration}ms`;
+        return {
+          success: true,
+          httpStatus: 200,
+          provider: 'OpenStreetMap Overpass API',
+          endpoint: 'https://overpass-api.de/api/interpreter',
+          placesReturned: leads.length,
+          responseTime: `${duration}ms`,
+          responseTimeMs: duration,
+          configured: true,
+          status: 'Connected',
+          authStatus: 'No API key required',
+          message: `Overpass accepted a bounded London test query; ${leads.length} named business result(s) matched the test.`,
+          sanitizedProviderError: null,
+          timestamp: new Date().toISOString()
+        };
+      } catch (error) {
+        const duration = Date.now() - startTime;
+        const message = error instanceof Error ? error.message : 'Overpass connection test failed.';
+        overpassConnectionVerified = false;
+        overpassLastError = message;
+        overpassLastResponseTime = `${duration}ms`;
+        return {
+          success: false,
+          httpStatus:
+            error instanceof OverpassApiError && error.httpStatus
+              ? error.httpStatus >= 500
+                ? 503
+                : error.httpStatus
+              : message.includes('timed out')
+              ? 504
+              : 502,
+          provider: 'OpenStreetMap Overpass API',
+          endpoint: 'https://overpass-api.de/api/interpreter',
+          placesReturned: 0,
+          responseTime: `${duration}ms`,
+          responseTimeMs: duration,
+          configured: true,
+          status: 'Error',
+          authStatus: 'Public endpoint error',
+          message,
+          sanitizedProviderError: message,
+          timestamp: new Date().toISOString()
+        };
+      }
+    }
 
     if (!key) {
       lastErrorMsg =
@@ -731,6 +822,21 @@ export class ServerLeadProviderService {
   ): Promise<RawLead[]> {
     const startTime = Date.now();
     const { key, type } = this.resolveApiKey(overrideApiKey, requestedType);
+
+    if (type === 'overpass') {
+      try {
+        const results = await new OverpassLeadProvider().search(filters);
+        overpassConnectionVerified = true;
+        overpassLastSuccessTimestamp = new Date().toISOString();
+        overpassLastError = 'None';
+        overpassLastResponseTime = `${Date.now() - startTime}ms`;
+        return results;
+      } catch (err) {
+        overpassConnectionVerified = false;
+        overpassLastError = err instanceof Error ? err.message : 'OpenStreetMap Overpass search error.';
+        throw err;
+      }
+    }
 
     if (!key) {
       lastErrorMsg =

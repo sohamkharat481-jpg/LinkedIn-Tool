@@ -54,6 +54,17 @@ export function generatePersonCompositeKey(lead: RawLead): string {
  */
 export function isValidLeadRecord(lead: RawLead): boolean {
   if (!lead) return false;
+
+  if (lead.leadType === 'business') {
+    return Boolean(
+      lead.source === 'OpenStreetMap (Overpass API)' &&
+      lead.osmType &&
+      Number.isSafeInteger(lead.osmId) &&
+      lead.companyName?.trim() &&
+      lead.businessCategory?.trim() &&
+      lead.profileUrl === `https://www.openstreetmap.org/${lead.osmType}/${lead.osmId}`
+    );
+  }
   
   const hasName = Boolean(lead.fullName && lead.fullName.trim().length >= 2);
   const hasJobTitle = Boolean(lead.currentJobTitle && lead.currentJobTitle.trim().length >= 2);
@@ -83,8 +94,27 @@ export function filterAndDeduplicateLeads(candidates: RawLead[]): DeduplicationR
   // Step 3 & 4: Normalize LinkedIn profile URLs and remove duplicate profile URLs
   const uniqueUrlLeadsMap = new Map<string, RawLead>();
   let duplicateProfilesRemoved = 0;
+  let duplicateBusinessesRemoved = 0;
+  const seenBusinessIds = new Set<string>();
+  const seenBusinessAddresses = new Set<string>();
 
   for (const rawLead of validRecords) {
+    if (rawLead.leadType === 'business') {
+      const osmId = `${rawLead.osmType}/${rawLead.osmId}`;
+      const address = rawLead.businessAddress?.trim().toLowerCase();
+      const addressKey = address
+        ? `${rawLead.companyName.trim().toLowerCase()}|${address}`
+        : '';
+      if (seenBusinessIds.has(osmId) || (addressKey && seenBusinessAddresses.has(addressKey))) {
+        duplicateBusinessesRemoved++;
+        continue;
+      }
+      seenBusinessIds.add(osmId);
+      if (addressKey) seenBusinessAddresses.add(addressKey);
+      uniqueUrlLeadsMap.set(rawLead.profileUrl, rawLead);
+      continue;
+    }
+
     const normalizedUrl = normalizeLinkedInUrl(rawLead.profileUrl);
     const normalizedLead = {
       ...rawLead,
@@ -98,7 +128,12 @@ export function filterAndDeduplicateLeads(candidates: RawLead[]): DeduplicationR
     }
   }
 
-  const leadsAfterUrlDedupe = Array.from(uniqueUrlLeadsMap.values());
+  const leadsAfterUrlDedupe = Array.from(uniqueUrlLeadsMap.values()).filter(
+    lead => lead.leadType !== 'business'
+  );
+  const businessLeads = Array.from(uniqueUrlLeadsMap.values()).filter(
+    lead => lead.leadType === 'business'
+  );
 
   // Step 5: Remove duplicate people using composite key (name + company + profile URL)
   const uniquePeopleMap = new Map<string, RawLead>();
@@ -114,14 +149,16 @@ export function filterAndDeduplicateLeads(candidates: RawLead[]): DeduplicationR
   }
 
   // Step 6: Return final unique leads
-  const finalUniqueLeads = Array.from(uniquePeopleMap.values());
-  const totalDuplicatesRemoved = duplicateProfilesRemoved + duplicatePeopleRemoved;
+  const finalUniqueLeads = [...Array.from(uniquePeopleMap.values()), ...businessLeads];
+  const totalDuplicatesRemoved =
+    duplicateProfilesRemoved + duplicatePeopleRemoved + duplicateBusinessesRemoved;
 
   return {
     rawCandidatesCount,
     validRecordsCount,
     duplicateProfilesRemoved,
     duplicatePeopleRemoved,
+    duplicateBusinessesRemoved,
     totalDuplicatesRemoved,
     finalUniqueLeads
   };

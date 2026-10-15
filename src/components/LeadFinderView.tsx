@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Client, LeadFilter, SeniorityLevel, CompanySizeRange, RawLead, SearchProgressState, ProviderStatusInfo } from '../types';
+import { Client, LeadFilter, LeadProviderConfig, SeniorityLevel, CompanySizeRange, RawLead, SearchProgressState, ProviderStatusInfo } from '../types';
 import { Search, Sparkles, Filter, CheckCircle2, Loader2, AlertTriangle, ArrowRight, ShieldCheck, Tag, XCircle, Settings, Link, User, Globe, Building2 } from 'lucide-react';
 import { apiUrl } from '../services/apiClient';
 
@@ -16,6 +16,7 @@ interface LeadFinderViewProps {
   onNavigateToLeads: () => void;
   onNavigateToSettings: () => void;
   providerStatus: ProviderStatusInfo;
+  providerType: LeadProviderConfig['providerType'];
   onEnableMockMode?: () => void;
 }
 
@@ -65,6 +66,7 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
   onNavigateToLeads,
   onNavigateToSettings,
   providerStatus,
+  providerType,
   onEnableMockMode
 }) => {
   // Search Mode state: 'manual' | 'profile'
@@ -195,7 +197,7 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
     }
 
     const activeJobTitles = overrideFilters ? overrideFilters.jobTitles : jobTitles;
-    if (activeJobTitles.length === 0) {
+    if (providerType !== 'overpass' && activeJobTitles.length === 0) {
       setSearchError('At least one job title is required.');
       return;
     }
@@ -225,7 +227,7 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
       setProgressState({ step: 3, message: 'Validating public lead records...' });
       await new Promise((r) => setTimeout(r, 300));
 
-      setProgressState({ step: 4, message: 'Executing profile URL & composite deduplication...' });
+      setProgressState({ step: 4, message: 'Deduplicating provider records...' });
       await new Promise((r) => setTimeout(r, 300));
 
       setProgressState({ step: 5, message: 'Saving unique leads to client database...' });
@@ -259,7 +261,8 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
     handleRunSearch(filters);
   };
 
-  const isNotConfigured = !providerStatus.isMock && providerStatus.status === 'Not Configured';
+  const isNotConfigured =
+    providerType !== 'overpass' && !providerStatus.isMock && providerStatus.status === 'Not Configured';
 
   return (
     <div id="lead-finder-section" className="space-y-6 max-w-5xl mx-auto scroll-mt-6">
@@ -301,10 +304,10 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
             <AlertTriangle className="w-6 h-6 text-amber-600 shrink-0 mt-0.5" />
             <div className="space-y-1">
               <h3 className="text-base font-bold text-amber-900">
-                LeadOcean API key is not configured.
+                {providerStatus.message}
               </h3>
               <p className="text-xs text-amber-800">
-                To perform production lead searches, set <code className="bg-amber-100 font-mono px-1 py-0.5 rounded text-amber-900 font-bold">LEADOCEAN_API_KEY</code> in environment variables or enter your key in Settings.
+                Select a configured provider in Settings before searching.
               </p>
             </div>
           </div>
@@ -805,7 +808,7 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
                 'Preparing search parameters...',
                 'Connecting to server lead provider...',
                 'Validating public lead records...',
-                'Executing profile URL & composite deduplication...',
+                'Deduplicating provider records...',
                 'Saving unique leads to client database...'
               ].map((msg, idx) => {
                 const stepNum = idx + 1;

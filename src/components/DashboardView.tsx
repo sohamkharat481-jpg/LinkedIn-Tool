@@ -346,6 +346,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   <span className="flex items-center gap-1 text-[11px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
                     <AlertCircle className="w-3.5 h-3.5 text-amber-600" /> Not Configured
                   </span>
+                ) : providerStatus.status === 'Not Tested' ? (
+                  <span className="flex items-center gap-1 text-[11px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+                    <AlertCircle className="w-3.5 h-3.5 text-amber-600" /> Not Tested
+                  </span>
                 ) : (
                   <span className="flex items-center gap-1 text-[11px] font-semibold text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">
                     <XCircle className="w-3.5 h-3.5 text-red-600" /> Error
@@ -357,7 +361,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <p className="text-xs font-semibold text-gray-800">{providerStatus.providerName}</p>
             <p className="text-xs text-gray-500 mt-1 leading-relaxed">
               {providerStatus.status === 'Connected'
-                ? `${providerStatus.providerName} is active and ready to deliver verified leads.`
+                ? `${providerStatus.providerName} completed a live request.`
                 : providerStatus.message || 'SERPER_API_KEY must be configured in Vercel environment variables.'}
             </p>
           </div>

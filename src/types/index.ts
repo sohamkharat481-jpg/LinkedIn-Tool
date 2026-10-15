@@ -29,6 +29,17 @@ export interface RawLead {
   connectionsOrFollowers?: string;
   lastActivityDate?: string;
   source?: string;
+  leadType?: 'business';
+  businessCategory?: string;
+  businessWebsite?: string;
+  businessPhone?: string;
+  businessAddress?: string;
+  businessCity?: string;
+  businessCountry?: string;
+  latitude?: number;
+  longitude?: number;
+  osmType?: 'node' | 'way' | 'relation';
+  osmId?: number;
 }
 
 export interface LeadRecord {
@@ -48,6 +59,17 @@ export interface LeadRecord {
   status: LeadStatus;
   notes: string;
   source: string;
+  leadType?: 'business';
+  businessCategory?: string;
+  businessWebsite?: string;
+  businessPhone?: string;
+  businessAddress?: string;
+  businessCity?: string;
+  businessCountry?: string;
+  latitude?: number;
+  longitude?: number;
+  osmType?: 'node' | 'way' | 'relation';
+  osmId?: number;
 }
 
 export interface Client {
@@ -114,7 +136,7 @@ export interface SearchProgressState {
 }
 
 export interface LeadProviderConfig {
-  providerType: 'mock' | 'rapidapi' | 'custom_proxy' | 'google_search' | 'leadocean' | 'serper';
+  providerType: 'mock' | 'rapidapi' | 'custom_proxy' | 'google_search' | 'leadocean' | 'serper' | 'overpass';
   apiKey?: string;
   customEndpoint?: string;
 }
@@ -124,6 +146,7 @@ export interface DeduplicationResult {
   validRecordsCount: number;
   duplicateProfilesRemoved: number;
   duplicatePeopleRemoved: number;
+  duplicateBusinessesRemoved: number;
   totalDuplicatesRemoved: number;
   finalUniqueLeads: RawLead[];
 }
@@ -140,7 +163,7 @@ export interface GoogleSheetExportResult {
 export interface ProviderStatusInfo {
   configured: boolean;
   providerName: string;
-  status: 'Connected' | 'Not Configured' | 'Error';
+  status: 'Connected' | 'Not Configured' | 'Not Tested' | 'Error';
   message: string;
   isMock: boolean;
   endpointStatus: string;

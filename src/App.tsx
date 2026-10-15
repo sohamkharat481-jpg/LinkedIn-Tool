@@ -84,7 +84,9 @@ export default function App() {
       setProviderStatus(data);
     } catch (error: unknown) {
       const providerName =
-        activeCfg.providerType === 'leadocean'
+        activeCfg.providerType === 'overpass'
+          ? 'OpenStreetMap Overpass API'
+          : activeCfg.providerType === 'leadocean'
           ? 'LeadOcean B2B People Search API'
           : activeCfg.providerType === 'serper'
           ? 'Serper.dev Google Search API'
@@ -97,7 +99,9 @@ export default function App() {
         message: `Unable to load provider status: ${message}`,
         isMock: false,
         endpointStatus:
-          activeCfg.providerType === 'leadocean'
+          activeCfg.providerType === 'overpass'
+            ? 'https://overpass-api.de/api/interpreter'
+            : activeCfg.providerType === 'leadocean'
             ? 'https://api.leadocean.io/v1/people/search'
             : activeCfg.providerType === 'serper'
             ? 'https://google.serper.dev/search'
@@ -258,12 +262,24 @@ export default function App() {
       companyName: raw.companyName,
       location: raw.location,
       profileUrl: raw.profileUrl,
-      connectionsOrFollowers: raw.connectionsOrFollowers || '500+ connections',
+      connectionsOrFollowers:
+        raw.leadType === 'business' ? raw.connectionsOrFollowers || '' : raw.connectionsOrFollowers || '500+ connections',
       lastActivityDate: raw.lastActivityDate || 'N/A',
       dateAdded: dateToday,
       status: 'Not Contacted',
       notes: '',
-      source: raw.source || 'LeadOcean B2B People Search API'
+      source: raw.source || 'LeadOcean B2B People Search API',
+      leadType: raw.leadType,
+      businessCategory: raw.businessCategory,
+      businessWebsite: raw.businessWebsite,
+      businessPhone: raw.businessPhone,
+      businessAddress: raw.businessAddress,
+      businessCity: raw.businessCity,
+      businessCountry: raw.businessCountry,
+      latitude: raw.latitude,
+      longitude: raw.longitude,
+      osmType: raw.osmType,
+      osmId: raw.osmId
     }));
 
     // Deduplicate against existing client leads and save to Supabase
@@ -460,6 +476,7 @@ export default function App() {
                   onNavigateToLeads={() => setActiveTab('clients')}
                   onNavigateToSettings={() => setActiveTab('settings')}
                   providerStatus={providerStatus}
+                  providerType={providerConfig.providerType}
                 />
               </div>
             </div>

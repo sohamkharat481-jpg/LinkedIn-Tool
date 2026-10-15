@@ -3,6 +3,7 @@ import { LeadProvider } from './LeadProvider';
 import { GoogleMapsPlacesLeadProvider } from './GoogleMapsPlacesLeadProvider';
 import { LeadOceanLeadProvider } from './LeadOceanLeadProvider';
 import { SerperSearchLeadProvider } from './SerperSearchLeadProvider';
+import { OverpassLeadProvider } from './OverpassLeadProvider';
 
 let currentConfig: LeadProviderConfig = {
   providerType: 'google_search',
@@ -20,6 +21,10 @@ export class ProviderFactory {
   }
 
   static getProvider(): LeadProvider {
+    if (currentConfig.providerType === 'overpass') {
+      return new OverpassLeadProvider();
+    }
+
     const googleMapsKey =
       process.env.GOOGLE_MAPS_API_KEY ||
       process.env.VITE_GOOGLE_MAPS_API_KEY ||

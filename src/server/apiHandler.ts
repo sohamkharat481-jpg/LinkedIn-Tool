@@ -4,6 +4,7 @@ import { filterAndDeduplicateLeads } from '../services/deduplication';
 import { ServerLeadProviderService } from './leadProviderService';
 import { testSupabaseHealth } from '../services/supabase';
 import { GooglePlacesApiError } from '../services/leadProviders/googlePlacesErrors';
+import { OverpassApiError } from '../services/leadProviders/OverpassLeadProvider';
 
 export const apiRouter = express.Router();
 
@@ -179,13 +180,13 @@ const executeLeadSearch = async (filters: LeadFilter, providerType?: string, api
   filters.maxLeads = Math.min(Math.max(Number(filters.maxLeads) || 50, 1), 500);
 
   const resolved = ServerLeadProviderService.resolveApiKey(apiKey, providerType);
-  if (!resolved.key || resolved.key.trim() === '') {
+  if (resolved.type !== 'overpass' && (!resolved.key || resolved.key.trim() === '')) {
     return {
       status: 422,
       body: {
         error: 'No real lead provider is configured.',
         code: 'NO_PROVIDER_CONFIGURED',
-        message: 'Configure a Google Maps Places, Serper, or LeadOcean API key on the server.'
+        message: 'Configure a Google Maps Places, Serper, or LeadOcean API key on the server, or select the no-key OpenStreetMap provider.'
       }
     };
   }
@@ -199,18 +200,23 @@ const executeLeadSearch = async (filters: LeadFilter, providerType?: string, api
     const dedupeResult = filterAndDeduplicateLeads(rawCandidates);
     const isGooglePlaces = resolved.type === 'google_places';
     const isSerper = resolved.type === 'serper';
+    const isOverpass = resolved.type === 'overpass';
 
     return {
       status: 200,
       body: {
         success: true,
         provider: {
-          id: isGooglePlaces
+          id: isOverpass
+            ? 'openstreetmap-overpass-provider'
+            : isGooglePlaces
             ? 'google-maps-places-provider'
             : isSerper
             ? 'serper-search-provider'
             : 'leadocean-b2b-provider',
-          name: isGooglePlaces
+          name: isOverpass
+            ? 'OpenStreetMap Overpass API'
+            : isGooglePlaces
             ? 'Google Maps Platform Places API (New)'
             : isSerper
             ? 'Serper.dev Google Search API'
@@ -222,6 +228,7 @@ const executeLeadSearch = async (filters: LeadFilter, providerType?: string, api
           validRecordsCount: dedupeResult.validRecordsCount,
           duplicateProfilesRemoved: dedupeResult.duplicateProfilesRemoved,
           duplicatePeopleRemoved: dedupeResult.duplicatePeopleRemoved,
+          duplicateBusinessesRemoved: dedupeResult.duplicateBusinessesRemoved,
           totalDuplicatesRemoved: dedupeResult.totalDuplicatesRemoved,
           finalLeadCount: dedupeResult.finalUniqueLeads.length
         },
@@ -238,6 +245,24 @@ const executeLeadSearch = async (filters: LeadFilter, providerType?: string, api
           code: 'GOOGLE_PLACES_API_ERROR',
           providerHttpStatus: error.httpStatus,
           ...error.diagnostics
+        }
+      };
+    }
+    if (error instanceof OverpassApiError) {
+      const status =
+        error.httpStatus === 429
+          ? 429
+          : error.httpStatus && error.httpStatus >= 500
+          ? 503
+          : error.message.includes('timed out')
+          ? 504
+          : 502;
+      return {
+        status,
+        body: {
+          error: error.message,
+          code: 'OVERPASS_API_ERROR',
+          providerHttpStatus: error.httpStatus
         }
       };
     }

@@ -54,7 +54,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onRefreshProviderStatus
 }) => {
   // Provider state
-  const [providerType] = useState<'google_search'>('google_search');
+  const [providerType, setProviderType] = useState<LeadProviderConfig['providerType']>(
+    providerConfig.providerType
+  );
   const [apiKeyInput, setApiKeyInput] = useState(providerConfig.apiKey || '');
   const [endpointInput, setEndpointInput] = useState(providerConfig.customEndpoint || '');
   const [providerSavedNotice, setProviderSavedNotice] = useState(false);
@@ -289,46 +291,86 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <div className="flex items-center gap-2">
             <Database className="w-5 h-5 text-blue-600" />
             <div>
-              <h2 className="text-base font-bold text-gray-900">Lead Discovery Data Provider (Google Maps Places)</h2>
+              <h2 className="text-base font-bold text-gray-900">Lead Discovery Data Provider</h2>
               <p className="text-xs text-gray-500">
-                Searches real business listings returned by Google Maps Places; it does not search or scrape LinkedIn member profiles.
+                Select a source for business listings or public LinkedIn search results.
               </p>
             </div>
           </div>
         </div>
 
         <div className="space-y-4 pt-2">
-          <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-2xl space-y-3">
-            <div className="flex items-start gap-3">
-              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
-              <div className="space-y-1">
-                <h3 className="text-xs font-bold text-emerald-900 uppercase tracking-wider">
-                  Google Maps Platform Places API (New)
-                </h3>
-                <p className="text-xs text-emerald-800">
-                  Authentication is secured via the server-side <code className="bg-emerald-100 font-mono px-1 py-0.5 rounded text-emerald-900 font-bold">GOOGLE_MAPS_API_KEY</code> environment variable. No provider API keys are sent from or exposed to the browser.
-                </p>
-              </div>
-            </div>
+          <label className="block max-w-md space-y-1.5">
+            <span className="text-xs font-semibold text-gray-700">Active provider</span>
+            <select
+              value={providerType}
+              onChange={event => {
+                const nextProvider = event.target.value as LeadProviderConfig['providerType'];
+                setProviderType(nextProvider);
+                onUpdateProviderConfig({ providerType: nextProvider });
+              }}
+              className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+            >
+              <option value="google_search">Google Maps Places API (New)</option>
+              <option value="overpass">OpenStreetMap Overpass (free, no API key)</option>
+              <option value="serper">Serper.dev</option>
+              <option value="leadocean">LeadOcean</option>
+            </select>
+          </label>
 
-            <div className="p-3 bg-white border border-emerald-100 rounded-xl text-xs space-y-2">
-              <p className="font-bold text-gray-800">Business Listing Data:</p>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
-                <span className="text-emerald-700 font-semibold">✓ Business names</span>
-                <span className="text-emerald-700 font-semibold">✓ Business categories</span>
-                <span className="text-emerald-700 font-semibold">✓ Locations</span>
-                <span className="text-emerald-700 font-semibold">✓ Websites and Maps links</span>
-                <span className="text-emerald-700 font-semibold">✓ Public business phone numbers</span>
-                <span className="text-emerald-700 font-semibold">✓ Ratings and reviews</span>
-                <span className="text-emerald-700 font-semibold">✓ Real provider results</span>
-                <span className="text-emerald-700 font-semibold">✓ Composite deduplication</span>
-              </div>
+          {providerType === 'overpass' ? (
+            <div className="max-w-3xl rounded-2xl border border-blue-200 bg-blue-50 p-4 text-xs text-blue-900 space-y-2">
+              <p className="font-bold">OpenStreetMap Overpass API — no API key required</p>
+              <p>
+                Requires both city and country in the search filters. Only mapped business data is returned;
+                missing contact and address fields stay empty. Requests are bounded, cached, and rate-limited.
+              </p>
+              <p>
+                © OpenStreetMap contributors · Data available under the{' '}
+                <a
+                  href="https://www.openstreetmap.org/copyright"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="underline"
+                >
+                  Open Database License
+                </a>
+                .
+              </p>
             </div>
+          ) : (
+            <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-2xl space-y-3">
+              <div className="flex items-start gap-3">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <h3 className="text-xs font-bold text-emerald-900 uppercase tracking-wider">
+                    Google Maps Platform Places API (New)
+                  </h3>
+                  <p className="text-xs text-emerald-800">
+                    Authentication is secured via the server-side <code className="bg-emerald-100 font-mono px-1 py-0.5 rounded text-emerald-900 font-bold">GOOGLE_MAPS_API_KEY</code> environment variable. No provider API keys are sent from or exposed to the browser.
+                  </p>
+                </div>
+              </div>
 
-            <p className="text-[11px] text-gray-500 pt-1">
-              Serper and LeadOcean remain available as server-configured fallback providers when Google Maps Places is not configured.
-            </p>
-          </div>
+              <div className="p-3 bg-white border border-emerald-100 rounded-xl text-xs space-y-2">
+                <p className="font-bold text-gray-800">Business Listing Data:</p>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                  <span className="text-emerald-700 font-semibold">✓ Business names</span>
+                  <span className="text-emerald-700 font-semibold">✓ Business categories</span>
+                  <span className="text-emerald-700 font-semibold">✓ Locations</span>
+                  <span className="text-emerald-700 font-semibold">✓ Websites and Maps links</span>
+                  <span className="text-emerald-700 font-semibold">✓ Public business phone numbers</span>
+                  <span className="text-emerald-700 font-semibold">✓ Ratings and reviews</span>
+                  <span className="text-emerald-700 font-semibold">✓ Real provider results</span>
+                  <span className="text-emerald-700 font-semibold">✓ Composite deduplication</span>
+                </div>
+              </div>
+
+              <p className="text-[11px] text-gray-500 pt-1">
+                Serper and LeadOcean remain available as server-configured fallback providers when Google Maps Places is not configured.
+              </p>
+            </div>
+          )}
 
           <div className="flex items-center justify-between pt-2">
             <button

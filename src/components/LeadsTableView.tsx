@@ -221,6 +221,21 @@ export const LeadsTableView: React.FC<LeadsTableViewProps> = ({
         </div>
       </div>
 
+      {leads.some(lead => lead.source === 'OpenStreetMap (Overpass API)') && (
+        <p className="px-4 text-[11px] text-gray-500">
+          OpenStreetMap contributors · Data available under the{' '}
+          <a
+            href="https://www.openstreetmap.org/copyright"
+            target="_blank"
+            rel="noreferrer"
+            className="text-blue-600 underline"
+          >
+            Open Database License
+          </a>
+          .
+        </p>
+      )}
+
       {/* Main Table */}
       {processedLeads.length === 0 ? (
         <div className="p-12 text-center text-gray-500 text-sm">
@@ -239,12 +254,15 @@ export const LeadsTableView: React.FC<LeadsTableViewProps> = ({
                     className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
                   />
                 </th>
-                <th className="py-3 px-4 min-w-[150px]">Full Name</th>
+                <th className="py-3 px-4 min-w-[150px]">Name</th>
                 <th className="py-3 px-4 min-w-[200px]">Headline</th>
-                <th className="py-3 px-4 min-w-[140px]">Current Job Title</th>
+                <th className="py-3 px-4 min-w-[140px]">Category / Title</th>
                 <th className="py-3 px-4 min-w-[130px]">Company</th>
                 <th className="py-3 px-4 min-w-[120px]">Location</th>
-                <th className="py-3 px-4 min-w-[100px] text-center">LinkedIn Profile</th>
+                <th className="py-3 px-4 min-w-[160px]">Website</th>
+                <th className="py-3 px-4 min-w-[130px]">Phone</th>
+                <th className="py-3 px-4 min-w-[100px]">Coordinates</th>
+                <th className="py-3 px-4 min-w-[100px] text-center">Source Link</th>
                 <th className="py-3 px-4 min-w-[110px]">Connections</th>
                 <th className="py-3 px-4 min-w-[100px]">Last Activity</th>
                 <th className="py-3 px-4 min-w-[90px]">Date Added</th>
@@ -280,6 +298,26 @@ export const LeadsTableView: React.FC<LeadsTableViewProps> = ({
                     <td className="py-3 px-4 text-gray-800 font-semibold">{lead.currentJobTitle}</td>
                     <td className="py-3 px-4 font-semibold text-gray-900">{lead.companyName}</td>
                     <td className="py-3 px-4 text-gray-600">{lead.location}</td>
+                    <td className="py-3 px-4 text-gray-600">
+                      {lead.businessWebsite && /^https?:\/\//i.test(lead.businessWebsite) ? (
+                        <a
+                          href={lead.businessWebsite}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-blue-600 hover:underline"
+                        >
+                          {lead.businessWebsite}
+                        </a>
+                      ) : (
+                        lead.businessWebsite || ''
+                      )}
+                    </td>
+                    <td className="py-3 px-4 text-gray-600">{lead.businessPhone || ''}</td>
+                    <td className="py-3 px-4 text-gray-600">
+                      {lead.latitude !== undefined && lead.longitude !== undefined
+                        ? `${lead.latitude}, ${lead.longitude}`
+                        : ''}
+                    </td>
                     <td className="py-3 px-4 text-center">
                       <a
                         href={lead.profileUrl}
@@ -287,7 +325,7 @@ export const LeadsTableView: React.FC<LeadsTableViewProps> = ({
                         rel="noreferrer"
                         className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 font-semibold hover:underline bg-blue-50 px-2 py-1 rounded-md border border-blue-200 text-[11px]"
                       >
-                        Profile <ExternalLink className="w-3 h-3" />
+                        {lead.leadType === 'business' ? 'OSM object' : 'Profile'} <ExternalLink className="w-3 h-3" />
                       </a>
                     </td>
                     <td className="py-3 px-4 text-gray-600">{lead.connectionsOrFollowers}</td>

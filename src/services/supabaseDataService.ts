@@ -205,12 +205,26 @@ export class SupabaseDataService {
               companyName: item.company_name || 'N/A',
               location: item.location || 'N/A',
               profileUrl: item.profile_url || '',
-              connectionsOrFollowers: item.connections_or_followers || '500+ connections',
+              connectionsOrFollowers:
+                item.lead_type === 'business'
+                  ? item.connections_or_followers || ''
+                  : item.connections_or_followers || '500+ connections',
               lastActivityDate: item.last_activity_date || 'N/A',
               dateAdded: (item.created_at || new Date().toISOString()).split('T')[0],
               status: (junction.status as LeadStatus) || 'Not Contacted',
               notes: junction.notes || '',
-              source: item.source || 'LeadOcean B2B People Search API'
+              source: item.source || 'LeadOcean B2B People Search API',
+              leadType: item.lead_type || undefined,
+              businessCategory: item.business_category || undefined,
+              businessWebsite: item.business_website || undefined,
+              businessPhone: item.business_phone || undefined,
+              businessAddress: item.business_address || undefined,
+              businessCity: item.business_city || undefined,
+              businessCountry: item.business_country || undefined,
+              latitude: typeof item.latitude === 'number' ? item.latitude : undefined,
+              longitude: typeof item.longitude === 'number' ? item.longitude : undefined,
+              osmType: item.osm_type || undefined,
+              osmId: typeof item.osm_id === 'number' ? item.osm_id : undefined
             };
           });
 
@@ -256,6 +270,17 @@ export class SupabaseDataService {
           connections_or_followers: l.connectionsOrFollowers,
           last_activity_date: l.lastActivityDate,
           source: l.source || 'LeadOcean B2B People Search API',
+          lead_type: l.leadType || null,
+          business_category: l.businessCategory || null,
+          business_website: l.businessWebsite || null,
+          business_phone: l.businessPhone || null,
+          business_address: l.businessAddress || null,
+          business_city: l.businessCity || null,
+          business_country: l.businessCountry || null,
+          latitude: l.latitude ?? null,
+          longitude: l.longitude ?? null,
+          osm_type: l.osmType || null,
+          osm_id: l.osmId ?? null,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         }));
