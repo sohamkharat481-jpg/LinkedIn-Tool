@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
-    "build": "vite build && esbuild api/index.ts --bundle --platform=node --format=cjs --target=node20 --external:express --external:@google/genai --external:@supabase/supabase-js --external:firebase --external:dotenv --external:lucide-react --external:motion --external:react --external:react-dom --outfile=api/index.cjs && esbuild api/index.ts --bundle --platform=node --format=esm --target=node20 --external:express --external:@google/genai --external:@supabase/supabase-js --external:firebase --external:dotenv --external:lucide-react --external:motion --external:react --external:react-dom --outfile=api/index.js",
+    "build": "vite build && esbuild api/index.ts --bundle --platform=node --format=cjs --target=node20 --external:express --external:@google/genai --external:@supabase/supabase-js --external:firebase --external:dotenv --external:lucide-react --external:motion --external:react --external:react-dom --outfile=api/index.cjs",
     "start": "tsx server.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
@@ -27,10 +27,12 @@
     "vite": "^8.3.0"
   },
   "devDependencies": {
+    "@types/archiver": "^8.0.0",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "archiver": "^8.0.0",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.28.0",
     "tailwindcss": "^4.3.3",
