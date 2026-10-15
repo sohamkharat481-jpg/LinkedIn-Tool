@@ -1,14 +1,7 @@
 node_modules
-src
-server.ts
-api/index.ts
 .env
 .env.example
 .env.*
 .git
 *.log
 .DS_Store
-tsconfig.json
-vite.config.ts
-postcss.config.js
-eslint.config.js
