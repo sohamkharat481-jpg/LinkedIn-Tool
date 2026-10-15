@@ -174,123 +174,100 @@ export const handleTestConnection = async (req: Request, res: Response) => {
 apiRouter.all('/provider-status/test', handleTestConnection);
 apiRouter.all('/api/provider-status/test', handleTestConnection);
 
-// 4. Main Search Leads Endpoint (Executes server-side provider, normalization & deduplication)
-apiRouter.post('/search-leads', async (req: Request, res: Response) => {
-  try {
-    const { filters, clientId, workspaceId, providerType, apiKey } = req.body;
+const executeLeadSearch = async (filters: LeadFilter, providerType?: string, apiKey?: string) => {
+  filters.maxLeads = Math.min(Math.max(Number(filters.maxLeads) || 50, 1), 500);
 
-    if (!filters || typeof filters !== 'object') {
-      res.status(400).json({ error: 'Invalid search filters provided.' });
-      return;
-    }
-
-    filters.maxLeads = Math.min(Math.max(Number(filters.maxLeads) || 50, 1), 500);
-
-    const resolved = ServerLeadProviderService.resolveApiKey(apiKey, providerType);
-
-    // Strict requirement: If missing API key, return clear configuration error (never fake leads)
-    if (!resolved.key || resolved.key.trim() === '') {
-      res.status(422).json({
-        error: 'Google Maps Places provider is not configured.',
+  const resolved = ServerLeadProviderService.resolveApiKey(apiKey, providerType);
+  if (!resolved.key || resolved.key.trim() === '') {
+    return {
+      status: 422,
+      body: {
+        error: 'No real lead provider is configured.',
         code: 'NO_PROVIDER_CONFIGURED',
-        message: 'Please configure GOOGLE_MAPS_API_KEY or VITE_GOOGLE_MAPS_API_KEY in environment variables.'
-      });
-      return;
-    }
+        message: 'Configure a Google Maps Places, Serper, or LeadOcean API key on the server.'
+      }
+    };
+  }
 
-    // Step 1: Fetch raw candidate leads from server-side provider adapter
+  try {
     const rawCandidates: RawLead[] = await ServerLeadProviderService.fetchCandidateLeads(
-      filters as LeadFilter,
+      filters,
       resolved.key,
       resolved.type
     );
-
-    // Step 2 & 3: Filtering & Deduplication Pipeline
     const dedupeResult = filterAndDeduplicateLeads(rawCandidates);
-
     const isGooglePlaces = resolved.type === 'google_places';
     const isSerper = resolved.type === 'serper';
 
-    res.json({
-      success: true,
-      provider: {
-        id: isGooglePlaces
-          ? 'google-maps-places-provider'
-          : isSerper
-          ? 'serper-search-provider'
-          : 'leadocean-b2b-provider',
-        name: isGooglePlaces
-          ? 'Google Maps Platform Places API (New)'
-          : isSerper
-          ? 'Serper.dev Google Search API'
-          : 'LeadOcean B2B People Search API',
-        isMock: false
-      },
-      metrics: {
-        rawCandidatesCount: dedupeResult.rawCandidatesCount,
-        validRecordsCount: dedupeResult.validRecordsCount,
-        duplicateProfilesRemoved: dedupeResult.duplicateProfilesRemoved,
-        duplicatePeopleRemoved: dedupeResult.duplicatePeopleRemoved,
-        totalDuplicatesRemoved: dedupeResult.totalDuplicatesRemoved,
-        finalLeadCount: dedupeResult.finalUniqueLeads.length
-      },
-      leads: dedupeResult.finalUniqueLeads
-    });
+    return {
+      status: 200,
+      body: {
+        success: true,
+        provider: {
+          id: isGooglePlaces
+            ? 'google-maps-places-provider'
+            : isSerper
+            ? 'serper-search-provider'
+            : 'leadocean-b2b-provider',
+          name: isGooglePlaces
+            ? 'Google Maps Platform Places API (New)'
+            : isSerper
+            ? 'Serper.dev Google Search API'
+            : 'LeadOcean B2B People Search API',
+          isMock: false
+        },
+        metrics: {
+          rawCandidatesCount: dedupeResult.rawCandidatesCount,
+          validRecordsCount: dedupeResult.validRecordsCount,
+          duplicateProfilesRemoved: dedupeResult.duplicateProfilesRemoved,
+          duplicatePeopleRemoved: dedupeResult.duplicatePeopleRemoved,
+          totalDuplicatesRemoved: dedupeResult.totalDuplicatesRemoved,
+          finalLeadCount: dedupeResult.finalUniqueLeads.length
+        },
+        leads: dedupeResult.finalUniqueLeads
+      }
+    };
   } catch (error: any) {
-    console.error('API /search-leads error:', error);
-    res.status(500).json({
-      error: error.message || 'Lead provider temporarily unavailable.'
-    });
+    console.error('API lead search error:', error);
+    return {
+      status: 502,
+      body: {
+        error: error.message || 'Lead provider temporarily unavailable.'
+      }
+    };
   }
+};
+
+// 4. Main Search Leads Endpoint (Executes server-side provider, normalization & deduplication)
+apiRouter.post('/search-leads', async (req: Request, res: Response) => {
+  const { filters, providerType, apiKey } = req.body;
+  if (!filters || typeof filters !== 'object') {
+    res.status(400).json({ error: 'Invalid search filters provided.' });
+    return;
+  }
+
+  const result = await executeLeadSearch(filters as LeadFilter, providerType, apiKey);
+  res.status(result.status).json(result.body);
 });
 
 // 5. Server-side Lead Provider Proxy Implementation
 apiRouter.post('/lead-search-proxy', async (req: Request, res: Response) => {
-  const apiKey = req.headers['x-provider-api-key'] || req.body.apiKey || process.env.LEAD_PROVIDER_API_KEY;
-
-  if (!apiKey || String(apiKey).trim() === '') {
-    res.status(401).json({ error: 'No real lead provider is configured.' });
+  const filters = req.body.filters || req.body;
+  if (!filters || typeof filters !== 'object') {
+    res.status(400).json({ error: 'Invalid search filters provided.' });
     return;
   }
 
-  try {
-    const filters: LeadFilter = req.body.filters || req.body;
-    const targetCount = Math.min(Math.max(filters.maxLeads || 50, 1), 500);
-
-    const titles = filters.jobTitles && filters.jobTitles.length > 0 ? filters.jobTitles : ['Founder', 'CEO'];
-    const country = filters.country || 'United States';
-    const city = filters.city || 'Metropolitan Area';
-
-    // Generates permitted public B2B candidates for live API mode
-    const publicLeads: RawLead[] = [];
-    const companies = ['Aether Digital', 'Vanguard Health', 'Hyperion SaaS', 'Zenith Capital', 'Pulse Dynamics', 'Optima Edge'];
-
-    for (let i = 0; i < Math.floor(targetCount * 1.15); i++) {
-      const title = titles[i % titles.length];
-      const company = companies[i % companies.length];
-      const name = `Candidate ${i + 1} (${title})`;
-      const username = `public-b2b-lead-${i + 100}`;
-
-      publicLeads.push({
-        fullName: name,
-        headline: `${title} at ${company} | Driving growth in ${country}`,
-        currentJobTitle: title,
-        companyName: company,
-        location: city ? `${city}, ${country}` : country,
-        profileUrl: `https://www.linkedin.com/in/${username}`,
-        connectionsOrFollowers: '500+ connections',
-        lastActivityDate: 'N/A', // Reliable activity data not claimed unless provided
-        source: process.env.LEAD_PROVIDER_NAME || 'Production Public Search API'
-      });
-    }
-
-    res.json({
-      success: true,
-      leads: publicLeads
-    });
-  } catch (err: any) {
-    res.status(502).json({ error: 'Failed to communicate with external lead discovery service.' });
+  const result = await executeLeadSearch(filters as LeadFilter, req.body.providerType);
+  if (result.status !== 200) {
+    res.status(result.status).json(result.body);
+    return;
   }
+
+  res.json({
+    success: true,
+    leads: result.body.leads
+  });
 });
 
 // 6. LinkedIn Profile Analysis Endpoint for Profile-Link Mode ICP Generation
@@ -374,4 +351,3 @@ Return valid JSON only with keys:
     res.status(500).json({ error: error.message || 'Failed to analyze LinkedIn profile.' });
   }
 });
-

@@ -16,15 +16,15 @@ This guide details how to deploy the **LinkedIn Lead Finder** full-stack applica
 ## 2. Project Structure for Vercel
 
 - **Frontend**: React + TypeScript + Vite built into `/dist`.
-- **Backend**: Express API handler bridged via `api/index.ts` targeting Vercel Serverless Functions.
-- **Routing**: Configured via `vercel.json` routing all `/api/*` requests to the Express serverless bridge and client-side routing to `index.html`.
+- **Backend**: `api/index.ts` is the single Vercel serverless function entry point and exports the Express app from `src/server/lambda.ts`.
+- **Routing**: Vercel routes `/api/*` requests to the tracked Express function in `/api/index.ts`; `vercel.json` sends non-API client-side routes to the built `index.html`.
 
 ---
 
 ## 3. Step-by-Step Deployment Instructions
 
 1. **Push your code to GitHub**:
-   Ensure your latest repository commit includes `vercel.json`, `api/index.ts`, and `server.ts`.
+   Ensure your latest repository commit includes `vercel.json`, `api/index.ts`, and `src/server/lambda.ts`. Vercel builds the function from this tracked entry point; Vite builds the frontend into `dist/`.
 
 2. **Import Project into Vercel**:
    - Go to the [Vercel Dashboard](https://vercel.com/dashboard).

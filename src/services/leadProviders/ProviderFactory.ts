@@ -5,7 +5,7 @@ import { LeadOceanLeadProvider } from './LeadOceanLeadProvider';
 import { SerperSearchLeadProvider } from './SerperSearchLeadProvider';
 
 let currentConfig: LeadProviderConfig = {
-  providerType: 'google_places',
+  providerType: 'google_search',
   apiKey: '',
   customEndpoint: ''
 };
@@ -24,7 +24,7 @@ export class ProviderFactory {
       process.env.GOOGLE_MAPS_API_KEY ||
       process.env.VITE_GOOGLE_MAPS_API_KEY ||
       process.env.PLACES_API_KEY ||
-      (currentConfig.providerType === 'google_places' ? currentConfig.apiKey : '');
+      (currentConfig.providerType === 'google_search' ? currentConfig.apiKey : '');
 
     const serperKey =
       process.env.SERPER_API_KEY ||
@@ -37,7 +37,7 @@ export class ProviderFactory {
       process.env.LEAD_PROVIDER_API_KEY;
 
     // Prefer Google Maps Platform Places API (New) as primary
-    if ((currentConfig.providerType === 'google_places' || !currentConfig.providerType) && googleMapsKey) {
+    if ((currentConfig.providerType === 'google_search' || !currentConfig.providerType) && googleMapsKey) {
       return new GoogleMapsPlacesLeadProvider(googleMapsKey);
     }
 
