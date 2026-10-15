@@ -12,6 +12,14 @@ const INITIAL_RETRY_DELAY_MS = 500;
 const MAX_RETRY_DELAY_MS = 2000;
 const MAX_RETRY_AFTER_MS = 15000;
 const RETRYABLE_HTTP_STATUSES = new Set([429, 500, 502, 503, 504]);
+const DEFAULT_TOTAL_BUDGET_MS = 60000;
+
+export interface OverpassSearchOptions {
+  bypassCache?: boolean;
+  maxResults?: number;
+  maxAttempts?: number;
+  totalBudgetMs?: number;
+}
 
 type OsmElement = {
   type: 'node' | 'way' | 'relation';
@@ -31,7 +39,13 @@ type CachedResult = { expiresAt: number; leads: RawLead[] };
 export class OverpassApiError extends Error {
   constructor(
     message: string,
-    readonly httpStatus?: number
+    readonly httpStatus?: number,
+    readonly diagnostics: {
+      attemptCount?: number;
+      elapsedMs?: number;
+      timeoutReason?: string;
+      upstreamHttpStatus?: number;
+    } = {}
   ) {
     super(message);
     this.name = 'OverpassApiError';
@@ -230,90 +244,194 @@ export class OverpassLeadProvider implements LeadProvider {
     this.waitForSlot = waitForSlot ?? this.waitForRequestSlot.bind(this);
   }
 
-  async search(filters: LeadFilter, queryResultLimit = MAX_RESULTS): Promise<RawLead[]> {
-    const query = buildOverpassQuery(filters, queryResultLimit);
+  async search(filters: LeadFilter, options: OverpassSearchOptions = {}): Promise<RawLead[]> {
+    const query = buildOverpassQuery(filters, options.maxResults ?? MAX_RESULTS);
     const cached = OverpassLeadProvider.cache.get(query);
-    if (cached && cached.expiresAt > Date.now()) {
+    if (!options.bypassCache && cached && cached.expiresAt > Date.now()) {
       return cached.leads.slice(0, normalizeResultLimit(filters.maxLeads));
     }
 
-    let data: OverpassResponse | undefined;
-    for (let attempt = 1; attempt <= MAX_REQUEST_ATTEMPTS; attempt++) {
-      await this.waitForSlot();
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-      let response: Response | undefined;
+    const startedAt = Date.now();
+    const totalBudgetMs = normalizeBudget(options.totalBudgetMs);
+    const deadline = startedAt + totalBudgetMs;
+    const maxAttempts = normalizeAttempts(options.maxAttempts);
+    let attemptCount = 0;
+    let lastUpstreamStatus: number | undefined;
 
-      try {
-        response = await this.fetcher(this.endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'User-Agent': 'LinkedInLeadFinder/1.0 (OpenStreetMap Overpass business search)'
-          },
-          body: `data=${encodeURIComponent(query)}`,
-          signal: controller.signal
-        });
+    try {
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        await this.awaitWithinBudget(this.waitForSlot(), deadline);
 
-        if (response.ok) {
-          const parsed: unknown = await response.json();
-          if (
-            parsed === null ||
-            typeof parsed !== 'object' ||
-            !Array.isArray((parsed as { elements?: unknown }).elements)
-          ) {
-            throw new OverpassApiError('OpenStreetMap Overpass returned malformed JSON or an invalid response.');
-          }
-          data = parsed as OverpassResponse;
-          break;
-        }
-      } catch (error) {
-        if (error instanceof OverpassApiError) throw error;
+        const remainingMs = deadline - Date.now();
+        if (remainingMs <= 0) throw this.totalBudgetError(totalBudgetMs);
 
-        const timedOut = error instanceof Error && error.name === 'AbortError';
-        clearTimeout(timeoutId);
-        const isMalformedResponse = response?.ok === true;
-        if (!timedOut && isMalformedResponse) {
-          throw new OverpassApiError('OpenStreetMap Overpass returned malformed JSON or an invalid response.');
-        }
-        if (attempt === MAX_REQUEST_ATTEMPTS) {
-          throw new OverpassApiError(
-            timedOut
-              ? `OpenStreetMap Overpass request timed out (${REQUEST_TIMEOUT_MS / 1000}s limit).`
-              : 'Network error connecting to the public OpenStreetMap Overpass API.'
+        const requestTimeoutMs = Math.min(REQUEST_TIMEOUT_MS, remainingMs);
+        const timeoutReason =
+          remainingMs <= REQUEST_TIMEOUT_MS
+            ? `Total request budget exceeded (${totalBudgetMs}ms).`
+            : `Overpass request timed out (${REQUEST_TIMEOUT_MS / 1000}s per-attempt limit).`;
+        const controller = new AbortController();
+        attemptCount = attempt;
+        let response: Response | { response: Response; data: OverpassResponse };
+        try {
+          response = await this.withRequestTimeout(
+            async () => {
+              const result = await this.fetcher(this.endpoint, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/x-www-form-urlencoded',
+                  'User-Agent': 'LinkedInLeadFinder/1.0 (OpenStreetMap Overpass business search)'
+                },
+                body: `data=${encodeURIComponent(query)}`,
+                signal: controller.signal
+              });
+              if (!result.ok) return result;
+
+              const responseText = await result.text();
+              if (Date.now() >= deadline) throw this.totalBudgetError(totalBudgetMs);
+              let parsed: unknown;
+              try {
+                parsed = JSON.parse(responseText);
+              } catch {
+                throw new OverpassApiError(
+                  'OpenStreetMap Overpass returned malformed JSON or an invalid response.'
+                );
+              }
+              if (
+                parsed === null ||
+                typeof parsed !== 'object' ||
+                !Array.isArray((parsed as { elements?: unknown }).elements)
+              ) {
+                throw new OverpassApiError(
+                  'OpenStreetMap Overpass returned malformed JSON or an invalid response.'
+                );
+              }
+              if (Date.now() >= deadline) throw this.totalBudgetError(totalBudgetMs);
+              return { response: result, data: parsed as OverpassResponse };
+            },
+            requestTimeoutMs,
+            controller,
+            timeoutReason
           );
-        }
-        await this.delay(this.retryDelay(attempt));
-        continue;
-      } finally {
-        clearTimeout(timeoutId);
-      }
-
-      if (response && !response.ok) {
-        const canRetry = RETRYABLE_HTTP_STATUSES.has(response.status);
-        const retryAfterMs = this.retryAfterDelay(response.headers.get('Retry-After'));
-        if (canRetry && attempt < MAX_REQUEST_ATTEMPTS && retryAfterMs <= MAX_RETRY_AFTER_MS) {
-          await this.delay(Math.max(this.retryDelay(attempt), retryAfterMs));
+        } catch (error) {
+          const timedOut = error instanceof Error && error.name === 'AbortError';
+          const requestError = error instanceof OverpassApiError
+            ? error
+            : timedOut
+            ? new OverpassApiError(timeoutReason, undefined, { timeoutReason })
+            : new OverpassApiError(
+                'Network error connecting to the public OpenStreetMap Overpass API.'
+              );
+          const canRetryTimeout =
+            requestError instanceof OverpassApiError &&
+            requestError.diagnostics.timeoutReason?.startsWith('Overpass request timed out') &&
+            attempt < maxAttempts;
+          const canRetryNetwork =
+            requestError.message === 'Network error connecting to the public OpenStreetMap Overpass API.' &&
+            attempt < maxAttempts;
+          if (!canRetryTimeout && !canRetryNetwork) throw requestError;
+          await this.awaitWithinBudget(
+            this.delay(this.retryDelay(attempt)),
+            deadline,
+            `Total request budget exceeded (${totalBudgetMs}ms) while waiting to retry.`
+          );
           continue;
         }
-        throw this.httpError(response.status);
+
+        if ('data' in response) {
+          const leads = deduplicateBusinessLeads(
+            response.data.elements
+              .map(mapOsmElementToLead)
+              .filter((lead): lead is RawLead => lead !== null)
+              .filter(lead => matchesBusinessFilters(lead, filters))
+          );
+          if (Date.now() >= deadline) throw this.totalBudgetError(totalBudgetMs);
+
+          OverpassLeadProvider.cache.set(query, { expiresAt: Date.now() + CACHE_TTL_MS, leads });
+          if (OverpassLeadProvider.cache.size > 100) {
+            const oldestKey = OverpassLeadProvider.cache.keys().next().value;
+            if (oldestKey) OverpassLeadProvider.cache.delete(oldestKey);
+          }
+          return leads.slice(0, normalizeResultLimit(filters.maxLeads));
+        }
+
+        lastUpstreamStatus = response.status;
+        const canRetry =
+          RETRYABLE_HTTP_STATUSES.has(response.status) && attempt < maxAttempts;
+        if (!canRetry) throw this.httpError(response.status);
+
+        const retryAfterMs = this.retryAfterDelay(response.headers.get('Retry-After'));
+        if (retryAfterMs > MAX_RETRY_AFTER_MS) throw this.httpError(response.status);
+        const waitMs = Math.max(this.retryDelay(attempt), retryAfterMs);
+        await this.awaitWithinBudget(
+          this.delay(waitMs),
+          deadline,
+          `Total request budget exceeded (${totalBudgetMs}ms) while waiting to retry.`
+        );
       }
+      throw new OverpassApiError('OpenStreetMap Overpass returned no response.');
+    } catch (error) {
+      const elapsedMs = Date.now() - startedAt;
+      const failure =
+        error instanceof OverpassApiError
+          ? error
+          : new OverpassApiError('Network error connecting to the public OpenStreetMap Overpass API.');
+      throw new OverpassApiError(failure.message, failure.httpStatus, {
+        attemptCount,
+        elapsedMs,
+        timeoutReason: failure.diagnostics.timeoutReason,
+        upstreamHttpStatus: lastUpstreamStatus
+      });
     }
+  }
 
-    if (!data) throw new OverpassApiError('OpenStreetMap Overpass returned no response.');
-    const leads = deduplicateBusinessLeads(
-      data.elements
-        .map(mapOsmElementToLead)
-        .filter((lead): lead is RawLead => lead !== null)
-        .filter(lead => matchesBusinessFilters(lead, filters))
-    );
-
-    OverpassLeadProvider.cache.set(query, { expiresAt: Date.now() + CACHE_TTL_MS, leads });
-    if (OverpassLeadProvider.cache.size > 100) {
-      const oldestKey = OverpassLeadProvider.cache.keys().next().value;
-      if (oldestKey) OverpassLeadProvider.cache.delete(oldestKey);
+  private async withRequestTimeout<T>(
+    operation: () => Promise<T>,
+    timeoutMs: number,
+    controller: AbortController,
+    timeoutReason: string
+  ): Promise<T> {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => {
+        controller.abort();
+        reject(new OverpassApiError(timeoutReason, undefined, { timeoutReason }));
+      }, timeoutMs);
+    });
+    try {
+      return await Promise.race([operation(), timeout]);
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
     }
-    return leads.slice(0, normalizeResultLimit(filters.maxLeads));
+  }
+
+  private async awaitWithinBudget<T>(
+    operation: Promise<T>,
+    deadline: number,
+    message?: string
+  ): Promise<T> {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) throw this.totalBudgetError(message);
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(
+        () => reject(this.totalBudgetError(message)),
+        remainingMs
+      );
+    });
+    try {
+      return await Promise.race([operation, timeout]);
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+  }
+
+  private totalBudgetError(message?: string | number): OverpassApiError {
+    const reason =
+      typeof message === 'number'
+        ? `Total request budget exceeded (${message}ms).`
+        : message || 'Total request time budget exceeded.';
+    return new OverpassApiError(reason, undefined, { timeoutReason: reason });
   }
 
   private retryDelay(attempt: number): number {
@@ -374,6 +492,16 @@ export class OverpassLeadProvider implements LeadProvider {
     );
     await queuedRequest;
   }
+}
+
+function normalizeBudget(value?: number): number {
+  if (value === undefined || !Number.isFinite(value)) return DEFAULT_TOTAL_BUDGET_MS;
+  return Math.min(Math.max(Math.floor(value), 1), 120000);
+}
+
+function normalizeAttempts(value?: number): number {
+  if (value === undefined || !Number.isFinite(value)) return MAX_REQUEST_ATTEMPTS;
+  return Math.min(Math.max(Math.floor(value), 1), MAX_REQUEST_ATTEMPTS);
 }
 
 function normalizeResultLimit(limit: number): number {

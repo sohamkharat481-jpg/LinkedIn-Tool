@@ -152,7 +152,13 @@ export const handleTestConnection = async (req: Request, res: Response) => {
       req.body?.providerType;
 
     const testResult = await ServerLeadProviderService.testConnection(apiKey, providerType);
-    res.json(testResult);
+    const responseStatus =
+      testResult.success
+        ? 200
+        : testResult.httpStatus >= 400 && testResult.httpStatus <= 599
+        ? testResult.httpStatus
+        : 502;
+    res.status(responseStatus).json(testResult);
   } catch (error: any) {
     console.error('API /provider-status/test error:', error);
     res.status(500).json({

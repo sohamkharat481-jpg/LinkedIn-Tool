@@ -7,6 +7,7 @@ import {
   OverpassApiError,
   OverpassLeadProvider
 } from '../src/services/leadProviders/OverpassLeadProvider';
+import { ServerLeadProviderService } from '../src/server/leadProviderService';
 import { LeadFilter } from '../src/types';
 
 const filters: LeadFilter = {
@@ -38,12 +39,13 @@ const cafeElement = {
 
 const createTestProvider = (
   fetcher: typeof fetch,
-  delays: number[] = []
+  delays: number[] = [],
+  waitForSlot: () => Promise<void> = async () => {}
 ): OverpassLeadProvider =>
   new OverpassLeadProvider(
     'https://overpass-api.de/api/interpreter',
     fetcher,
-    async () => {},
+    waitForSlot,
     async milliseconds => {
       delays.push(milliseconds);
     }
@@ -143,6 +145,23 @@ test('retries HTTP 502 with bounded exponential backoff and accepts a successful
   assert.equal(leads[0].companyName, 'Example Cafe');
 });
 
+test('preserves upstream HTTP 500, 502, and 504 with attempt and elapsed diagnostics', async () => {
+  for (const status of [500, 502, 504]) {
+    const provider = createTestProvider(async () => new Response('upstream failure', { status }));
+    await assert.rejects(
+      provider.search({ ...filters, city: `upstream ${status} test` }, { maxAttempts: 1 }),
+      (error: unknown) => {
+        assert.ok(error instanceof OverpassApiError);
+        assert.equal(error.httpStatus, status);
+        assert.equal(error.diagnostics.upstreamHttpStatus, status);
+        assert.equal(error.diagnostics.attemptCount, 1);
+        assert.ok(typeof error.diagnostics.elapsedMs === 'number');
+        return true;
+      }
+    );
+  }
+});
+
 test('honors Retry-After when retrying HTTP 503', async () => {
   let calls = 0;
   const delays: number[] = [];
@@ -195,34 +214,100 @@ test('bounds retries for request timeouts', async () => {
 
   await assert.rejects(provider.search({ ...filters, city: 'timeout retry test' }), (error: unknown) => {
     assert.ok(error instanceof OverpassApiError);
-    assert.match(error.message, /timed out \(15s limit\)/);
+    assert.match(error.message, /timed out \(15s per-attempt limit\)/);
     return true;
   });
   assert.equal(calls, 3);
   assert.deepEqual(delays, [500, 1000]);
 });
 
-test('keeps the timeout active while reading the response body', async () => {
-  let calls = 0;
-  const delays: number[] = [];
+test('aborts a stalled request when its total time budget expires', async () => {
+  let requestSignal: AbortSignal | undefined;
+  const provider = createTestProvider((_input, init) => {
+    requestSignal = init?.signal as AbortSignal;
+    return new Promise<Response>(() => {});
+  });
+
+  await assert.rejects(
+    provider.search({ ...filters, city: 'total timeout test' }, { totalBudgetMs: 30, maxAttempts: 1 }),
+    (error: unknown) => {
+      assert.ok(error instanceof OverpassApiError);
+      assert.match(error.message, /Total request budget exceeded \(30ms\)/);
+      assert.equal(error.diagnostics.attemptCount, 1);
+      assert.equal(error.diagnostics.timeoutReason, 'Total request budget exceeded (30ms).');
+      assert.ok((error.diagnostics.elapsedMs ?? 0) < 500);
+      return true;
+    }
+  );
+  assert.equal(requestSignal?.aborted, true);
+});
+
+test('enforces the total budget while waiting for an interval slot', async () => {
+  let requests = 0;
   const provider = createTestProvider(async () => {
+    requests++;
+    return new Response(JSON.stringify({ elements: [] }), { status: 200 });
+  }, [], () => new Promise(() => {}));
+
+  await assert.rejects(
+    provider.search({ ...filters, city: 'slot budget test' }, { totalBudgetMs: 25 }),
+    (error: unknown) => {
+      assert.ok(error instanceof OverpassApiError);
+      assert.equal(error.diagnostics.timeoutReason, 'Total request time budget exceeded.');
+      assert.equal(error.diagnostics.attemptCount, 0);
+      return true;
+    }
+  );
+  assert.equal(requests, 0);
+});
+
+test('enforces the total budget instead of sleeping past Retry-After', async () => {
+  let calls = 0;
+  const provider = new OverpassLeadProvider(
+    'https://overpass-api.de/api/interpreter',
+    async () => {
+      calls++;
+      return new Response('busy', { status: 503, headers: { 'Retry-After': '1' } });
+    },
+    async () => {},
+    milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
+  );
+
+  await assert.rejects(
+    provider.search({ ...filters, city: 'retry-after budget test' }, { totalBudgetMs: 35 }),
+    (error: unknown) => {
+      assert.ok(error instanceof OverpassApiError);
+      assert.equal(error.diagnostics.upstreamHttpStatus, 503);
+      assert.equal(error.diagnostics.attemptCount, 1);
+      assert.match(error.diagnostics.timeoutReason || '', /budget exceeded/);
+      return true;
+    }
+  );
+  assert.equal(calls, 1);
+});
+
+test('keeps a response-body read inside the request timeout and retries it safely', async () => {
+  let calls = 0;
+  let lastSignal: AbortSignal | undefined;
+  const delays: number[] = [];
+  const provider = createTestProvider((_input, init) => {
     calls++;
-    const response = new Response('{}', { status: 200 });
-    response.json = async () => {
-      const error = new Error('aborted while reading body');
-      error.name = 'AbortError';
-      throw error;
-    };
-    return response;
+    lastSignal = init?.signal as AbortSignal;
+    const response = new Response('');
+    response.text = () => new Promise<string>(() => {});
+    return Promise.resolve(response);
   }, delays);
 
-  await assert.rejects(provider.search({ ...filters, city: 'body timeout test' }), (error: unknown) => {
-    assert.ok(error instanceof OverpassApiError);
-    assert.match(error.message, /timed out \(15s limit\)/);
-    return true;
-  });
-  assert.equal(calls, 3);
-  assert.deepEqual(delays, [500, 1000]);
+  await assert.rejects(
+    provider.search({ ...filters, city: 'body timeout test' }, { totalBudgetMs: 25, maxAttempts: 1 }),
+    (error: unknown) => {
+      assert.ok(error instanceof OverpassApiError);
+      assert.match(error.message, /Total request budget exceeded \(25ms\)/);
+      return true;
+    }
+  );
+  assert.equal(calls, 1);
+  assert.equal(lastSignal?.aborted, true);
 });
 
 test('returns a genuine empty result without retries', async () => {
@@ -235,4 +320,108 @@ test('returns a genuine empty result without retries', async () => {
   const leads = await provider.search({ ...filters, city: 'empty result test' });
   assert.deepEqual(leads, []);
   assert.equal(calls, 1);
+});
+
+test('bypasses cached data when performing an explicitly fresh check', async () => {
+  let calls = 0;
+  const provider = createTestProvider(async () => {
+    calls++;
+    if (calls === 1) return new Response(JSON.stringify({ elements: [cafeElement] }), { status: 200 });
+    return new Response('temporarily unavailable', { status: 502 });
+  });
+  const checkFilters = { ...filters, city: 'fresh health-check cache test' };
+
+  assert.equal((await provider.search(checkFilters, { maxResults: 1 })).length, 1);
+  await assert.rejects(
+    provider.search(checkFilters, { bypassCache: true, maxResults: 1, maxAttempts: 1 }),
+    (error: unknown) => {
+      assert.ok(error instanceof OverpassApiError);
+      assert.equal(error.httpStatus, 502);
+      return true;
+    }
+  );
+  assert.equal(calls, 2);
+});
+
+test('health checks use a configurable single-request budget and do not pass on empty data', async () => {
+  const searchDescriptor = Object.getOwnPropertyDescriptor(OverpassLeadProvider.prototype, 'search');
+  const originalBudget = process.env.OVERPASS_HEALTH_CHECK_BUDGET_MS;
+  let searchOptions: unknown;
+
+  Object.defineProperty(OverpassLeadProvider.prototype, 'search', {
+    configurable: true,
+    value: async (_filters: LeadFilter, options: unknown) => {
+      searchOptions = options;
+      return [];
+    }
+  });
+  process.env.OVERPASS_HEALTH_CHECK_BUDGET_MS = '12000';
+
+  try {
+    const result = await ServerLeadProviderService.testConnection(undefined, 'overpass');
+    assert.deepEqual(searchOptions, {
+      bypassCache: true,
+      maxResults: 1,
+      maxAttempts: 1,
+      totalBudgetMs: 12000
+    });
+    assert.equal(result.success, false);
+    assert.equal(result.httpStatus, 503);
+    assert.equal(result.upstreamHttpStatus, 200);
+    assert.equal(result.placesReturned, 0);
+    assert.match(result.message, /no named business data/);
+    assert.equal(ServerLeadProviderService.getStatus(undefined, 'overpass').status, 'Error');
+  } finally {
+    if (searchDescriptor) {
+      Object.defineProperty(OverpassLeadProvider.prototype, 'search', searchDescriptor);
+    } else {
+      delete (OverpassLeadProvider.prototype as { search?: unknown }).search;
+    }
+    if (originalBudget === undefined) delete process.env.OVERPASS_HEALTH_CHECK_BUDGET_MS;
+    else process.env.OVERPASS_HEALTH_CHECK_BUDGET_MS = originalBudget;
+  }
+});
+
+test('health diagnostics preserve sanitized upstream status, attempts, elapsed time and timeout reason', async () => {
+  const searchDescriptor = Object.getOwnPropertyDescriptor(OverpassLeadProvider.prototype, 'search');
+  Object.defineProperty(OverpassLeadProvider.prototype, 'search', {
+    configurable: true,
+    value: async () => {
+      throw new OverpassApiError(
+        'OpenStreetMap Overpass is temporarily unavailable (HTTP 502). Try again later.',
+        502,
+        {
+          attemptCount: 2,
+          elapsedMs: 734,
+          upstreamHttpStatus: 502,
+          timeoutReason: 'Retry budget would exceed the health-check deadline.'
+        }
+      );
+    }
+  });
+
+  try {
+    const result = await ServerLeadProviderService.testConnection(undefined, 'overpass');
+    assert.equal(result.success, false);
+    assert.equal(result.httpStatus, 502);
+    assert.equal(result.upstreamHttpStatus, 502);
+    assert.equal(result.attemptCount, 2);
+    assert.equal(result.elapsedMs, 734);
+    assert.equal(result.timeoutReason, 'Retry budget would exceed the health-check deadline.');
+    assert.deepEqual(result.diagnostics, {
+      attemptCount: 2,
+      elapsedMs: 734,
+      upstreamHttpStatus: 502,
+      timeoutReason: 'Retry budget would exceed the health-check deadline.'
+    });
+    const status = ServerLeadProviderService.getStatus(undefined, 'overpass');
+    assert.equal(status.diagnostics?.upstreamHttpStatus, 502);
+    assert.equal(status.diagnostics?.attemptCount, 2);
+  } finally {
+    if (searchDescriptor) {
+      Object.defineProperty(OverpassLeadProvider.prototype, 'search', searchDescriptor);
+    } else {
+      delete (OverpassLeadProvider.prototype as { search?: unknown }).search;
+    }
+  }
 });

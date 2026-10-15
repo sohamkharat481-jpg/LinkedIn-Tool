@@ -13,8 +13,23 @@ let overpassConnectionVerified = false;
 let overpassLastSuccessTimestamp = 'None yet';
 let overpassLastError = 'None';
 let overpassLastResponseTime: number | string = 'N/A';
+let overpassLastDiagnostics: OverpassApiError['diagnostics'] = {};
 
 const isProductionRuntime = () => Boolean(process.env.VERCEL || process.env.NODE_ENV === 'production');
+
+function getOverpassHealthCheckBudgetMs(): number {
+  const configured = Number(process.env.OVERPASS_HEALTH_CHECK_BUDGET_MS);
+  if (!Number.isFinite(configured) || configured <= 0) return 8000;
+  return Math.min(Math.max(Math.floor(configured), 1000), 15000);
+}
+
+function overpassDiagnosticHttpStatus(upstreamStatus: number): number {
+  if (upstreamStatus === 429) return 429;
+  if (upstreamStatus === 503) return 503;
+  if (upstreamStatus === 504) return 504;
+  if (upstreamStatus >= 500) return 502;
+  return upstreamStatus >= 400 ? 502 : 503;
+}
 
 const googleMapsApiKey = () =>
   process.env.GOOGLE_MAPS_API_KEY ||
@@ -69,7 +84,15 @@ export interface ProviderDiagnosticTestResult {
   message: string;
   sanitizedProviderError: string | null;
   timestamp: string;
+  attemptCount?: number;
+  upstreamHttpStatus?: number;
+  elapsedMs?: number;
+  timeoutReason?: string;
   diagnostics?: {
+    upstreamHttpStatus?: number;
+    attemptCount?: number;
+    elapsedMs?: number;
+    timeoutReason?: string;
     apiKeyDetected?: boolean;
     providerInitialized?: boolean;
     httpStatusCode?: number;
@@ -235,7 +258,14 @@ export class ServerLeadProviderService {
         lastSuccessfulRequest: overpassLastSuccessTimestamp,
         lastError: overpassLastError,
         responseTimeMs: overpassLastResponseTime,
-        isExternal: true
+        isExternal: true,
+        diagnostics: {
+          httpStatusCode: overpassLastDiagnostics.upstreamHttpStatus,
+          upstreamHttpStatus: overpassLastDiagnostics.upstreamHttpStatus,
+          attemptCount: overpassLastDiagnostics.attemptCount,
+          elapsedMs: overpassLastDiagnostics.elapsedMs,
+          timeoutReason: overpassLastDiagnostics.timeoutReason
+        }
       };
     }
 
@@ -392,6 +422,7 @@ export class ServerLeadProviderService {
     const startTime = Date.now();
 
     if (type === 'overpass') {
+      const healthCheckBudgetMs = getOverpassHealthCheckBudgetMs();
       try {
         const leads = await new OverpassLeadProvider().search({
           jobTitles: [],
@@ -401,12 +432,55 @@ export class ServerLeadProviderService {
           seniority: [],
           companySize: [],
           maxLeads: 1
-        }, 1);
+        }, {
+          bypassCache: true,
+          maxResults: 1,
+          maxAttempts: 1,
+          totalBudgetMs: healthCheckBudgetMs
+        });
         const duration = Date.now() - startTime;
+        if (leads.length === 0) {
+          overpassConnectionVerified = false;
+          overpassLastError = 'Overpass returned no named business data for the bounded health check.';
+          overpassLastResponseTime = `${duration}ms`;
+          overpassLastDiagnostics = {
+            attemptCount: 1,
+            elapsedMs: duration,
+            upstreamHttpStatus: 200
+          };
+          return {
+            success: false,
+            httpStatus: 503,
+            provider: 'OpenStreetMap Overpass API',
+            endpoint: 'https://overpass-api.de/api/interpreter',
+            placesReturned: 0,
+            responseTime: `${duration}ms`,
+            responseTimeMs: duration,
+            configured: true,
+            status: 'Error',
+            authStatus: 'No business data returned',
+            message: overpassLastError,
+            sanitizedProviderError: overpassLastError,
+            timestamp: new Date().toISOString(),
+            attemptCount: 1,
+            upstreamHttpStatus: 200,
+            elapsedMs: duration,
+            diagnostics: {
+              attemptCount: 1,
+              elapsedMs: duration,
+              upstreamHttpStatus: 200
+            }
+          };
+        }
         overpassConnectionVerified = true;
         overpassLastSuccessTimestamp = new Date().toISOString();
         overpassLastError = 'None';
         overpassLastResponseTime = `${duration}ms`;
+        overpassLastDiagnostics = {
+          attemptCount: 1,
+          elapsedMs: duration,
+          upstreamHttpStatus: 200
+        };
         return {
           success: true,
           httpStatus: 200,
@@ -420,24 +494,38 @@ export class ServerLeadProviderService {
           authStatus: 'No API key required',
           message: `Overpass accepted a bounded London test query; ${leads.length} named business result(s) matched the test.`,
           sanitizedProviderError: null,
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
+          attemptCount: 1,
+          upstreamHttpStatus: 200,
+          elapsedMs: duration,
+          diagnostics: {
+            attemptCount: 1,
+            elapsedMs: duration,
+            upstreamHttpStatus: 200
+          }
         };
       } catch (error) {
         const duration = Date.now() - startTime;
         const message = error instanceof Error ? error.message : 'Overpass connection test failed.';
+        const diagnostics =
+          error instanceof OverpassApiError
+            ? error.diagnostics
+            : { attemptCount: 0, elapsedMs: duration };
+        const upstreamHttpStatus =
+          diagnostics.upstreamHttpStatus ?? (error instanceof OverpassApiError ? error.httpStatus : undefined);
         overpassConnectionVerified = false;
         overpassLastError = message;
         overpassLastResponseTime = `${duration}ms`;
+        overpassLastDiagnostics = { ...diagnostics, upstreamHttpStatus };
+        const httpStatus =
+          error instanceof OverpassApiError && error.httpStatus
+            ? overpassDiagnosticHttpStatus(error.httpStatus)
+            : diagnostics.timeoutReason
+            ? 504
+            : 502;
         return {
           success: false,
-          httpStatus:
-            error instanceof OverpassApiError && error.httpStatus
-              ? error.httpStatus >= 500
-                ? 503
-                : error.httpStatus
-              : message.includes('timed out')
-              ? 504
-              : 502,
+          httpStatus,
           provider: 'OpenStreetMap Overpass API',
           endpoint: 'https://overpass-api.de/api/interpreter',
           placesReturned: 0,
@@ -448,7 +536,17 @@ export class ServerLeadProviderService {
           authStatus: 'Public endpoint error',
           message,
           sanitizedProviderError: message,
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
+          attemptCount: diagnostics.attemptCount,
+          upstreamHttpStatus,
+          elapsedMs: diagnostics.elapsedMs ?? duration,
+          timeoutReason: diagnostics.timeoutReason,
+          diagnostics: {
+            attemptCount: diagnostics.attemptCount,
+            elapsedMs: diagnostics.elapsedMs ?? duration,
+            upstreamHttpStatus,
+            timeoutReason: diagnostics.timeoutReason
+          }
         };
       }
     }
@@ -826,14 +924,25 @@ export class ServerLeadProviderService {
     if (type === 'overpass') {
       try {
         const results = await new OverpassLeadProvider().search(filters);
-        overpassConnectionVerified = true;
-        overpassLastSuccessTimestamp = new Date().toISOString();
-        overpassLastError = 'None';
-        overpassLastResponseTime = `${Date.now() - startTime}ms`;
+        const elapsedMs = Date.now() - startTime;
+        if (results.length === 0) {
+          overpassConnectionVerified = false;
+          overpassLastError = 'Overpass search returned no named business results.';
+          overpassLastResponseTime = `${elapsedMs}ms`;
+          overpassLastDiagnostics = { elapsedMs };
+        }
         return results;
       } catch (err) {
         overpassConnectionVerified = false;
         overpassLastError = err instanceof Error ? err.message : 'OpenStreetMap Overpass search error.';
+        overpassLastResponseTime = `${Date.now() - startTime}ms`;
+        overpassLastDiagnostics =
+          err instanceof OverpassApiError
+            ? {
+                ...err.diagnostics,
+                upstreamHttpStatus: err.diagnostics.upstreamHttpStatus ?? err.httpStatus
+              }
+            : { elapsedMs: Date.now() - startTime };
         throw err;
       }
     }

@@ -176,6 +176,10 @@ export interface ProviderStatusInfo {
     apiKeyDetected?: boolean;
     providerInitialized?: boolean;
     httpStatusCode?: number;
+    upstreamHttpStatus?: number;
+    attemptCount?: number;
+    elapsedMs?: number;
+    timeoutReason?: string;
     providerErrorMessage?: string;
     googleErrorMessage?: string;
     credentialSource?: string;
