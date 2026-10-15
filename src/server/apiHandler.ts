@@ -84,6 +84,7 @@ apiRouter.get('/diagnostics', async (req: Request, res: Response) => {
         appUrl: process.env.APP_URL || process.env.VERCEL_URL || 'Google Cloud Run Dev Environment'
       },
       providers: {
+        GOOGLE_MAPS_API_KEY: providerDiag.GOOGLE_MAPS_API_KEY,
         SERPER_API_KEY: providerDiag.SERPER_API_KEY,
         LEADOCEAN_API_KEY: providerDiag.LEADOCEAN_API_KEY,
         activeProvider: providerDiag.ActiveProvider
@@ -159,9 +160,9 @@ apiRouter.post('/search-leads', async (req: Request, res: Response) => {
     // Strict requirement: If missing API key, return clear configuration error (never fake leads)
     if (!resolved.key || resolved.key.trim() === '') {
       res.status(422).json({
-        error: 'Serper.dev provider is not configured.',
+        error: 'Google Maps Places provider is not configured.',
         code: 'NO_PROVIDER_CONFIGURED',
-        message: 'Please configure SERPER_API_KEY in environment variables.'
+        message: 'Please configure GOOGLE_MAPS_API_KEY or VITE_GOOGLE_MAPS_API_KEY in environment variables.'
       });
       return;
     }
@@ -176,13 +177,22 @@ apiRouter.post('/search-leads', async (req: Request, res: Response) => {
     // Step 2 & 3: Filtering & Deduplication Pipeline
     const dedupeResult = filterAndDeduplicateLeads(rawCandidates);
 
+    const isGooglePlaces = resolved.type === 'google_places';
     const isSerper = resolved.type === 'serper';
 
     res.json({
       success: true,
       provider: {
-        id: isSerper ? 'serper-search-provider' : 'leadocean-b2b-provider',
-        name: isSerper ? 'Serper.dev Google Search API' : 'LeadOcean B2B People Search API',
+        id: isGooglePlaces
+          ? 'google-maps-places-provider'
+          : isSerper
+          ? 'serper-search-provider'
+          : 'leadocean-b2b-provider',
+        name: isGooglePlaces
+          ? 'Google Maps Platform Places API (New)'
+          : isSerper
+          ? 'Serper.dev Google Search API'
+          : 'LeadOcean B2B People Search API',
         isMock: false
       },
       metrics: {
