@@ -4,6 +4,7 @@ server.ts
 api/index.ts
 .env
 .env.example
+.env.*
 .git
 *.log
 .DS_Store
