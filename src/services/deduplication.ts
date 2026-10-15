@@ -58,7 +58,14 @@ export function isValidLeadRecord(lead: RawLead): boolean {
   const hasName = Boolean(lead.fullName && lead.fullName.trim().length >= 2);
   const hasJobTitle = Boolean(lead.currentJobTitle && lead.currentJobTitle.trim().length >= 2);
   const hasCompany = Boolean(lead.companyName && lead.companyName.trim().length >= 1);
-  const hasUrl = Boolean(lead.profileUrl && lead.profileUrl.trim().toLowerCase().includes('linkedin.com'));
+  const hasUrl = Boolean(
+    lead.profileUrl &&
+    (lead.profileUrl.trim().toLowerCase().includes('linkedin.com') ||
+      lead.profileUrl.trim().toLowerCase().includes('google.com/maps') ||
+      lead.profileUrl.trim().toLowerCase().includes('maps.google.com') ||
+      lead.profileUrl.trim().toLowerCase().startsWith('http://') ||
+      lead.profileUrl.trim().toLowerCase().startsWith('https://'))
+  );
 
   return hasName && hasJobTitle && hasCompany && hasUrl;
 }
