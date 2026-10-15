@@ -16,8 +16,8 @@ This guide details how to deploy the **LinkedIn Lead Finder** full-stack applica
 ## 2. Project Structure for Vercel
 
 - **Frontend**: React + TypeScript + Vite built into `/dist`.
-- **Backend**: `api/index.ts` is the single Vercel serverless function entry point and exports the Express app from `src/server/lambda.ts`.
-- **Routing**: Vercel routes `/api/*` requests to the tracked Express function in `/api/index.ts`; `vercel.json` sends non-API client-side routes to the built `index.html`.
+- **Backend**: `api/index.ts` is the single Vercel serverless function entry point and invokes the Express app from `src/server/lambda.ts`.
+- **Routing**: `vercel.json` rewrites `/api` and `/api/*` to that function while preserving the original API path for Express. The function restores the path before Express routing; the SPA fallback excludes API paths and sends other client-side routes to the built `index.html`.
 
 ---
 
@@ -41,8 +41,9 @@ This guide details how to deploy the **LinkedIn Lead Finder** full-stack applica
    In the Vercel project settings under **Environment Variables** (Select Target: **Production**):
    - `SUPABASE_URL`: `https://your-project.supabase.co`
    - `SUPABASE_ANON_KEY`: `your-supabase-anon-key`
-   - `SERPER_API_KEY`: `your-serper-api-key` (Primary public search provider - server-side only)
-   - `LEADOCEAN_API_KEY`: `your-leadocean-api-key` (Alternative B2B provider - server-side only)
+   - `GOOGLE_MAPS_API_KEY`: `your-google-maps-api-key` (Primary Google Maps Places provider - server-side only)
+   - `SERPER_API_KEY`: `your-serper-api-key` (Optional fallback provider - server-side only)
+   - `LEADOCEAN_API_KEY`: `your-leadocean-api-key` (Optional fallback provider - server-side only)
    - `VITE_SUPABASE_URL`: `https://your-project.supabase.co`
    - `VITE_SUPABASE_ANON_KEY`: `your-supabase-anon-key`
 
@@ -56,5 +57,5 @@ This guide details how to deploy the **LinkedIn Lead Finder** full-stack applica
 Once deployed, verify your production deployment at your assigned Vercel domain (`https://your-project.vercel.app`):
 - `GET /api/health` -> Returns service status (`ok`).
 - `GET /api/supabase-status` -> Verifies Supabase connection, database query, and RLS persistence.
-- `GET /api/provider-status` -> Reports LeadOcean provider readiness and API status.
-- `POST /api/provider-status/test` -> Executes an authenticated test ping against LeadOcean API.
+- `GET /api/provider-status?type=google_search` -> Reports the configured real provider without exposing its key.
+- `POST /api/provider-status/test` -> Executes a live test against the server-configured provider.

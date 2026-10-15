@@ -3,6 +3,11 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "rewrites": [
+    { "source": "/api", "destination": "/api/index?__vercel_api_path=/api" },
+    {
+      "source": "/api/:path*",
+      "destination": "/api/index?__vercel_api_path=/api/:path*"
+    },
     { "source": "/:path((?!api(?:/|$)).*)", "destination": "/index.html" }
   ]
 }

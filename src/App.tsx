@@ -14,7 +14,6 @@ import {
 import { dbService } from './services/storage';
 import { SupabaseDataService } from './services/supabaseDataService';
 import { initAuthListener, setCachedAccessToken, googleSignIn, googleSignOut } from './services/auth';
-import { ProviderFactory } from './services/leadProviders/ProviderFactory';
 import { apiUrl } from './services/apiClient';
 
 import { TopBar } from './components/TopBar';
@@ -51,16 +50,16 @@ export default function App() {
   const [isGoogleConnected, setIsGoogleConnected] = useState<boolean>(false);
 
   const [providerConfig, setProviderConfig] = useState<LeadProviderConfig>({
-    providerType: 'serper'
+    providerType: 'google_search'
   });
 
   const [providerStatus, setProviderStatus] = useState<ProviderStatusInfo>({
     configured: false,
-    providerName: 'Serper.dev Google Search API',
+    providerName: 'Google Maps Platform Places API (New)',
     status: 'Not Configured',
-    message: 'Serper.dev API key is not configured. Please set SERPER_API_KEY in Vercel environment variables.',
+    message: 'Google Maps API key is not configured. Please set GOOGLE_MAPS_API_KEY in Vercel environment variables.',
     isMock: false,
-    endpointStatus: 'https://google.serper.dev/search',
+    endpointStatus: 'https://places.googleapis.com/v1/places:searchText',
     authStatus: 'Not Configured',
     lastSuccessfulRequest: 'None yet',
     lastError: 'None',
@@ -77,26 +76,35 @@ export default function App() {
   const fetchProviderStatus = async (cfg?: LeadProviderConfig) => {
     const activeCfg = cfg || providerConfig;
     try {
-      const res = await fetch(apiUrl(`/api/provider-status?type=${activeCfg.providerType}`), {
-        headers: {
-          'X-Provider-Api-Key': activeCfg.apiKey || ''
-        }
-      });
-      if (res.ok) {
-        const data: ProviderStatusInfo = await res.json();
-        setProviderStatus(data);
+      const res = await fetch(apiUrl(`/api/provider-status?type=${activeCfg.providerType}`));
+      if (!res.ok) {
+        throw new Error(`Provider status API returned HTTP ${res.status}.`);
       }
-    } catch {
+      const data: ProviderStatusInfo = await res.json();
+      setProviderStatus(data);
+    } catch (error: unknown) {
+      const providerName =
+        activeCfg.providerType === 'leadocean'
+          ? 'LeadOcean B2B People Search API'
+          : activeCfg.providerType === 'serper'
+          ? 'Serper.dev Google Search API'
+          : 'Google Maps Platform Places API (New)';
+      const message = error instanceof Error ? error.message : 'Unknown provider status error.';
       setProviderStatus({
         configured: false,
-        providerName: activeCfg.providerType === 'leadocean' ? 'LeadOcean B2B People Search API' : 'Serper.dev Google Search API',
-        status: 'Not Configured',
-        message: activeCfg.providerType === 'leadocean' ? 'LeadOcean API key is not configured.' : 'Serper.dev API key is not configured. Please set SERPER_API_KEY.',
+        providerName,
+        status: 'Error',
+        message: `Unable to load provider status: ${message}`,
         isMock: false,
-        endpointStatus: activeCfg.providerType === 'leadocean' ? 'https://api.leadocean.io/v1/people/search' : 'https://google.serper.dev/search',
-        authStatus: 'Missing Key',
+        endpointStatus:
+          activeCfg.providerType === 'leadocean'
+            ? 'https://api.leadocean.io/v1/people/search'
+            : activeCfg.providerType === 'serper'
+            ? 'https://google.serper.dev/search'
+            : 'https://places.googleapis.com/v1/places:searchText',
+        authStatus: 'Unavailable',
         lastSuccessfulRequest: 'None yet',
-        lastError: 'None',
+        lastError: message,
         responseTimeMs: 'N/A',
         isExternal: true
       });
@@ -226,8 +234,7 @@ export default function App() {
         filters,
         clientId: targetClient.id,
         workspaceId: activeWorkspace.id,
-        providerType: providerConfig.providerType,
-        apiKey: providerConfig.apiKey
+        providerType: providerConfig.providerType
       })
     });
 
@@ -327,7 +334,6 @@ export default function App() {
   const handleUpdateProviderConfig = (cfg: Partial<LeadProviderConfig>) => {
     const updated = { ...providerConfig, ...cfg };
     setProviderConfig(updated);
-    ProviderFactory.configure(updated);
     fetchProviderStatus(updated);
   };
 
