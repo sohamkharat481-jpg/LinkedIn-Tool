@@ -135,13 +135,44 @@ apiRouter.get('/provider-status/diagnostics', (req: Request, res: Response) => {
   }
 });
 
-// 3. Test Provider Connection
-apiRouter.post('/provider-status/test', async (req: Request, res: Response) => {
-  const { apiKey, providerType } = req.body;
+// 3. Test Provider Connection Endpoint (Supports both GET and POST)
+export const handleTestConnection = async (req: Request, res: Response) => {
+  try {
+    const apiKey =
+      (req.headers['x-goog-api-key'] as string) ||
+      (req.headers['x-provider-api-key'] as string) ||
+      (req.query?.key as string) ||
+      (req.query?.apiKey as string) ||
+      req.body?.apiKey;
+    const providerType =
+      (req.query?.type as string) ||
+      (req.query?.providerType as string) ||
+      req.body?.providerType;
 
-  const testResult = await ServerLeadProviderService.testConnection(apiKey, providerType);
-  res.json(testResult);
-});
+    const testResult = await ServerLeadProviderService.testConnection(apiKey, providerType);
+    res.json(testResult);
+  } catch (error: any) {
+    console.error('API /provider-status/test error:', error);
+    res.status(500).json({
+      success: false,
+      httpStatus: 500,
+      provider: 'Google Maps Platform Places API (New)',
+      endpoint: 'https://places.googleapis.com/v1/places:searchText',
+      placesReturned: 0,
+      responseTime: '0ms',
+      responseTimeMs: 0,
+      configured: false,
+      status: 'Error',
+      authStatus: 'Internal Error',
+      message: error.message || 'Failed to execute provider connection test.',
+      sanitizedProviderError: error.message || 'Internal server error',
+      timestamp: new Date().toISOString()
+    });
+  }
+};
+
+apiRouter.all('/provider-status/test', handleTestConnection);
+apiRouter.all('/api/provider-status/test', handleTestConnection);
 
 // 4. Main Search Leads Endpoint (Executes server-side provider, normalization & deduplication)
 apiRouter.post('/search-leads', async (req: Request, res: Response) => {
