@@ -475,7 +475,7 @@ apiRouter.get('/auth/instagram/start', async (req: Request, res: Response) => {
 
   // Enforce authorized workspace and client ownership using verified user identity
   const isAuthorized = await InstagramOAuthService.verifyClientAuthorization(
-    workspaceId,
+    workspaceId.trim(),
     clientId.trim(),
     verifiedUserId
   );
