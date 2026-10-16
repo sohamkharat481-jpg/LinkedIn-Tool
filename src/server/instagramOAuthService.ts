@@ -74,6 +74,8 @@ export class InstagramOAuthService {
   ): Promise<boolean> {
     if (!workspaceId || !clientId || !userId || !userId.trim()) return false;
 
+    console.warn(`[AuthDiagnostic] Verification start: user=${userId}, ws=${workspaceId}, client=${clientId}`);
+
     // Supabase validation if connected
     if (supabase && process.env.NODE_ENV !== 'test') {
       try {
@@ -94,15 +96,20 @@ export class InstagramOAuthService {
           .from('users')
           .select('id, role, workspace_id')
           .eq('id', userId)
-          .eq('workspace_id', workspaceId)
-          .abortSignal(timeout)
           .maybeSingle();
 
         if (userError || !userData) {
+          console.warn(`[AuthDiagnostic] User lookup failed: ${userError?.message || 'Not found'}`);
+          return false;
+        }
+
+        if (userData.workspace_id !== workspaceId) {
+          console.warn(`[AuthDiagnostic] Workspace mismatch: db=${userData.workspace_id}, req=${workspaceId}`);
           return false;
         }
 
         if (userData.role === 'member' && data.created_by && data.created_by !== userId) {
+          console.warn(`[AuthDiagnostic] Member not authorized for client=${clientId}`);
           return false;
         }
 
