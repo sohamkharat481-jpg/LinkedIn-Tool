@@ -87,6 +87,8 @@ export default function App() {
       const providerName =
         activeCfg.providerType === 'leadocean'
           ? 'LeadOcean B2B People Search API'
+          : activeCfg.providerType === 'instagram_business'
+          ? 'Instagram Graph API Business Discovery'
           : 'Serper.dev Google Search API';
       const message = error instanceof Error ? error.message : 'Unknown provider status error.';
       setProviderStatus({
@@ -98,6 +100,8 @@ export default function App() {
         endpointStatus:
           activeCfg.providerType === 'leadocean'
             ? 'https://api.leadocean.io/v1/people/search'
+            : activeCfg.providerType === 'instagram_business'
+            ? 'https://graph.facebook.com'
             : 'https://google.serper.dev/search',
         authStatus: 'Unavailable',
         lastSuccessfulRequest: 'None yet',
@@ -471,6 +475,7 @@ export default function App() {
                   onNavigateToLeads={() => setActiveTab('clients')}
                   onNavigateToSettings={() => setActiveTab('settings')}
                   providerStatus={providerStatus}
+                  providerType={providerConfig.providerType}
                 />
               </div>
             </div>

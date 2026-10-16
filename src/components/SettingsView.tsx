@@ -267,8 +267,23 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             >
               <option value="serper">Serper.dev</option>
               <option value="leadocean">LeadOcean</option>
+              <option value="instagram_business">Instagram Business Discovery (Meta)</option>
             </select>
           </label>
+
+          {providerType === 'instagram_business' && (
+            <div className="rounded-xl border border-fuchsia-200 bg-fuchsia-50 p-4 space-y-2">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-fuchsia-950">
+                Instagram Business Discovery limitations
+              </h3>
+              <p className="text-xs text-fuchsia-900">
+                This provider only looks up public Instagram Business or Creator accounts whose usernames you supply in Lead Finder. It cannot search accounts by niche or location, and it does not infer profile location or contact details.
+              </p>
+              <p className="text-xs text-fuchsia-900">
+                Configure <code>INSTAGRAM_ACCESS_TOKEN</code> and <code>INSTAGRAM_USER_ID</code> on the server. Meta requires the Instagram API with Facebook Login and the <code>instagram_basic</code>, <code>instagram_manage_insights</code>, and <code>pages_read_engagement</code> permissions. A Page role granted through Business Manager may also require <code>ads_management</code> or <code>ads_read</code>.
+              </p>
+            </div>
+          )}
 
           <div className="p-4 bg-blue-50/70 border border-blue-200 rounded-2xl space-y-3">
               <div className="flex items-start gap-3">

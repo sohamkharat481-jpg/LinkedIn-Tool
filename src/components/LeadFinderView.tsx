@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Client, LeadFilter, SeniorityLevel, CompanySizeRange, RawLead, SearchProgressState, ProviderStatusInfo } from '../types';
+import { Client, LeadFilter, LeadProviderConfig, SeniorityLevel, CompanySizeRange, RawLead, SearchProgressState, ProviderStatusInfo } from '../types';
 import { Search, Sparkles, Filter, CheckCircle2, Loader2, AlertTriangle, ArrowRight, ShieldCheck, Tag, XCircle, Settings, Link, User, Globe, Building2 } from 'lucide-react';
 import { apiUrl } from '../services/apiClient';
 import type { LeadPersistenceStatus } from '../services/supabaseDataService';
@@ -19,6 +19,7 @@ interface LeadFinderViewProps {
   onNavigateToLeads: () => void;
   onNavigateToSettings: () => void;
   providerStatus: ProviderStatusInfo;
+  providerType: LeadProviderConfig['providerType'];
   onEnableMockMode?: () => void;
 }
 
@@ -68,6 +69,7 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
   onNavigateToLeads,
   onNavigateToSettings,
   providerStatus,
+  providerType,
   onEnableMockMode
 }) => {
   // Search Mode state: 'manual' | 'profile'
@@ -96,6 +98,7 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
 
   const [country, setCountry] = useState('United States');
   const [city, setCity] = useState('');
+  const [instagramUsernameInput, setInstagramUsernameInput] = useState('');
 
   const [seniority, setSeniority] = useState<SeniorityLevel[]>(['Director', 'VP', 'C-Level']);
   const [companySize, setCompanySize] = useState<CompanySizeRange[]>(['11-50', '51-200']);
@@ -200,8 +203,15 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
     }
 
     const activeJobTitles = overrideFilters ? overrideFilters.jobTitles : jobTitles;
-    if (activeJobTitles.length === 0) {
+    if (providerType !== 'instagram_business' && activeJobTitles.length === 0) {
       setSearchError('At least one job title is required.');
+      return;
+    }
+    if (
+      providerType === 'instagram_business' &&
+      !instagramUsernameInput.split(/[\s,]+/).some(username => username.trim())
+    ) {
+      setSearchError('Enter at least one Instagram business or creator username to look up.');
       return;
     }
 
@@ -209,14 +219,20 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
     setSearchError(null);
     setSearchResultSummary(null);
 
-    const filters: LeadFilter = overrideFilters || {
-      jobTitles,
-      industry: industries,
-      country,
-      city: city.trim() || undefined,
-      seniority,
-      companySize,
-      maxLeads: Math.min(Math.max(maxLeads, 1), 500)
+    const filters: LeadFilter = {
+      ...(overrideFilters || {
+        jobTitles,
+        industry: industries,
+        country,
+        city: city.trim() || undefined,
+        seniority,
+        companySize,
+        maxLeads: Math.min(Math.max(maxLeads, 1), 500)
+      }),
+      instagramUsernames:
+        providerType === 'instagram_business'
+          ? instagramUsernameInput.split(/[\s,]+/).filter(Boolean)
+          : undefined
     };
 
     try {
@@ -337,35 +353,37 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
       )}
 
       {/* Mode Selector Tabs */}
-      <div className="flex bg-gray-100 p-1 rounded-2xl max-w-md gap-1">
-        <button
-          type="button"
-          onClick={() => setSearchMode('manual')}
-          className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
-            searchMode === 'manual'
-              ? 'bg-white text-blue-900 shadow-sm'
-              : 'text-gray-600 hover:text-gray-900'
-          }`}
-        >
-          <Filter className="w-4 h-4 text-blue-600" />
-          A. Manual Filters
-        </button>
-        <button
-          type="button"
-          onClick={() => setSearchMode('profile')}
-          className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
-            searchMode === 'profile'
-              ? 'bg-white text-blue-900 shadow-sm'
-              : 'text-gray-600 hover:text-gray-900'
-          }`}
-        >
-          <Link className="w-4 h-4 text-purple-600" />
-          B. LinkedIn Profile Mode
-        </button>
-      </div>
+      {providerType !== 'instagram_business' && (
+        <div className="flex bg-gray-100 p-1 rounded-2xl max-w-md gap-1">
+          <button
+            type="button"
+            onClick={() => setSearchMode('manual')}
+            className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+              searchMode === 'manual'
+                ? 'bg-white text-blue-900 shadow-sm'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            <Filter className="w-4 h-4 text-blue-600" />
+            A. Manual Filters
+          </button>
+          <button
+            type="button"
+            onClick={() => setSearchMode('profile')}
+            className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+              searchMode === 'profile'
+                ? 'bg-white text-blue-900 shadow-sm'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            <Link className="w-4 h-4 text-purple-600" />
+            B. LinkedIn Profile Mode
+          </button>
+        </div>
+      )}
 
       {/* PROFILE MODE VIEW */}
-      {searchMode === 'profile' && (
+      {providerType !== 'instagram_business' && searchMode === 'profile' && (
         <div className="bg-white rounded-2xl border border-gray-200/90 shadow-xs p-6 space-y-6">
           <div className="space-y-1">
             <h2 className="text-base font-bold text-gray-900 flex items-center gap-2">
@@ -503,7 +521,9 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
             {/* Job Titles */}
             <div>
               <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
-                Job Titles * (Multiple Allowed)
+                {providerType === 'instagram_business'
+                  ? 'Job Titles (Not used by Instagram Business Discovery)'
+                  : 'Job Titles * (Multiple Allowed)'}
               </label>
               <div className="flex gap-2 mb-2">
                 <input
@@ -527,6 +547,28 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
                   Add
                 </button>
               </div>
+
+              {providerType === 'instagram_business' && (
+                <div className="rounded-xl border border-fuchsia-200 bg-fuchsia-50 p-4 space-y-2">
+                  <label
+                    htmlFor="instagram-business-usernames"
+                    className="block text-xs font-bold uppercase tracking-wider text-fuchsia-950"
+                  >
+                    Target Instagram usernames *
+                  </label>
+                  <textarea
+                    id="instagram-business-usernames"
+                    value={instagramUsernameInput}
+                    onChange={event => setInstagramUsernameInput(event.target.value)}
+                    placeholder="@business_one, business.two"
+                    rows={3}
+                    className="w-full rounded-xl border border-fuchsia-200 bg-white px-3 py-2 text-xs"
+                  />
+                  <p className="text-[11px] text-fuchsia-900">
+                    Meta Business Discovery looks up usernames you provide; it cannot discover arbitrary accounts by niche or location. Niche and location above are search context only and are not verified or added to returned profiles. Up to 20 usernames per request; results cannot exceed the number of eligible usernames.
+                  </p>
+                </div>
+              )}
 
               {/* Selected Tags */}
               <div className="flex flex-wrap gap-1.5 min-h-[36px]">
@@ -566,7 +608,9 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
             {/* Industry */}
             <div>
               <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
-                Industry (Multiple Allowed)
+                {providerType === 'instagram_business'
+                  ? 'Business niche (context only)'
+                  : 'Industry (Multiple Allowed)'}
               </label>
               <div className="flex gap-2 mb-2">
                 <input
@@ -631,7 +675,9 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-gray-100">
             <div>
               <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
-                Country *
+                {providerType === 'instagram_business'
+                  ? 'Target country (context only)'
+                  : 'Country *'}
               </label>
               <select
                 value={country}
@@ -648,7 +694,9 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
 
             <div>
               <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
-                City (Optional)
+                {providerType === 'instagram_business'
+                  ? 'Target city (context only)'
+                  : 'City (Optional)'}
               </label>
               <input
                 type="text"

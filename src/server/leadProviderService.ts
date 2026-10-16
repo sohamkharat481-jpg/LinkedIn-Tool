@@ -1,8 +1,12 @@
 import { LeadFilter, RawLead, ProviderStatusInfo } from '../types';
 import { LeadOceanLeadProvider } from '../services/leadProviders/LeadOceanLeadProvider';
+import {
+  InstagramBusinessLeadProvider,
+  InstagramBusinessProviderError
+} from '../services/leadProviders/InstagramBusinessLeadProvider';
 import { SerperSearchLeadProvider } from '../services/leadProviders/SerperSearchLeadProvider';
 
-export type SupportedLeadProvider = 'serper' | 'leadocean';
+export type SupportedLeadProvider = 'serper' | 'leadocean' | 'instagram_business';
 
 interface ProviderState {
   connectionVerified: boolean;
@@ -38,6 +42,12 @@ const PROVIDERS: Record<SupportedLeadProvider, {
     name: 'LeadOcean B2B People Search API',
     endpoint: 'https://api.leadocean.io/v1/people/search',
     missingKeyMessage: 'LeadOcean API key is not configured.'
+  },
+  instagram_business: {
+    name: 'Instagram Graph API Business Discovery',
+    endpoint: 'https://graph.facebook.com',
+    missingKeyMessage:
+      'Instagram Business Discovery requires INSTAGRAM_ACCESS_TOKEN and INSTAGRAM_USER_ID on the server.'
   }
 };
 
@@ -53,13 +63,19 @@ const providerStates: Record<SupportedLeadProvider, ProviderState> = {
     lastSuccessTimestamp: 'None yet',
     lastError: 'None',
     lastResponseTime: 'N/A'
+  },
+  instagram_business: {
+    connectionVerified: false,
+    lastSuccessTimestamp: 'None yet',
+    lastError: 'None',
+    lastResponseTime: 'N/A'
   }
 };
 
 const isProductionRuntime = () => Boolean(process.env.VERCEL || process.env.NODE_ENV === 'production');
 
 function isSupportedProvider(type?: string): type is SupportedLeadProvider {
-  return type === 'serper' || type === 'leadocean';
+  return type === 'serper' || type === 'leadocean' || type === 'instagram_business';
 }
 
 function getProviderKey(type: SupportedLeadProvider, overrideKey?: string): string {
@@ -82,6 +98,14 @@ function getProviderKey(type: SupportedLeadProvider, overrideKey?: string): stri
     ).trim();
   }
 
+  if (type === 'instagram_business') {
+    return (
+      cleanedOverride ||
+      process.env.INSTAGRAM_ACCESS_TOKEN ||
+      ''
+    ).trim();
+  }
+
   return (
     cleanedOverride ||
     process.env.LEADOCEAN_API_KEY ||
@@ -95,6 +119,8 @@ export class ServerLeadProviderService {
   static getDiagnostics(overrideApiKey?: string) {
     const serperKey = getProviderKey('serper', overrideApiKey);
     const leadOceanKey = getProviderKey('leadocean', overrideApiKey);
+    const instagramToken = getProviderKey('instagram_business', overrideApiKey);
+    const instagramUserId = process.env.INSTAGRAM_USER_ID || '';
     const runtimeName = process.env.VERCEL
       ? 'Vercel Serverless'
       : process.env.K_SERVICE
@@ -108,6 +134,11 @@ export class ServerLeadProviderService {
     return {
       SERPER_API_KEY: serperKey ? 'CONFIGURED' : 'MISSING',
       LEADOCEAN_API_KEY: leadOceanKey ? 'CONFIGURED' : 'MISSING',
+      INSTAGRAM_ACCESS_TOKEN: instagramToken ? 'CONFIGURED' : 'MISSING',
+      INSTAGRAM_USER_ID: instagramUserId ? 'CONFIGURED' : 'MISSING',
+      INSTAGRAM_GRAPH_API_VERSION: process.env.INSTAGRAM_GRAPH_API_VERSION
+        ? 'CONFIGURED'
+        : 'DEFAULT',
       ActiveProvider: 'Selected in Settings',
       Runtime: runtimeName,
       Deployment: deploymentId,
@@ -115,6 +146,7 @@ export class ServerLeadProviderService {
         key =>
           key.includes('SERPER') ||
           key.includes('LEADOCEAN') ||
+          key.includes('INSTAGRAM') ||
           key.includes('LEAD_PROVIDER')
       )
     };
@@ -135,7 +167,10 @@ export class ServerLeadProviderService {
     const { key, type } = this.resolveApiKey(overrideApiKey, requestedType);
     const provider = PROVIDERS[type];
     const state = providerStates[type];
-    const configured = Boolean(key);
+    const configured = Boolean(
+      key &&
+        (type !== 'instagram_business' || process.env.INSTAGRAM_USER_ID?.trim())
+    );
 
     return {
       configured,
@@ -203,6 +238,46 @@ export class ServerLeadProviderService {
         timestamp: timestamp()
       };
     };
+
+    if (type === 'instagram_business') {
+      try {
+        await new InstagramBusinessLeadProvider(key, process.env.INSTAGRAM_USER_ID).testConnection();
+        state.connectionVerified = true;
+        state.lastSuccessTimestamp = timestamp();
+        state.lastError = 'None';
+        return result({
+          success: true,
+          httpStatus: 200,
+          placesReturned: 0,
+          configured: true,
+          status: 'Connected',
+          authStatus: 'Verified',
+          message:
+            'Meta verified access to the configured Instagram professional account. This does not verify a Business Discovery lookup for a target username.',
+          sanitizedProviderError: null
+        });
+      } catch (error) {
+        const providerError =
+          error instanceof InstagramBusinessProviderError
+            ? error
+            : new InstagramBusinessProviderError(
+                'Instagram Graph API connection test failed.',
+                502
+              );
+        state.connectionVerified = false;
+        state.lastError = providerError.message;
+        return result({
+          success: false,
+          httpStatus: providerError.httpStatus,
+          placesReturned: 0,
+          configured: Boolean(key && process.env.INSTAGRAM_USER_ID),
+          status: providerError.httpStatus === 503 ? 'Not Configured' : 'Error',
+          authStatus: providerError.httpStatus === 503 ? 'Not Configured' : 'Meta API Error',
+          message: providerError.message,
+          sanitizedProviderError: providerError.message
+        });
+      }
+    }
 
     if (!key) {
       state.connectionVerified = false;
@@ -348,7 +423,9 @@ export class ServerLeadProviderService {
       const adapter =
         type === 'serper'
           ? new SerperSearchLeadProvider(key)
-          : new LeadOceanLeadProvider(key);
+          : type === 'leadocean'
+          ? new LeadOceanLeadProvider(key)
+          : new InstagramBusinessLeadProvider(key, process.env.INSTAGRAM_USER_ID);
       const leads = await adapter.search(filters);
       state.connectionVerified = true;
       state.lastSuccessTimestamp = new Date().toISOString();

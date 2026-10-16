@@ -1,5 +1,6 @@
 import { LeadProviderConfig } from '../../types';
 import { LeadProvider } from './LeadProvider';
+import { InstagramBusinessLeadProvider } from './InstagramBusinessLeadProvider';
 import { LeadOceanLeadProvider } from './LeadOceanLeadProvider';
 import { SerperSearchLeadProvider } from './SerperSearchLeadProvider';
 
@@ -41,6 +42,10 @@ export class ProviderFactory {
         throw new Error('LeadOcean is selected but no API key is configured.');
       }
       return new LeadOceanLeadProvider(leadOceanKey, currentConfig.customEndpoint);
+    }
+
+    if (currentConfig.providerType === 'instagram_business') {
+      return new InstagramBusinessLeadProvider();
     }
 
     throw new Error(`Unsupported lead provider: ${currentConfig.providerType}`);

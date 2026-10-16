@@ -3,6 +3,7 @@ import { LeadFilter, RawLead } from '../types';
 import { filterAndDeduplicateLeads } from '../services/deduplication';
 import { ServerLeadProviderService } from './leadProviderService';
 import { testSupabaseHealth } from '../services/supabase';
+import { InstagramBusinessProviderError } from '../services/leadProviders/InstagramBusinessLeadProvider';
 
 export const apiRouter = express.Router();
 
@@ -86,6 +87,9 @@ apiRouter.get('/diagnostics', async (req: Request, res: Response) => {
       providers: {
         SERPER_API_KEY: providerDiag.SERPER_API_KEY,
         LEADOCEAN_API_KEY: providerDiag.LEADOCEAN_API_KEY,
+        INSTAGRAM_ACCESS_TOKEN: providerDiag.INSTAGRAM_ACCESS_TOKEN,
+        INSTAGRAM_USER_ID: providerDiag.INSTAGRAM_USER_ID,
+        INSTAGRAM_GRAPH_API_VERSION: providerDiag.INSTAGRAM_GRAPH_API_VERSION,
         activeProvider: providerDiag.ActiveProvider
       },
       database: {
@@ -203,11 +207,17 @@ const executeLeadSearch = async (filters: LeadFilter, providerType?: string, api
       }
     };
   }
-  if (!resolved.key) {
+  if (
+    !resolved.key ||
+    (resolved.type === 'instagram_business' && !process.env.INSTAGRAM_USER_ID?.trim())
+  ) {
     return {
       status: 422,
       body: {
-        error: 'No API key is configured for the selected lead provider.',
+        error:
+          resolved.type === 'instagram_business'
+            ? 'Instagram Business Discovery requires server-side INSTAGRAM_ACCESS_TOKEN and INSTAGRAM_USER_ID configuration.'
+            : 'No API key is configured for the selected lead provider.',
         code: 'NO_PROVIDER_CONFIGURED'
       }
     };
@@ -221,16 +231,21 @@ const executeLeadSearch = async (filters: LeadFilter, providerType?: string, api
     );
     const dedupeResult = filterAndDeduplicateLeads(rawCandidates);
     const isSerper = resolved.type === 'serper';
+    const isInstagramBusiness = resolved.type === 'instagram_business';
 
     return {
       status: 200,
       body: {
         success: true,
         provider: {
-          id: isSerper
+          id: isInstagramBusiness
+            ? 'instagram-business-discovery-provider'
+            : isSerper
             ? 'serper-search-provider'
             : 'leadocean-b2b-provider',
-          name: isSerper
+          name: isInstagramBusiness
+            ? 'Instagram Graph API Business Discovery'
+            : isSerper
             ? 'Serper.dev Google Search API'
             : 'LeadOcean B2B People Search API',
           isMock: false
@@ -248,7 +263,18 @@ const executeLeadSearch = async (filters: LeadFilter, providerType?: string, api
       }
     };
   } catch (error: any) {
-    console.error('API lead search error:', error);
+    if (!(error instanceof InstagramBusinessProviderError)) {
+      console.error('API lead search error:', error);
+    }
+    if (error instanceof InstagramBusinessProviderError) {
+      return {
+        status: error.httpStatus,
+        body: {
+          error: error.message,
+          code: 'INSTAGRAM_BUSINESS_DISCOVERY_ERROR'
+        }
+      };
+    }
     return {
       status: 502,
       body: {

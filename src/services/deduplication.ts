@@ -34,6 +34,23 @@ export function normalizeLinkedInUrl(url: string): string {
   }
 }
 
+export function normalizeProfileUrl(url: string): string {
+  if (!url || typeof url !== 'string') return '';
+  const normalized = normalizeLinkedInUrl(url);
+
+  try {
+    const parsed = new URL(normalized);
+    const hostname = parsed.hostname.replace(/^www\./, '');
+    if (hostname !== 'instagram.com') return normalized;
+
+    const username = parsed.pathname.split('/').filter(Boolean);
+    if (username.length !== 1 || !/^[a-z0-9._]{1,30}$/i.test(username[0])) return '';
+    return `https://www.instagram.com/${username[0].toLowerCase()}/`;
+  } catch {
+    return '';
+  }
+}
+
 /**
  * Generates a deduplication composite key for a person based on:
  * Normalized Full Name + Normalized Company Name + Normalized Profile URL
@@ -41,7 +58,7 @@ export function normalizeLinkedInUrl(url: string): string {
 export function generatePersonCompositeKey(lead: RawLead): string {
   const normName = (lead.fullName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   const normCompany = (lead.companyName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  const normUrl = normalizeLinkedInUrl(lead.profileUrl);
+  const normUrl = normalizeProfileUrl(lead.profileUrl);
   return `${normName}_${normCompany}_${normUrl}`;
 }
 
@@ -60,11 +77,15 @@ export function isValidLeadRecord(lead: RawLead): boolean {
   const hasName = Boolean(isPresent(lead.fullName) && lead.fullName.trim().length >= 2);
   const hasJobTitle = Boolean(isPresent(lead.currentJobTitle) && lead.currentJobTitle.trim().length >= 2);
   const hasCompany = Boolean(isPresent(lead.companyName));
+  if (lead.leadType === 'business') {
+    const profileUrl = normalizeProfileUrl(lead.profileUrl);
+    return hasName && hasCompany && Boolean(profileUrl.startsWith('https://www.instagram.com/'));
+  }
   const hasUrl = Boolean(
     lead.profileUrl &&
-    (lead.profileUrl.trim().toLowerCase().includes('linkedin.com') ||
-      lead.profileUrl.trim().toLowerCase().startsWith('http://') ||
-      lead.profileUrl.trim().toLowerCase().startsWith('https://'))
+      (lead.profileUrl.trim().toLowerCase().includes('linkedin.com') ||
+        lead.profileUrl.trim().toLowerCase().startsWith('http://') ||
+        lead.profileUrl.trim().toLowerCase().startsWith('https://'))
   );
 
   return hasName && hasJobTitle && hasCompany && hasUrl;
@@ -83,16 +104,18 @@ export function filterAndDeduplicateLeads(candidates: RawLead[]): DeduplicationR
   // Step 3 & 4: Normalize LinkedIn profile URLs and remove duplicate profile URLs
   const uniqueUrlLeadsMap = new Map<string, RawLead>();
   let duplicateProfilesRemoved = 0;
+  let duplicateBusinessesRemoved = 0;
 
   for (const rawLead of validRecords) {
-    const normalizedUrl = normalizeLinkedInUrl(rawLead.profileUrl);
+    const normalizedUrl = normalizeProfileUrl(rawLead.profileUrl);
     const normalizedLead = {
       ...rawLead,
       profileUrl: normalizedUrl
     };
 
     if (uniqueUrlLeadsMap.has(normalizedUrl)) {
-      duplicateProfilesRemoved++;
+      if (rawLead.leadType === 'business') duplicateBusinessesRemoved++;
+      else duplicateProfilesRemoved++;
     } else {
       uniqueUrlLeadsMap.set(normalizedUrl, normalizedLead);
     }
@@ -120,7 +143,7 @@ export function filterAndDeduplicateLeads(candidates: RawLead[]): DeduplicationR
     validRecordsCount,
     duplicateProfilesRemoved,
     duplicatePeopleRemoved,
-    duplicateBusinessesRemoved: 0,
+    duplicateBusinessesRemoved,
     totalDuplicatesRemoved,
     finalUniqueLeads
   };

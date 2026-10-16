@@ -17,6 +17,7 @@ export interface LeadFilter {
   companySize: CompanySizeRange[];
   maxLeads: number;
   keywords?: string;
+  instagramUsernames?: string[];
 }
 
 export interface RawLead {
@@ -132,7 +133,7 @@ export interface SearchProgressState {
 }
 
 export interface LeadProviderConfig {
-  providerType: 'leadocean' | 'serper';
+  providerType: 'leadocean' | 'serper' | 'instagram_business';
   apiKey?: string;
   customEndpoint?: string;
 }

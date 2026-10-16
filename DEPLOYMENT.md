@@ -43,6 +43,9 @@ This guide details how to deploy the **LinkedIn Lead Finder** full-stack applica
    - `SUPABASE_ANON_KEY`: `your-supabase-anon-key`
    - `SERPER_API_KEY`: `your-serper-api-key` (Serper.dev search provider - server-side only)
    - `LEADOCEAN_API_KEY`: `your-leadocean-api-key` (LeadOcean people search provider - server-side only)
+   - `INSTAGRAM_ACCESS_TOKEN`: Meta user access token for the app user's Instagram professional account (server-side only)
+   - `INSTAGRAM_USER_ID`: ID of that Instagram professional account
+   - `INSTAGRAM_GRAPH_API_VERSION`: optional Graph API version; defaults to `v25.0`
    - `VITE_SUPABASE_URL`: `https://your-project.supabase.co`
    - `VITE_SUPABASE_ANON_KEY`: `your-supabase-anon-key`
 
@@ -53,7 +56,11 @@ This guide details how to deploy the **LinkedIn Lead Finder** full-stack applica
 
 ## 4. Configure a lead provider
 
-Select either **Serper.dev** or **LeadOcean** in **Settings → Lead Discovery Data Provider**. Configure the selected provider's server-side API key in the Vercel project environment. Provider selection is explicit; the application does not automatically switch to another provider when the selected provider is unavailable.
+Select **Serper.dev**, **LeadOcean**, or **Instagram Business Discovery (Meta)** in **Settings → Lead Discovery Data Provider**. Configure the selected provider's server-side credentials in the Vercel project environment. Provider selection is explicit; the application does not automatically switch to another provider when the selected provider is unavailable.
+
+Instagram Business Discovery requires a Meta app configured for the Instagram API with Facebook Login, an Instagram Business or Creator account connected to a Facebook Page, a user access token, and the Instagram professional account ID. The token needs `instagram_basic`, `instagram_manage_insights`, and `pages_read_engagement`; if the user's Page role was granted through Business Manager, Meta may additionally require `ads_management` or `ads_read`. Use the app's required access level/review for the intended users. Keep all Meta credentials server-side.
+
+This API only looks up public Business or Creator account usernames explicitly supplied in Lead Finder. It cannot discover arbitrary Instagram accounts by niche or location. Those filters are not used to search Instagram, and the application does not infer locations or contact details. A successful live lookup has not been verified until valid authorized Meta credentials are configured and a request succeeds.
 
 ---
 
