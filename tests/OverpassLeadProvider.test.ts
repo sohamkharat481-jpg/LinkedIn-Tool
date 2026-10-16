@@ -192,6 +192,8 @@ test('preserves upstream HTTP 500, 502, and 504 with attempt and elapsed diagnos
         assert.equal(error.diagnostics.upstreamHttpStatus, status);
         assert.equal(error.diagnostics.httpStatus, status);
         assert.equal(error.diagnostics.failurePhase, 'http_status');
+        assert.equal(error.diagnostics.failureOrigin, 'http_response');
+        assert.equal(error.diagnostics.responseHeadersReceived, true);
         assert.equal(typeof error.diagnostics.responseHeadersElapsedMs, 'number');
         assert.equal(error.diagnostics.responseBodyCompletedElapsedMs, undefined);
         assert.equal(error.diagnostics.attemptCount, 1);
@@ -276,6 +278,9 @@ test('aborts a stalled request when its total time budget expires', async () => 
       assert.equal(error.diagnostics.attemptCount, 1);
       assert.equal(error.diagnostics.timeoutReason, 'Total request budget exceeded (30ms).');
       assert.equal(error.diagnostics.failurePhase, 'request');
+      assert.equal(error.diagnostics.timeoutFired, true);
+      assert.equal(error.diagnostics.failureOrigin, 'application_deadline');
+      assert.equal(error.diagnostics.responseHeadersReceived, false);
       assert.equal(typeof error.diagnostics.requestStartedAt, 'string');
       assert.equal(error.diagnostics.responseHeadersElapsedMs, undefined);
       assert.ok((error.diagnostics.elapsedMs ?? 0) < 500);
@@ -283,6 +288,65 @@ test('aborts a stalled request when its total time budget expires', async () => 
     }
   );
   assert.equal(requestSignal?.aborted, true);
+});
+
+test('captures sanitized native fetch and nested cause codes without logging messages', async () => {
+  const cause = Object.assign(new Error('private nested detail'), { code: 'EAI_AGAIN' });
+  const networkError = Object.assign(new Error('private token=never-log'), {
+    code: 'ENOTFOUND',
+    cause
+  });
+  const provider = createTestProvider(async () => {
+    throw networkError;
+  });
+
+  await assert.rejects(
+    provider.search({ ...filters, city: 'native fetch rejection diagnostics' }, {
+      maxAttempts: 1,
+      totalBudgetMs: 500,
+      diagnosticContext: { requestId: 'bom1::request-123' }
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof OverpassApiError);
+      assert.equal(error.diagnostics.errorName, 'Error');
+      assert.equal(error.diagnostics.errorCode, 'ENOTFOUND');
+      assert.equal(error.diagnostics.causeCode, 'EAI_AGAIN');
+      assert.equal(error.diagnostics.failureOrigin, 'fetch_rejection');
+      assert.equal(error.diagnostics.timeoutFired, false);
+      assert.equal(error.diagnostics.responseHeadersReceived, false);
+      assert.equal(error.diagnostics.httpStatus, undefined);
+      assert.equal(error.diagnostics.upstreamHostname, 'overpass-api.de');
+      assert.equal(error.diagnostics.requestId, 'bom1::request-123');
+      assert.ok(!JSON.stringify(error.diagnostics).includes('private'));
+      assert.ok(!JSON.stringify(error.diagnostics).includes('never-log'));
+      return true;
+    }
+  );
+});
+
+test('records response-header and body timings on a successful request', async () => {
+  let diagnostics: OverpassRequestDiagnostics | undefined;
+  const provider = createTestProvider(async () =>
+    new Response(JSON.stringify({ elements: [cafeElement] }), { status: 200 })
+  );
+
+  const leads = await provider.search({ ...filters, city: 'successful timing diagnostics' }, {
+    maxAttempts: 1,
+    totalBudgetMs: 500,
+    onDiagnostics: result => {
+      diagnostics = result;
+    }
+  });
+
+  assert.equal(leads.length, 1);
+  assert.equal(diagnostics?.providerId, 'openstreetmap-overpass-provider');
+  assert.equal(diagnostics?.upstreamHostname, 'overpass-api.de');
+  assert.equal(diagnostics?.responseHeadersReceived, true);
+  assert.equal(diagnostics?.httpStatus, 200);
+  assert.equal(typeof diagnostics?.responseHeadersElapsedMs, 'number');
+  assert.equal(typeof diagnostics?.responseBodyCompletedElapsedMs, 'number');
+  assert.equal(typeof diagnostics?.elapsedMs, 'number');
+  assert.equal(diagnostics?.timeoutFired, false);
 });
 
 test('enforces the total budget while waiting for an interval slot', async () => {
@@ -298,6 +362,8 @@ test('enforces the total budget while waiting for an interval slot', async () =>
       assert.ok(error instanceof OverpassApiError);
       assert.equal(error.diagnostics.timeoutReason, 'Total request time budget exceeded.');
       assert.equal(error.diagnostics.attemptCount, 0);
+      assert.equal(error.diagnostics.timeoutFired, true);
+      assert.equal(error.diagnostics.failureOrigin, 'application_deadline');
       return true;
     }
   );
@@ -481,9 +547,12 @@ test('health checks use a configurable single-request budget and do not pass on 
 
 test('health diagnostics preserve sanitized upstream status, attempts, elapsed time and timeout reason', async () => {
   const searchDescriptor = Object.getOwnPropertyDescriptor(OverpassLeadProvider.prototype, 'search');
+  const originalConsoleWarn = console.warn;
+  let diagnosticContext: { requestId?: string } | undefined;
   Object.defineProperty(OverpassLeadProvider.prototype, 'search', {
     configurable: true,
-    value: async () => {
+    value: async (_filters: LeadFilter, options: OverpassSearchOptions) => {
+      diagnosticContext = options.diagnosticContext;
       throw new OverpassApiError(
         'OpenStreetMap Overpass is temporarily unavailable (HTTP 502). Try again later.',
         502,
@@ -496,14 +565,28 @@ test('health diagnostics preserve sanitized upstream status, attempts, elapsed t
           requestStartedElapsedMs: 0,
           responseHeadersElapsedMs: 733,
           httpStatus: 502,
-          failurePhase: 'http_status'
+          failurePhase: 'http_status',
+          providerId: 'openstreetmap-overpass-provider',
+          upstreamHostname: 'overpass-api.de',
+          requestId: 'bom1::overpass-diag',
+          deploymentSha: 'abcdef1234567',
+          responseHeadersReceived: true,
+          timeoutFired: false,
+          failureOrigin: 'http_response',
+          errorName: 'TypeError',
+          errorCode: 'ECONNRESET',
+          causeCode: 'ETIMEDOUT'
         }
       );
     }
   });
 
   try {
-    const result = await ServerLeadProviderService.testConnection(undefined, 'overpass');
+    console.warn = () => {};
+    const result = await ServerLeadProviderService.testConnection(undefined, 'overpass', {
+      requestId: 'bom1::overpass-diag'
+    });
+    assert.equal(diagnosticContext?.requestId, 'bom1::overpass-diag');
     assert.equal(result.success, false);
     assert.equal(result.httpStatus, 502);
     assert.equal(result.upstreamHttpStatus, 502);
@@ -517,10 +600,21 @@ test('health diagnostics preserve sanitized upstream status, attempts, elapsed t
     assert.equal(result.diagnostics?.failurePhase, 'http_status');
     assert.equal(result.diagnostics?.httpStatus, 502);
     assert.equal(typeof result.diagnostics?.responseHeadersElapsedMs, 'number');
+    assert.equal(result.diagnostics?.providerId, 'openstreetmap-overpass-provider');
+    assert.equal(result.diagnostics?.upstreamHostname, 'overpass-api.de');
+    assert.equal(result.diagnostics?.requestId, 'bom1::overpass-diag');
+    assert.equal(result.diagnostics?.deploymentSha, 'abcdef1234567');
+    assert.equal(result.diagnostics?.responseHeadersReceived, true);
+    assert.equal(result.diagnostics?.timeoutFired, false);
+    assert.equal(result.diagnostics?.failureOrigin, 'http_response');
+    assert.equal(result.diagnostics?.errorName, 'TypeError');
+    assert.equal(result.diagnostics?.errorCode, 'ECONNRESET');
+    assert.equal(result.diagnostics?.causeCode, 'ETIMEDOUT');
     const status = ServerLeadProviderService.getStatus(undefined, 'overpass');
     assert.equal(status.diagnostics?.upstreamHttpStatus, 502);
     assert.equal(status.diagnostics?.attemptCount, 2);
   } finally {
+    console.warn = originalConsoleWarn;
     if (searchDescriptor) {
       Object.defineProperty(OverpassLeadProvider.prototype, 'search', searchDescriptor);
     } else {

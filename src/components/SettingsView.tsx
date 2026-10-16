@@ -283,6 +283,39 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </pre>
           </details>
         )}
+        {activeDiagnostics.diagnostics?.providerId && (
+          <details className="p-3 bg-slate-950/70 rounded-xl border border-slate-700 text-xs text-slate-300">
+            <summary className="font-semibold cursor-pointer">Sanitized network diagnostics</summary>
+            <p className="mt-2 text-slate-400">
+              Fetch-level timings cannot distinguish DNS, TCP, or TLS phases unless the runtime reports a specific native error code.
+            </p>
+            <pre className="mt-3 overflow-x-auto whitespace-pre-wrap break-words text-[11px] text-slate-300">
+              {JSON.stringify(
+                {
+                  providerId: activeDiagnostics.diagnostics.providerId,
+                  upstreamHostname: activeDiagnostics.diagnostics.upstreamHostname,
+                  requestId: activeDiagnostics.diagnostics.requestId,
+                  deploymentSha: activeDiagnostics.diagnostics.deploymentSha,
+                  requestStartedAt: activeDiagnostics.diagnostics.requestStartedAt,
+                  responseHeadersReceived: activeDiagnostics.diagnostics.responseHeadersReceived,
+                  responseHeadersElapsedMs: activeDiagnostics.diagnostics.responseHeadersElapsedMs,
+                  httpStatus: activeDiagnostics.diagnostics.httpStatus,
+                  responseBodyCompletedElapsedMs:
+                    activeDiagnostics.diagnostics.responseBodyCompletedElapsedMs,
+                  elapsedMs: activeDiagnostics.diagnostics.elapsedMs,
+                  timeoutFired: activeDiagnostics.diagnostics.timeoutFired,
+                  failureOrigin: activeDiagnostics.diagnostics.failureOrigin,
+                  failurePhase: activeDiagnostics.diagnostics.failurePhase,
+                  errorName: activeDiagnostics.diagnostics.errorName,
+                  errorCode: activeDiagnostics.diagnostics.errorCode,
+                  causeCode: activeDiagnostics.diagnostics.causeCode
+                },
+                null,
+                2
+              )}
+            </pre>
+          </details>
+        )}
       </div>
 
       {/* Card 1: Lead Discovery Provider Abstraction */}

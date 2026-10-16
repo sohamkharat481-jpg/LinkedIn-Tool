@@ -10,7 +10,10 @@ import {
   WikidataLeadProvider,
   WikidataProviderError
 } from '../src/services/leadProviders/WikidataLeadProvider';
-import { ServerLeadProviderService } from '../src/server/leadProviderService';
+import {
+  ProviderDiagnosticTestResult,
+  ServerLeadProviderService
+} from '../src/server/leadProviderService';
 import { apiRouter } from '../src/server/apiHandler';
 import { LeadFilter } from '../src/types';
 
@@ -133,6 +136,7 @@ test('deduplicates source records by Wikidata entity identity', () => {
 test('sends a URL-encoded SPARQL POST and accepts only valid result records', async () => {
   let requestUrl = '';
   let requestInit: RequestInit | undefined;
+  let diagnostics: import('../src/services/leadProviders/networkDiagnostics').NetworkRequestDiagnostics | undefined;
   const provider = new WikidataLeadProvider(
     undefined,
     async (input, init) => {
@@ -142,7 +146,12 @@ test('sends a URL-encoded SPARQL POST and accepts only valid result records', as
     }
   );
 
-  const leads = await provider.search(filters);
+  const leads = await provider.search(filters, {
+    diagnosticContext: { requestId: 'bom1::wikidata-test' },
+    onDiagnostics: result => {
+      diagnostics = result;
+    }
+  });
   assert.equal(requestUrl, 'https://query.wikidata.org/sparql');
   assert.equal(requestInit?.method, 'POST');
   assert.equal(
@@ -152,6 +161,15 @@ test('sends a URL-encoded SPARQL POST and accepts only valid result records', as
   assert.match(String(requestInit?.body), /^query=/);
   assert.equal(leads.length, 1);
   assert.equal(leads[0].companyName, 'Cafe Mondegar');
+  assert.equal(diagnostics?.providerId, 'wikidata-cafe-provider');
+  assert.equal(diagnostics?.upstreamHostname, 'query.wikidata.org');
+  assert.equal(diagnostics?.requestId, 'bom1::wikidata-test');
+  assert.equal(diagnostics?.responseHeadersReceived, true);
+  assert.equal(diagnostics?.httpStatus, 200);
+  assert.equal(typeof diagnostics?.responseHeadersElapsedMs, 'number');
+  assert.equal(typeof diagnostics?.responseBodyCompletedElapsedMs, 'number');
+  assert.equal(typeof diagnostics?.elapsedMs, 'number');
+  assert.equal(diagnostics?.timeoutFired, false);
 });
 
 test('returns an empty record list for a valid empty source response', async () => {
@@ -174,6 +192,17 @@ test('reports upstream HTTP failures and malformed response shapes explicitly', 
       error.httpStatus === 503 &&
       /temporarily unavailable/.test(error.message)
   );
+  await assert.rejects(
+    unavailable.search(filters, { onDiagnostics: diagnostics => {
+      assert.equal(diagnostics.responseHeadersReceived, true);
+      assert.equal(diagnostics.httpStatus, 503);
+      assert.equal(diagnostics.failureOrigin, 'http_response');
+      assert.equal(diagnostics.timeoutFired, false);
+    } }),
+    (error: unknown) =>
+      error instanceof WikidataProviderError &&
+      error.diagnostics?.responseHeadersReceived === true
+  );
 
   const malformed = new WikidataLeadProvider(
     undefined,
@@ -184,6 +213,7 @@ test('reports upstream HTTP failures and malformed response shapes explicitly', 
 
 test('aborts a stalled request at its configured request deadline', async () => {
   let wasAborted = false;
+  let diagnostics: import('../src/services/leadProviders/networkDiagnostics').NetworkRequestDiagnostics | undefined;
   const provider = new WikidataLeadProvider(
     undefined,
     async (_input, init) => new Promise<Response>((_resolve, reject) => {
@@ -195,13 +225,79 @@ test('aborts a stalled request at its configured request deadline', async () => 
     5
   );
   await assert.rejects(
-    provider.search(filters),
+    provider.search(filters, {
+      diagnosticContext: { requestId: 'wikidata-timeout-test' },
+      onDiagnostics: result => {
+        diagnostics = result;
+      }
+    }),
     (error: unknown) =>
       error instanceof WikidataProviderError &&
       error.timedOut &&
       /timed out \(5ms\)/.test(error.message)
   );
   assert.equal(wasAborted, true);
+  assert.equal(diagnostics?.timeoutFired, true);
+  assert.equal(diagnostics?.failureOrigin, 'application_deadline');
+  assert.equal(diagnostics?.responseHeadersReceived, false);
+  assert.equal(diagnostics?.httpStatus, undefined);
+  assert.equal(diagnostics?.upstreamHostname, 'query.wikidata.org');
+  assert.equal(diagnostics?.requestId, 'wikidata-timeout-test');
+});
+
+test('classifies native fetch failures and whitelisted nested causes without exposing messages', async () => {
+  const originalSha = process.env.VERCEL_GIT_COMMIT_SHA;
+  process.env.VERCEL_GIT_COMMIT_SHA = 'abcdef1234567890abcdef1234567890abcdef12';
+  const cause = Object.assign(new Error('private cause text'), { code: 'ECONNRESET' });
+  const nativeError = Object.assign(new TypeError('secret=do-not-return'), {
+    code: 'ETIMEDOUT',
+    cause
+  });
+  const provider = new WikidataLeadProvider(undefined, async () => {
+    throw nativeError;
+  });
+  try {
+    await assert.rejects(
+      provider.search(filters, { onDiagnostics: diagnostics => {
+        assert.equal(diagnostics.failureOrigin, 'fetch_rejection');
+        assert.equal(diagnostics.timeoutFired, false);
+        assert.equal(diagnostics.responseHeadersReceived, false);
+        assert.equal(diagnostics.errorName, 'TypeError');
+        assert.equal(diagnostics.errorCode, 'ETIMEDOUT');
+        assert.equal(diagnostics.causeCode, 'ECONNRESET');
+        assert.equal(diagnostics.deploymentSha, process.env.VERCEL_GIT_COMMIT_SHA);
+        assert.ok(!JSON.stringify(diagnostics).includes('secret'));
+        assert.ok(!JSON.stringify(diagnostics).includes('private'));
+      } }),
+      (error: unknown) =>
+        error instanceof WikidataProviderError &&
+        error.diagnostics?.errorCode === 'ETIMEDOUT'
+    );
+  } finally {
+    if (originalSha === undefined) delete process.env.VERCEL_GIT_COMMIT_SHA;
+    else process.env.VERCEL_GIT_COMMIT_SHA = originalSha;
+  }
+});
+
+test('redacts unknown error codes and unsafe request identifiers', async () => {
+  const unsafeError = Object.assign(new Error('secret message'), {
+    code: 'TOKEN_VALUE_123'
+  });
+  const provider = new WikidataLeadProvider(undefined, async () => {
+    throw unsafeError;
+  });
+
+  await assert.rejects(
+    provider.search(filters, {
+      diagnosticContext: { requestId: 'bad request id with spaces' },
+      onDiagnostics: diagnostics => {
+        assert.equal(diagnostics.errorCode, undefined);
+        assert.equal(diagnostics.requestId, undefined);
+        assert.ok(!JSON.stringify(diagnostics).includes('TOKEN_VALUE_123'));
+        assert.ok(!JSON.stringify(diagnostics).includes('secret message'));
+      }
+    })
+  );
 });
 
 test('selects Wikidata explicitly and health checks fail when no businesses are mapped', async () => {
@@ -236,6 +332,74 @@ test('selects Wikidata explicitly and health checks fail when no businesses are 
     } else {
       delete (WikidataLeadProvider.prototype as { search?: unknown }).search;
     }
+  }
+});
+
+test('forwards only the safe Vercel request ID and returns sanitized network diagnostics', async () => {
+  const descriptor = Object.getOwnPropertyDescriptor(ServerLeadProviderService, 'testConnection');
+  const app = express();
+  app.use(apiRouter);
+  const server = app.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address() as AddressInfo;
+  const url = `http://127.0.0.1:${address.port}/provider-status/test`;
+  const diagnostics = {
+    providerId: 'wikidata-cafe-provider',
+    upstreamHostname: 'query.wikidata.org',
+    requestId: 'bom1::safe-request-id',
+    deploymentSha: 'abcdef1234567',
+    requestStartedAt: new Date().toISOString(),
+    responseHeadersReceived: false,
+    elapsedMs: 8000,
+    timeoutFired: true,
+    failureOrigin: 'application_deadline' as const,
+    failurePhase: 'request' as const
+  };
+  let receivedRequestId: string | undefined;
+  const result: ProviderDiagnosticTestResult = {
+    success: false,
+    httpStatus: 504,
+    provider: 'Wikidata Query Service (experimental cafes)',
+    endpoint: 'https://query.wikidata.org/sparql',
+    placesReturned: 0,
+    responseTime: '8000ms',
+    responseTimeMs: 8000,
+    configured: true,
+    status: 'Error',
+    authStatus: 'Public endpoint error',
+    message: 'Wikidata Query Service request timed out (8000ms).',
+    sanitizedProviderError: 'Wikidata Query Service request timed out (8000ms).',
+    diagnostics,
+    timestamp: new Date().toISOString()
+  };
+  Object.defineProperty(ServerLeadProviderService, 'testConnection', {
+    configurable: true,
+    value: async (_key: string | undefined, _provider: string | undefined, context: { requestId?: string }) => {
+      receivedRequestId = context.requestId;
+      return result;
+    }
+  });
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-vercel-id': 'bom1::safe-request-id',
+        'x-request-id': 'must-not-be-used'
+      },
+      body: JSON.stringify({ providerType: 'wikidata' })
+    });
+    const body = await response.json();
+    assert.equal(response.status, 504);
+    assert.equal(receivedRequestId, 'bom1::safe-request-id');
+    assert.deepEqual(body.diagnostics, diagnostics);
+    assert.ok(!JSON.stringify(body.diagnostics).includes('must-not-be-used'));
+  } finally {
+    if (descriptor) {
+      Object.defineProperty(ServerLeadProviderService, 'testConnection', descriptor);
+    }
+    server.close();
+    await once(server, 'close');
   }
 });
 

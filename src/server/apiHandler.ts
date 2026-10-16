@@ -152,7 +152,10 @@ export const handleTestConnection = async (req: Request, res: Response) => {
       (req.query?.providerType as string) ||
       req.body?.providerType;
 
-    const testResult = await ServerLeadProviderService.testConnection(apiKey, providerType);
+    const requestId = req.get('x-vercel-id');
+    const testResult = await ServerLeadProviderService.testConnection(apiKey, providerType, {
+      requestId
+    });
     const responseStatus =
       testResult.success
         ? 200

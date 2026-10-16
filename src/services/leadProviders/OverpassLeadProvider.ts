@@ -1,5 +1,10 @@
 import { LeadFilter, RawLead } from '../../types';
 import { LeadProvider } from './LeadProvider';
+import {
+  createNetworkRequestDiagnostics,
+  createSanitizedNetworkFailure,
+  NetworkDiagnosticContext
+} from './networkDiagnostics';
 
 const OVERPASS_ENDPOINT = 'https://overpass-api.de/api/interpreter';
 const MAX_RESULTS = 500;
@@ -21,6 +26,7 @@ export interface OverpassSearchOptions {
   maxAttempts?: number;
   totalBudgetMs?: number;
   onDiagnostics?: (diagnostics: OverpassRequestDiagnostics) => void;
+  diagnosticContext?: NetworkDiagnosticContext;
 }
 
 export interface OverpassRequestDiagnostics {
@@ -42,6 +48,16 @@ export interface OverpassRequestDiagnostics {
     | 'json_parse'
     | 'result_mapping'
     | 'rate_limit_wait';
+  providerId?: string;
+  upstreamHostname?: string;
+  requestId?: string;
+  deploymentSha?: string;
+  responseHeadersReceived?: boolean;
+  timeoutFired?: boolean;
+  failureOrigin?: 'application_deadline' | 'fetch_rejection' | 'http_response' | 'response_error';
+  errorName?: string;
+  errorCode?: string;
+  causeCode?: string;
 }
 
 type OsmElement = {
@@ -289,12 +305,21 @@ export class OverpassLeadProvider implements LeadProvider {
     }
 
     const startedAt = Date.now();
+    const requestStartedAt = new Date(startedAt);
     const totalBudgetMs = normalizeBudget(options.totalBudgetMs);
     const deadline = startedAt + totalBudgetMs;
     const maxAttempts = normalizeAttempts(options.maxAttempts);
     let attemptCount = 0;
     let lastUpstreamStatus: number | undefined;
-    let phaseDiagnostics: OverpassRequestDiagnostics = {};
+    let phaseDiagnostics: OverpassRequestDiagnostics = {
+      ...createNetworkRequestDiagnostics(
+        'openstreetmap-overpass-provider',
+        this.endpoint,
+        options.diagnosticContext,
+        requestStartedAt,
+        startedAt
+      )
+    };
 
     try {
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -320,8 +345,18 @@ export class OverpassLeadProvider implements LeadProvider {
         attemptCount = attempt;
         const requestStartedAt = Date.now();
         phaseDiagnostics = {
+          ...phaseDiagnostics,
           requestStartedAt: new Date(requestStartedAt).toISOString(),
           requestStartedElapsedMs: requestStartedAt - startedAt,
+          responseHeadersReceived: false,
+          responseHeadersElapsedMs: undefined,
+          httpStatus: undefined,
+          responseBodyCompletedElapsedMs: undefined,
+          timeoutFired: false,
+          failureOrigin: undefined,
+          errorName: undefined,
+          errorCode: undefined,
+          causeCode: undefined,
           failurePhase: 'request'
         };
         let response: Response | { response: Response; data: OverpassResponse };
@@ -340,8 +375,11 @@ export class OverpassLeadProvider implements LeadProvider {
               lastUpstreamStatus = result.status;
               phaseDiagnostics = {
                 ...phaseDiagnostics,
+                elapsedMs: Date.now() - startedAt,
+                responseHeadersReceived: true,
                 responseHeadersElapsedMs: Date.now() - requestStartedAt,
                 httpStatus: result.status,
+                failureOrigin: result.ok ? undefined : 'http_response',
                 failurePhase: result.ok ? 'response_body' : 'http_status'
               };
               if (!result.ok) return result;
@@ -350,6 +388,7 @@ export class OverpassLeadProvider implements LeadProvider {
               const responseBodyCompletedAt = Date.now();
               phaseDiagnostics = {
                 ...phaseDiagnostics,
+                elapsedMs: Date.now() - startedAt,
                 responseBodyCompletedElapsedMs: responseBodyCompletedAt - requestStartedAt,
                 failurePhase: 'response_body'
               };
@@ -360,6 +399,7 @@ export class OverpassLeadProvider implements LeadProvider {
               try {
                 parsed = JSON.parse(responseText);
               } catch {
+                phaseDiagnostics = { ...phaseDiagnostics, failureOrigin: 'response_error' };
                 throw new OverpassApiError(
                   'OpenStreetMap Overpass returned malformed JSON or an invalid response.'
                 );
@@ -375,6 +415,7 @@ export class OverpassLeadProvider implements LeadProvider {
                 typeof parsed !== 'object' ||
                 !Array.isArray((parsed as { elements?: unknown }).elements)
               ) {
+                phaseDiagnostics = { ...phaseDiagnostics, failureOrigin: 'response_error' };
                 throw new OverpassApiError(
                   'OpenStreetMap Overpass returned malformed JSON or an invalid response.'
                 );
@@ -392,10 +433,21 @@ export class OverpassLeadProvider implements LeadProvider {
           const timedOut = error instanceof Error && error.name === 'AbortError';
           const requestError = error instanceof OverpassApiError
             ? error
-            : timedOut
-            ? new OverpassApiError(timeoutReason, undefined, { timeoutReason })
             : new OverpassApiError(
-                'Network error connecting to the public OpenStreetMap Overpass API.'
+                timedOut
+                  ? timeoutReason
+                  : 'Network error connecting to the public OpenStreetMap Overpass API.',
+                undefined,
+                {
+                  ...createSanitizedNetworkFailure(
+                    phaseDiagnostics,
+                    error,
+                    phaseDiagnostics.failurePhase === 'request' ? 'fetch_rejection' : 'response_error',
+                    false,
+                    startedAt
+                  ),
+                  ...(timedOut ? { timeoutReason } : {})
+                }
               );
           const canRetryTimeout =
             requestError instanceof OverpassApiError &&
@@ -446,6 +498,8 @@ export class OverpassLeadProvider implements LeadProvider {
         lastUpstreamStatus = response.status;
         phaseDiagnostics = {
           ...phaseDiagnostics,
+          responseHeadersReceived: true,
+          failureOrigin: 'http_response',
           failurePhase: 'http_status'
         };
         const canRetry =
@@ -491,9 +545,14 @@ export class OverpassLeadProvider implements LeadProvider {
     const timeout = new Promise<never>((_, reject) => {
       timeoutId = setTimeout(() => {
         controller.abort();
+        const timeoutDiagnostics = {
+          ...getDiagnostics(),
+          timeoutFired: true,
+          failureOrigin: 'application_deadline' as const
+        };
         reject(
           new OverpassApiError(timeoutReason, undefined, {
-            ...getDiagnostics(),
+            ...timeoutDiagnostics,
             timeoutReason
           })
         );
@@ -532,7 +591,11 @@ export class OverpassLeadProvider implements LeadProvider {
       typeof message === 'number'
         ? `Total request budget exceeded (${message}ms).`
         : message || 'Total request time budget exceeded.';
-    return new OverpassApiError(reason, undefined, { timeoutReason: reason });
+    return new OverpassApiError(reason, undefined, {
+      timeoutReason: reason,
+      timeoutFired: true,
+      failureOrigin: 'application_deadline'
+    });
   }
 
   private retryDelay(attempt: number): number {

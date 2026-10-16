@@ -1,5 +1,11 @@
 import { LeadFilter, RawLead } from '../../types';
 import { LeadProvider } from './LeadProvider';
+import {
+  createNetworkRequestDiagnostics,
+  createSanitizedNetworkFailure,
+  NetworkDiagnosticContext,
+  NetworkRequestDiagnostics
+} from './networkDiagnostics';
 
 export const WIKIDATA_ENDPOINT = 'https://query.wikidata.org/sparql';
 const REQUEST_TIMEOUT_MS = 8000;
@@ -22,7 +28,8 @@ export class WikidataProviderError extends Error {
   constructor(
     message: string,
     readonly httpStatus?: number,
-    readonly timedOut = false
+    readonly timedOut = false,
+    readonly diagnostics?: Partial<NetworkRequestDiagnostics>
   ) {
     super(message);
     this.name = 'WikidataProviderError';
@@ -140,7 +147,13 @@ export class WikidataLeadProvider implements LeadProvider {
     private readonly timeoutMs = REQUEST_TIMEOUT_MS
   ) {}
 
-  async search(filters: LeadFilter): Promise<RawLead[]> {
+  async search(
+    filters: LeadFilter,
+    options: {
+      diagnosticContext?: NetworkDiagnosticContext;
+      onDiagnostics?: (diagnostics: NetworkRequestDiagnostics) => void;
+    } = {}
+  ): Promise<RawLead[]> {
     const targetLimit = Math.min(Math.max(Math.floor(filters.maxLeads) || 1, 1), MAX_RESULTS);
     let query: string;
     try {
@@ -153,6 +166,19 @@ export class WikidataLeadProvider implements LeadProvider {
     }
     const controller = new AbortController();
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const startedAt = Date.now();
+    let diagnostics = createNetworkRequestDiagnostics(
+      this.providerId,
+      this.endpoint,
+      options.diagnosticContext,
+      new Date(startedAt),
+      startedAt
+    );
+    diagnostics.failurePhase = 'request';
+    const reportDiagnostics = () => {
+      diagnostics = { ...diagnostics, elapsedMs: Date.now() - startedAt };
+      options.onDiagnostics?.(diagnostics);
+    };
 
     try {
       const response = await Promise.race([
@@ -167,20 +193,62 @@ export class WikidataLeadProvider implements LeadProvider {
             body: new URLSearchParams({ query }).toString(),
             signal: controller.signal
           });
+          diagnostics = {
+            ...diagnostics,
+            responseHeadersReceived: true,
+            responseHeadersElapsedMs: Date.now() - startedAt,
+            httpStatus: result.status,
+            failurePhase: result.ok ? 'response_body' : 'http_status',
+            failureOrigin: result.ok ? undefined : 'http_response'
+          };
           if (!result.ok) {
+            reportDiagnostics();
             throw new WikidataProviderError(
               result.status === 429 || result.status >= 500
                 ? `Wikidata Query Service is temporarily unavailable (HTTP ${result.status}).`
                 : `Wikidata Query Service rejected the query (HTTP ${result.status}).`,
-              result.status
+              result.status,
+              false,
+              diagnostics
             );
           }
 
           let parsed: unknown;
+          let responseText: string;
           try {
-            parsed = JSON.parse(await result.text());
+            responseText = await result.text();
+          } catch (error) {
+            throw new WikidataProviderError(
+              'Wikidata Query Service response body could not be read.',
+              undefined,
+              false,
+              {
+                ...createSanitizedNetworkFailure(
+                  diagnostics,
+                  error,
+                  'response_error',
+                  false,
+                  startedAt
+                ),
+                failurePhase: 'response_body'
+              }
+            );
+          }
+          diagnostics = {
+            ...diagnostics,
+            elapsedMs: Date.now() - startedAt,
+            responseBodyCompletedElapsedMs: Date.now() - startedAt,
+            failurePhase: 'json_parse'
+          };
+          try {
+            parsed = JSON.parse(responseText);
           } catch {
-            throw new WikidataProviderError('Wikidata Query Service returned malformed JSON.');
+            throw new WikidataProviderError(
+              'Wikidata Query Service returned malformed JSON.',
+              undefined,
+              false,
+              { ...diagnostics, failureOrigin: 'response_error' }
+            );
           }
           if (
             !parsed ||
@@ -191,18 +259,31 @@ export class WikidataLeadProvider implements LeadProvider {
             !('bindings' in parsed.results) ||
             !Array.isArray(parsed.results.bindings)
           ) {
-            throw new WikidataProviderError('Wikidata Query Service returned an invalid result shape.');
+            throw new WikidataProviderError(
+              'Wikidata Query Service returned an invalid result shape.',
+              undefined,
+              false,
+              { ...diagnostics, failureOrigin: 'response_error' }
+            );
           }
           return (parsed as SparqlResponse).results!.bindings!;
         })(),
         new Promise<never>((_, reject) => {
           timeoutId = setTimeout(() => {
             controller.abort();
+            diagnostics = {
+              ...diagnostics,
+              elapsedMs: Date.now() - startedAt,
+              timeoutFired: true,
+              failureOrigin: 'application_deadline'
+            };
+            reportDiagnostics();
             reject(
               new WikidataProviderError(
                 `Wikidata Query Service request timed out (${this.timeoutMs}ms).`,
                 undefined,
-                true
+                true,
+                diagnostics
               )
             );
           }, this.timeoutMs);
@@ -214,18 +295,38 @@ export class WikidataLeadProvider implements LeadProvider {
         const lead = mapWikidataBindingToLead(binding);
         if (lead && !byEntity.has(lead.profileUrl)) byEntity.set(lead.profileUrl, lead);
       }
+      diagnostics = {
+        ...diagnostics,
+        elapsedMs: Date.now() - startedAt,
+        failurePhase: 'result_mapping'
+      };
+      reportDiagnostics();
       return Array.from(byEntity.values()).slice(0, targetLimit);
     } catch (error) {
-      if (error instanceof WikidataProviderError) throw error;
-      if (controller.signal.aborted) {
-        throw new WikidataProviderError(
-          `Wikidata Query Service request timed out (${this.timeoutMs}ms).`,
-          undefined,
-          true
-        );
+      if (error instanceof WikidataProviderError) {
+        if (error.diagnostics) diagnostics = { ...diagnostics, ...error.diagnostics };
+        if (error.timedOut || error.diagnostics) reportDiagnostics();
+        throw error;
       }
+      const timedOut = controller.signal.aborted;
+      diagnostics = {
+        ...diagnostics,
+        ...createSanitizedNetworkFailure(
+          diagnostics,
+          error,
+          timedOut ? 'application_deadline' : 'fetch_rejection',
+          timedOut,
+          startedAt
+        )
+      };
+      reportDiagnostics();
       throw new WikidataProviderError(
-        'Network error connecting to the Wikidata Query Service.'
+        timedOut
+          ? `Wikidata Query Service request timed out (${this.timeoutMs}ms).`
+          : 'Network error connecting to the Wikidata Query Service.',
+        undefined,
+        timedOut,
+        diagnostics
       );
     } finally {
       if (timeoutId) clearTimeout(timeoutId);

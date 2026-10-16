@@ -187,6 +187,16 @@ export interface ProviderStatusInfo {
     responseBodyCompletedElapsedMs?: number;
     jsonParsingCompletedElapsedMs?: number;
     jsonParsingDurationMs?: number;
+    providerId?: string;
+    upstreamHostname?: string;
+    requestId?: string;
+    deploymentSha?: string;
+    responseHeadersReceived?: boolean;
+    timeoutFired?: boolean;
+    failureOrigin?: 'application_deadline' | 'fetch_rejection' | 'http_response' | 'response_error';
+    errorName?: string;
+    errorCode?: string;
+    causeCode?: string;
     failurePhase?:
       | 'request'
       | 'http_status'

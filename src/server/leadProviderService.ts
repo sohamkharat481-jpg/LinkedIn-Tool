@@ -13,6 +13,10 @@ import {
   WikidataLeadProvider,
   WikidataProviderError
 } from '../services/leadProviders/WikidataLeadProvider';
+import {
+  NetworkDiagnosticContext,
+  NetworkRequestDiagnostics
+} from '../services/leadProviders/networkDiagnostics';
 
 let lastSuccessTimestamp: string = 'None yet';
 let lastErrorMsg: string = 'None';
@@ -101,7 +105,7 @@ export interface ProviderDiagnosticTestResult {
   upstreamHttpStatus?: number;
   elapsedMs?: number;
   timeoutReason?: string;
-  diagnostics?: {
+  diagnostics?: Partial<NetworkRequestDiagnostics> & {
     upstreamHttpStatus?: number;
     attemptCount?: number;
     elapsedMs?: number;
@@ -465,7 +469,8 @@ export class ServerLeadProviderService {
    */
   static async testConnection(
     overrideApiKey?: string,
-    requestedType?: string
+    requestedType?: string,
+    diagnosticContext: NetworkDiagnosticContext = {}
   ): Promise<ProviderDiagnosticTestResult> {
     const { key, type } = this.resolveApiKey(overrideApiKey, requestedType);
     const startTime = Date.now();
@@ -480,8 +485,14 @@ export class ServerLeadProviderService {
         companySize: [],
         maxLeads: 1
       };
+      let networkDiagnostics: NetworkRequestDiagnostics | undefined;
       try {
-        const leads = await new WikidataLeadProvider().search(filters);
+        const leads = await new WikidataLeadProvider().search(filters, {
+          diagnosticContext,
+          onDiagnostics: diagnostics => {
+            networkDiagnostics = diagnostics;
+          }
+        });
         const duration = Date.now() - startTime;
         wikidataLastResponseTime = `${duration}ms`;
         if (leads.length === 0) {
@@ -500,6 +511,7 @@ export class ServerLeadProviderService {
             authStatus: 'No business data returned',
             message: wikidataLastError,
             sanitizedProviderError: wikidataLastError,
+            diagnostics: networkDiagnostics,
             timestamp: new Date().toISOString()
           };
         }
@@ -519,6 +531,7 @@ export class ServerLeadProviderService {
           authStatus: 'No API key required',
           message: `Wikidata returned ${leads.length} cafe record(s) for the bounded Mumbai test query. Coverage is incomplete.`,
           sanitizedProviderError: null,
+          diagnostics: networkDiagnostics,
           timestamp: new Date().toISOString()
         };
       } catch (error) {
@@ -527,9 +540,13 @@ export class ServerLeadProviderService {
           error instanceof WikidataProviderError
             ? error
             : new WikidataProviderError('Wikidata provider test failed.');
+        const diagnostics = providerError.diagnostics || networkDiagnostics;
         wikidataConnectionVerified = false;
         wikidataLastError = providerError.message;
         wikidataLastResponseTime = `${duration}ms`;
+        if (diagnostics?.providerId) {
+          console.warn('Sanitized Wikidata network diagnostics', JSON.stringify(diagnostics));
+        }
         return {
           success: false,
           httpStatus: providerError.timedOut ? 504 : providerError.httpStatus || 502,
@@ -543,6 +560,7 @@ export class ServerLeadProviderService {
           authStatus: 'Public endpoint error',
           message: providerError.message,
           sanitizedProviderError: providerError.message,
+          diagnostics,
           timestamp: new Date().toISOString()
         };
       }
@@ -566,6 +584,7 @@ export class ServerLeadProviderService {
           maxResults: 1,
           maxAttempts: 1,
           totalBudgetMs: healthCheckBudgetMs,
+          diagnosticContext,
           onDiagnostics: diagnostics => {
             healthDiagnostics = diagnostics;
           }
@@ -654,6 +673,9 @@ export class ServerLeadProviderService {
         overpassLastError = message;
         overpassLastResponseTime = `${duration}ms`;
         overpassLastDiagnostics = { ...diagnostics, upstreamHttpStatus };
+        if (overpassLastDiagnostics.providerId) {
+          console.warn('Sanitized Overpass network diagnostics', JSON.stringify(overpassLastDiagnostics));
+        }
         const httpStatus =
           error instanceof OverpassApiError && error.httpStatus
             ? overpassDiagnosticHttpStatus(error.httpStatus)
@@ -679,18 +701,11 @@ export class ServerLeadProviderService {
           elapsedMs: diagnostics.elapsedMs ?? duration,
           timeoutReason: diagnostics.timeoutReason,
           diagnostics: {
+            ...diagnostics,
             attemptCount: diagnostics.attemptCount,
             elapsedMs: diagnostics.elapsedMs ?? duration,
             upstreamHttpStatus,
             timeoutReason: diagnostics.timeoutReason,
-            requestStartedAt: diagnostics.requestStartedAt,
-            requestStartedElapsedMs: diagnostics.requestStartedElapsedMs,
-            responseHeadersElapsedMs: diagnostics.responseHeadersElapsedMs,
-            httpStatus: diagnostics.httpStatus,
-            responseBodyCompletedElapsedMs: diagnostics.responseBodyCompletedElapsedMs,
-            jsonParsingCompletedElapsedMs: diagnostics.jsonParsingCompletedElapsedMs,
-            jsonParsingDurationMs: diagnostics.jsonParsingDurationMs,
-            failurePhase: diagnostics.failurePhase
           }
         };
       }
