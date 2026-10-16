@@ -5,6 +5,7 @@ import { ServerLeadProviderService } from './leadProviderService';
 import { testSupabaseHealth } from '../services/supabase';
 import { GooglePlacesApiError } from '../services/leadProviders/googlePlacesErrors';
 import { OverpassApiError } from '../services/leadProviders/OverpassLeadProvider';
+import { WikidataProviderError } from '../services/leadProviders/WikidataLeadProvider';
 
 export const apiRouter = express.Router();
 
@@ -186,13 +187,13 @@ const executeLeadSearch = async (filters: LeadFilter, providerType?: string, api
   filters.maxLeads = Math.min(Math.max(Number(filters.maxLeads) || 50, 1), 500);
 
   const resolved = ServerLeadProviderService.resolveApiKey(apiKey, providerType);
-  if (resolved.type !== 'overpass' && (!resolved.key || resolved.key.trim() === '')) {
+  if (!['overpass', 'wikidata'].includes(resolved.type) && (!resolved.key || resolved.key.trim() === '')) {
     return {
       status: 422,
       body: {
         error: 'No real lead provider is configured.',
         code: 'NO_PROVIDER_CONFIGURED',
-        message: 'Configure a Google Maps Places, Serper, or LeadOcean API key on the server, or select the no-key OpenStreetMap provider.'
+        message: 'Configure a Google Maps Places, Serper, or LeadOcean API key on the server, or select a no-key OpenStreetMap or experimental Wikidata provider.'
       }
     };
   }
@@ -207,6 +208,18 @@ const executeLeadSearch = async (filters: LeadFilter, providerType?: string, api
     const isGooglePlaces = resolved.type === 'google_places';
     const isSerper = resolved.type === 'serper';
     const isOverpass = resolved.type === 'overpass';
+    const isWikidata = resolved.type === 'wikidata';
+    if (isWikidata && dedupeResult.finalUniqueLeads.length === 0) {
+      return {
+        status: 404,
+        body: {
+          success: false,
+          error: 'Wikidata returned no cafe records for this search.',
+          code: 'WIKIDATA_NO_RESULTS',
+          provider: 'Wikidata Query Service'
+        }
+      };
+    }
 
     return {
       status: 200,
@@ -215,6 +228,8 @@ const executeLeadSearch = async (filters: LeadFilter, providerType?: string, api
         provider: {
           id: isOverpass
             ? 'openstreetmap-overpass-provider'
+            : isWikidata
+            ? 'wikidata-cafe-provider'
             : isGooglePlaces
             ? 'google-maps-places-provider'
             : isSerper
@@ -222,6 +237,8 @@ const executeLeadSearch = async (filters: LeadFilter, providerType?: string, api
             : 'leadocean-b2b-provider',
           name: isOverpass
             ? 'OpenStreetMap Overpass API'
+            : isWikidata
+            ? 'Wikidata Query Service (experimental cafes)'
             : isGooglePlaces
             ? 'Google Maps Platform Places API (New)'
             : isSerper
@@ -268,6 +285,16 @@ const executeLeadSearch = async (filters: LeadFilter, providerType?: string, api
         body: {
           error: error.message,
           code: 'OVERPASS_API_ERROR',
+          providerHttpStatus: error.httpStatus
+        }
+      };
+    }
+    if (error instanceof WikidataProviderError) {
+      return {
+        status: error.timedOut ? 504 : error.httpStatus || 502,
+        body: {
+          error: error.message,
+          code: error.timedOut ? 'WIKIDATA_TIMEOUT' : 'WIKIDATA_API_ERROR',
           providerHttpStatus: error.httpStatus
         }
       };

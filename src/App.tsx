@@ -86,6 +86,8 @@ export default function App() {
       const providerName =
         activeCfg.providerType === 'overpass'
           ? 'OpenStreetMap Overpass API'
+          : activeCfg.providerType === 'wikidata'
+          ? 'Wikidata Query Service (experimental cafes)'
           : activeCfg.providerType === 'leadocean'
           ? 'LeadOcean B2B People Search API'
           : activeCfg.providerType === 'serper'
@@ -101,6 +103,8 @@ export default function App() {
         endpointStatus:
           activeCfg.providerType === 'overpass'
             ? 'https://overpass-api.de/api/interpreter'
+            : activeCfg.providerType === 'wikidata'
+            ? 'https://query.wikidata.org/sparql'
             : activeCfg.providerType === 'leadocean'
             ? 'https://api.leadocean.io/v1/people/search'
             : activeCfg.providerType === 'serper'

@@ -136,7 +136,7 @@ export interface SearchProgressState {
 }
 
 export interface LeadProviderConfig {
-  providerType: 'mock' | 'rapidapi' | 'custom_proxy' | 'google_search' | 'leadocean' | 'serper' | 'overpass';
+  providerType: 'mock' | 'rapidapi' | 'custom_proxy' | 'google_search' | 'leadocean' | 'serper' | 'overpass' | 'wikidata';
   apiKey?: string;
   customEndpoint?: string;
 }

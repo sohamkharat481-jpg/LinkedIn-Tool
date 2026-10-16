@@ -8,6 +8,11 @@ import {
   OverpassLeadProvider,
   OverpassRequestDiagnostics
 } from '../services/leadProviders/OverpassLeadProvider';
+import {
+  WIKIDATA_ENDPOINT,
+  WikidataLeadProvider,
+  WikidataProviderError
+} from '../services/leadProviders/WikidataLeadProvider';
 
 let lastSuccessTimestamp: string = 'None yet';
 let lastErrorMsg: string = 'None';
@@ -18,6 +23,10 @@ let overpassLastSuccessTimestamp = 'None yet';
 let overpassLastError = 'None';
 let overpassLastResponseTime: number | string = 'N/A';
 let overpassLastDiagnostics: OverpassRequestDiagnostics = {};
+let wikidataConnectionVerified = false;
+let wikidataLastSuccessTimestamp = 'None yet';
+let wikidataLastError = 'None';
+let wikidataLastResponseTime: number | string = 'N/A';
 
 const isProductionRuntime = () => Boolean(process.env.VERCEL || process.env.NODE_ENV === 'production');
 
@@ -200,9 +209,9 @@ export class ServerLeadProviderService {
   static resolveApiKey(
     overrideKey?: string,
     providerType?: string
-  ): { key: string; type: 'google_places' | 'serper' | 'leadocean' | 'overpass' } {
-    if (providerType === 'overpass') {
-      return { key: '', type: 'overpass' };
+  ): { key: string; type: 'google_places' | 'serper' | 'leadocean' | 'overpass' | 'wikidata' } {
+    if (providerType === 'overpass' || providerType === 'wikidata') {
+      return { key: '', type: providerType };
     }
 
     const cleanedOverride = isProductionRuntime() ? '' : (
@@ -286,6 +295,26 @@ export class ServerLeadProviderService {
           jsonParsingDurationMs: overpassLastDiagnostics.jsonParsingDurationMs,
           failurePhase: overpassLastDiagnostics.failurePhase
         }
+      };
+    }
+
+    if (type === 'wikidata') {
+      return {
+        configured: true,
+        providerName: 'Wikidata Query Service (experimental cafes)',
+        status: wikidataConnectionVerified ? 'Connected' : wikidataLastError !== 'None' ? 'Error' : 'Not Tested',
+        message: wikidataConnectionVerified
+          ? 'A bounded Wikidata cafe query returned business records. Coverage is incomplete.'
+          : wikidataLastError !== 'None'
+          ? wikidataLastError
+          : 'Experimental, cafe-only source. No API key required; run a live test to verify availability.',
+        isMock: false,
+        endpointStatus: WIKIDATA_ENDPOINT,
+        authStatus: 'No API key required',
+        lastSuccessfulRequest: wikidataLastSuccessTimestamp,
+        lastError: wikidataLastError,
+        responseTimeMs: wikidataLastResponseTime,
+        isExternal: true
       };
     }
 
@@ -440,6 +469,84 @@ export class ServerLeadProviderService {
   ): Promise<ProviderDiagnosticTestResult> {
     const { key, type } = this.resolveApiKey(overrideApiKey, requestedType);
     const startTime = Date.now();
+
+    if (type === 'wikidata') {
+      const filters: LeadFilter = {
+        jobTitles: [],
+        industry: ['cafe'],
+        country: 'India',
+        city: 'Mumbai',
+        seniority: [],
+        companySize: [],
+        maxLeads: 1
+      };
+      try {
+        const leads = await new WikidataLeadProvider().search(filters);
+        const duration = Date.now() - startTime;
+        wikidataLastResponseTime = `${duration}ms`;
+        if (leads.length === 0) {
+          wikidataConnectionVerified = false;
+          wikidataLastError = 'Wikidata returned no cafe records for the bounded Mumbai test query.';
+          return {
+            success: false,
+            httpStatus: 503,
+            provider: 'Wikidata Query Service (experimental cafes)',
+            endpoint: WIKIDATA_ENDPOINT,
+            placesReturned: 0,
+            responseTime: `${duration}ms`,
+            responseTimeMs: duration,
+            configured: true,
+            status: 'Error',
+            authStatus: 'No business data returned',
+            message: wikidataLastError,
+            sanitizedProviderError: wikidataLastError,
+            timestamp: new Date().toISOString()
+          };
+        }
+        wikidataConnectionVerified = true;
+        wikidataLastSuccessTimestamp = new Date().toISOString();
+        wikidataLastError = 'None';
+        return {
+          success: true,
+          httpStatus: 200,
+          provider: 'Wikidata Query Service (experimental cafes)',
+          endpoint: WIKIDATA_ENDPOINT,
+          placesReturned: leads.length,
+          responseTime: `${duration}ms`,
+          responseTimeMs: duration,
+          configured: true,
+          status: 'Connected',
+          authStatus: 'No API key required',
+          message: `Wikidata returned ${leads.length} cafe record(s) for the bounded Mumbai test query. Coverage is incomplete.`,
+          sanitizedProviderError: null,
+          timestamp: new Date().toISOString()
+        };
+      } catch (error) {
+        const duration = Date.now() - startTime;
+        const providerError =
+          error instanceof WikidataProviderError
+            ? error
+            : new WikidataProviderError('Wikidata provider test failed.');
+        wikidataConnectionVerified = false;
+        wikidataLastError = providerError.message;
+        wikidataLastResponseTime = `${duration}ms`;
+        return {
+          success: false,
+          httpStatus: providerError.timedOut ? 504 : providerError.httpStatus || 502,
+          provider: 'Wikidata Query Service (experimental cafes)',
+          endpoint: WIKIDATA_ENDPOINT,
+          placesReturned: 0,
+          responseTime: `${duration}ms`,
+          responseTimeMs: duration,
+          configured: true,
+          status: 'Error',
+          authStatus: 'Public endpoint error',
+          message: providerError.message,
+          sanitizedProviderError: providerError.message,
+          timestamp: new Date().toISOString()
+        };
+      }
+    }
 
     if (type === 'overpass') {
       const healthCheckBudgetMs = getOverpassHealthCheckBudgetMs();
@@ -982,6 +1089,24 @@ export class ServerLeadProviderService {
               }
             : { elapsedMs: Date.now() - startTime };
         throw err;
+      }
+    }
+
+    if (type === 'wikidata') {
+      try {
+        const results = await new WikidataLeadProvider().search(filters);
+        wikidataConnectionVerified = results.length > 0;
+        wikidataLastError = results.length > 0
+          ? 'None'
+          : 'Wikidata returned no cafe records for this search.';
+        wikidataLastResponseTime = `${Date.now() - startTime}ms`;
+        if (results.length > 0) wikidataLastSuccessTimestamp = new Date().toISOString();
+        return results;
+      } catch (error) {
+        wikidataConnectionVerified = false;
+        wikidataLastError = error instanceof Error ? error.message : 'Wikidata provider search error.';
+        wikidataLastResponseTime = `${Date.now() - startTime}ms`;
+        throw error;
       }
     }
 

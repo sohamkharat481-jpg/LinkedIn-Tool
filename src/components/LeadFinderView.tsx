@@ -197,7 +197,7 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
     }
 
     const activeJobTitles = overrideFilters ? overrideFilters.jobTitles : jobTitles;
-    if (providerType !== 'overpass' && activeJobTitles.length === 0) {
+    if (providerType !== 'overpass' && providerType !== 'wikidata' && activeJobTitles.length === 0) {
       setSearchError('At least one job title is required.');
       return;
     }
@@ -262,7 +262,10 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
   };
 
   const isNotConfigured =
-    providerType !== 'overpass' && !providerStatus.isMock && providerStatus.status === 'Not Configured';
+    providerType !== 'overpass' &&
+    providerType !== 'wikidata' &&
+    !providerStatus.isMock &&
+    providerStatus.status === 'Not Configured';
 
   return (
     <div id="lead-finder-section" className="space-y-6 max-w-5xl mx-auto scroll-mt-6">

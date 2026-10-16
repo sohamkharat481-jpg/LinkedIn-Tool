@@ -313,6 +313,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             >
               <option value="google_search">Google Maps Places API (New)</option>
               <option value="overpass">OpenStreetMap Overpass (free, no API key)</option>
+              <option value="wikidata">Wikidata (experimental, cafes only; free)</option>
               <option value="serper">Serper.dev</option>
               <option value="leadocean">LeadOcean</option>
             </select>
@@ -334,6 +335,25 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   className="underline"
                 >
                   Open Database License
+                </a>
+                .
+              </p>
+            </div>
+          ) : providerType === 'wikidata' ? (
+            <div className="max-w-3xl rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-950 space-y-2">
+              <p className="font-bold">Wikidata Query Service — experimental, no API key required</p>
+              <p>
+                This source is limited to cafes within 25 km of a city whose Wikidata item has an English label and coordinates. Coverage is incomplete; phone and website are populated only when Wikidata provides them. Empty results are reported as no leads found.
+              </p>
+              <p>
+                Structured data is available under CC0. Use this source only for bounded searches and consult the{' '}
+                <a
+                  href="https://www.mediawiki.org/wiki/Wikidata_Query_Service/User_Manual"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="underline"
+                >
+                  Wikidata Query Service documentation
                 </a>
                 .
               </p>

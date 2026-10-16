@@ -4,6 +4,7 @@ import { GoogleMapsPlacesLeadProvider } from './GoogleMapsPlacesLeadProvider';
 import { LeadOceanLeadProvider } from './LeadOceanLeadProvider';
 import { SerperSearchLeadProvider } from './SerperSearchLeadProvider';
 import { OverpassLeadProvider } from './OverpassLeadProvider';
+import { WikidataLeadProvider } from './WikidataLeadProvider';
 
 let currentConfig: LeadProviderConfig = {
   providerType: 'google_search',
@@ -23,6 +24,9 @@ export class ProviderFactory {
   static getProvider(): LeadProvider {
     if (currentConfig.providerType === 'overpass') {
       return new OverpassLeadProvider();
+    }
+    if (currentConfig.providerType === 'wikidata') {
+      return new WikidataLeadProvider();
     }
 
     const googleMapsKey =

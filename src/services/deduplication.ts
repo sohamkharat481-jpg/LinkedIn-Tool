@@ -56,13 +56,22 @@ export function isValidLeadRecord(lead: RawLead): boolean {
   if (!lead) return false;
 
   if (lead.leadType === 'business') {
-    return Boolean(
-      lead.source === 'OpenStreetMap (Overpass API)' &&
-      lead.osmType &&
-      Number.isSafeInteger(lead.osmId) &&
+    const hasCommonBusinessFields = Boolean(
       lead.companyName?.trim() &&
-      lead.businessCategory?.trim() &&
-      lead.profileUrl === `https://www.openstreetmap.org/${lead.osmType}/${lead.osmId}`
+      lead.businessCategory?.trim()
+    );
+    if (lead.source === 'OpenStreetMap (Overpass API)') {
+      return Boolean(
+        hasCommonBusinessFields &&
+        lead.osmType &&
+        Number.isSafeInteger(lead.osmId) &&
+        lead.profileUrl === `https://www.openstreetmap.org/${lead.osmType}/${lead.osmId}`
+      );
+    }
+    return Boolean(
+      hasCommonBusinessFields &&
+      lead.source === 'Wikidata Query Service' &&
+      /^https:\/\/www\.wikidata\.org\/entity\/Q[1-9]\d*$/.test(lead.profileUrl)
     );
   }
   
@@ -100,16 +109,16 @@ export function filterAndDeduplicateLeads(candidates: RawLead[]): DeduplicationR
 
   for (const rawLead of validRecords) {
     if (rawLead.leadType === 'business') {
-      const osmId = `${rawLead.osmType}/${rawLead.osmId}`;
+      const businessId = `${rawLead.source}:${rawLead.profileUrl}`;
       const address = rawLead.businessAddress?.trim().toLowerCase();
       const addressKey = address
         ? `${rawLead.companyName.trim().toLowerCase()}|${address}`
         : '';
-      if (seenBusinessIds.has(osmId) || (addressKey && seenBusinessAddresses.has(addressKey))) {
+      if (seenBusinessIds.has(businessId) || (addressKey && seenBusinessAddresses.has(addressKey))) {
         duplicateBusinessesRemoved++;
         continue;
       }
-      seenBusinessIds.add(osmId);
+      seenBusinessIds.add(businessId);
       if (addressKey) seenBusinessAddresses.add(addressKey);
       uniqueUrlLeadsMap.set(rawLead.profileUrl, rawLead);
       continue;
