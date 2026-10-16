@@ -43,9 +43,13 @@ This guide details how to deploy the **LinkedIn Lead Finder** full-stack applica
    - `SUPABASE_ANON_KEY`: `your-supabase-anon-key`
    - `SERPER_API_KEY`: `your-serper-api-key` (Serper.dev search provider - server-side only)
    - `LEADOCEAN_API_KEY`: `your-leadocean-api-key` (LeadOcean people search provider - server-side only)
-   - `INSTAGRAM_ACCESS_TOKEN`: Meta user access token for the app user's Instagram professional account (server-side only)
-   - `INSTAGRAM_USER_ID`: ID of that Instagram professional account
+   - `INSTAGRAM_ACCESS_TOKEN`: Meta user access token for the fallback Instagram professional account (server-side only)
+   - `INSTAGRAM_USER_ID`: ID of that Instagram professional account (fallback)
    - `INSTAGRAM_GRAPH_API_VERSION`: optional Graph API version; defaults to `v25.0`
+   - `INSTAGRAM_TOKEN_ENCRYPTION_KEY`: 32-character AES-256-GCM secret key used to securely encrypt client Instagram tokens in Supabase
+   - `META_APP_ID`: Meta Developer App ID for client-specific OAuth
+   - `META_APP_SECRET`: Meta Developer App Secret for code exchange (server-side only)
+   - `META_OAUTH_REDIRECT_URI`: OAuth redirect callback URI (e.g. `https://your-domain.vercel.app/api/auth/instagram/callback`)
    - `VITE_SUPABASE_URL`: `https://your-project.supabase.co`
    - `VITE_SUPABASE_ANON_KEY`: `your-supabase-anon-key`
 
@@ -57,6 +61,16 @@ This guide details how to deploy the **LinkedIn Lead Finder** full-stack applica
 ## 4. Configure a lead provider
 
 Select **Serper.dev**, **LeadOcean**, or **Instagram Business Discovery (Meta)** in **Settings → Lead Discovery Data Provider**. Configure the selected provider's server-side credentials in the Vercel project environment. Provider selection is explicit; the application does not automatically switch to another provider when the selected provider is unavailable.
+
+### Client-Specific Instagram OAuth
+Clients can connect their own Instagram Business or Professional accounts independently:
+1. In Meta Developer Portal:
+   - Add Facebook Login / Instagram Graph API product.
+   - Configure Valid OAuth Redirect URIs: `https://<your-domain>/api/auth/instagram/callback`.
+   - Required Scopes: `instagram_basic,instagram_manage_insights,pages_show_list,pages_read_engagement`.
+2. Configure `META_APP_ID`, `META_APP_SECRET`, and `INSTAGRAM_TOKEN_ENCRYPTION_KEY` in environment variables.
+3. In **Settings → Client-Specific Instagram OAuth Integration**, select a client and click **Connect Instagram Account**. Tokens are encrypted with AES-256-GCM and stored in the tenant-isolated `instagram_integrations` table with RLS. Plaintext tokens are never exposed to browser clients.
+4. When performing an Instagram lead search with an active client selected, the backend automatically uses the client's decrypted OAuth credentials. If not connected, it falls back to the server-configured credentials.
 
 Instagram Business Discovery requires a Meta app configured for the Instagram API with Facebook Login, an Instagram Business or Creator account connected to a Facebook Page, a user access token, and the Instagram professional account ID. The token needs `instagram_basic`, `instagram_manage_insights`, and `pages_read_engagement`; if the user's Page role was granted through Business Manager, Meta may additionally require `ads_management` or `ads_read`. Use the app's required access level/review for the intended users. Keep all Meta credentials server-side.
 

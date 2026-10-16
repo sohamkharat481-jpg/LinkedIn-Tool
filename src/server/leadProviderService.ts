@@ -5,6 +5,7 @@ import {
   InstagramBusinessProviderError
 } from '../services/leadProviders/InstagramBusinessLeadProvider';
 import { SerperSearchLeadProvider } from '../services/leadProviders/SerperSearchLeadProvider';
+import { InstagramOAuthService } from './instagramOAuthService';
 
 export type SupportedLeadProvider = 'serper' | 'leadocean' | 'instagram_business';
 
@@ -207,9 +208,13 @@ export class ServerLeadProviderService {
 
   static async testConnection(
     overrideApiKey?: string,
-    requestedType?: string
+    requestedType?: string,
+    workspaceId?: string,
+    clientId?: string
   ): Promise<ProviderDiagnosticTestResult> {
-    const { key, type } = this.resolveApiKey(overrideApiKey, requestedType);
+    let { key, type } = this.resolveApiKey(overrideApiKey, requestedType);
+    let userId = process.env.INSTAGRAM_USER_ID;
+
     const provider = PROVIDERS[type];
     const state = providerStates[type];
     const startTime = Date.now();
@@ -239,9 +244,34 @@ export class ServerLeadProviderService {
       };
     };
 
+    if (type === 'instagram_business' && workspaceId && clientId) {
+      const integrationMeta = await InstagramOAuthService.getIntegration(workspaceId, clientId);
+      if (integrationMeta) {
+        if (integrationMeta.connectionStatus === 'Expired' || integrationMeta.connectionStatus === 'Revoked') {
+          state.connectionVerified = false;
+          state.lastError = `Instagram connection for this client is ${integrationMeta.connectionStatus.toLowerCase()}. Please reconnect in Settings.`;
+          return result({
+            success: false,
+            httpStatus: 401,
+            placesReturned: 0,
+            configured: true,
+            status: 'Error',
+            authStatus: 'Expired Token',
+            message: state.lastError,
+            sanitizedProviderError: state.lastError
+          });
+        }
+        const clientIntegration = await InstagramOAuthService.getDecryptedToken(workspaceId, clientId);
+        if (clientIntegration) {
+          key = clientIntegration.accessToken;
+          userId = clientIntegration.instagramUserId;
+        }
+      }
+    }
+
     if (type === 'instagram_business') {
       try {
-        await new InstagramBusinessLeadProvider(key, process.env.INSTAGRAM_USER_ID).testConnection();
+        await new InstagramBusinessLeadProvider(key, userId).testConnection();
         state.connectionVerified = true;
         state.lastSuccessTimestamp = timestamp();
         state.lastError = 'None';
@@ -270,7 +300,7 @@ export class ServerLeadProviderService {
           success: false,
           httpStatus: providerError.httpStatus,
           placesReturned: 0,
-          configured: Boolean(key && process.env.INSTAGRAM_USER_ID),
+          configured: Boolean(key && userId),
           status: providerError.httpStatus === 503 ? 'Not Configured' : 'Error',
           authStatus: providerError.httpStatus === 503 ? 'Not Configured' : 'Meta API Error',
           message: providerError.message,
@@ -407,12 +437,37 @@ export class ServerLeadProviderService {
   static async fetchCandidateLeads(
     filters: LeadFilter,
     overrideApiKey?: string,
-    requestedType?: string
+    requestedType?: string,
+    workspaceId?: string,
+    clientId?: string
   ): Promise<RawLead[]> {
-    const { key, type } = this.resolveApiKey(overrideApiKey, requestedType);
+    let { key, type } = this.resolveApiKey(overrideApiKey, requestedType);
+    let userId = process.env.INSTAGRAM_USER_ID;
+
+    if (type === 'instagram_business') {
+      const ws = workspaceId || 'ws-default-01';
+      const cl = clientId;
+      if (ws && cl) {
+        const integrationMeta = await InstagramOAuthService.getIntegration(ws, cl);
+        if (integrationMeta) {
+          if (integrationMeta.connectionStatus === 'Expired' || integrationMeta.connectionStatus === 'Revoked') {
+            throw new InstagramBusinessProviderError(
+              `Instagram connection for this client is ${integrationMeta.connectionStatus.toLowerCase()}. Please reconnect in Settings.`,
+              401
+            );
+          }
+          const clientIntegration = await InstagramOAuthService.getDecryptedToken(ws, cl);
+          if (clientIntegration) {
+            key = clientIntegration.accessToken;
+            userId = clientIntegration.instagramUserId;
+          }
+        }
+      }
+    }
+
     const provider = PROVIDERS[type];
     const state = providerStates[type];
-    if (!key) {
+    if (!key || (type === 'instagram_business' && !userId)) {
       state.connectionVerified = false;
       state.lastError = provider.missingKeyMessage;
       throw new Error(provider.missingKeyMessage);
@@ -425,7 +480,7 @@ export class ServerLeadProviderService {
           ? new SerperSearchLeadProvider(key)
           : type === 'leadocean'
           ? new LeadOceanLeadProvider(key)
-          : new InstagramBusinessLeadProvider(key, process.env.INSTAGRAM_USER_ID);
+          : new InstagramBusinessLeadProvider(key, userId);
       const leads = await adapter.search(filters);
       state.connectionVerified = true;
       state.lastSuccessTimestamp = new Date().toISOString();

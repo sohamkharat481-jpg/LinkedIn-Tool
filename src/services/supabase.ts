@@ -26,6 +26,13 @@ export const getSupabaseAnonKey = (): string => {
   return (key || '').trim();
 };
 
+export const getSupabaseServiceRoleKey = (): string => {
+  if (typeof process !== 'undefined' && process.env && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return process.env.SUPABASE_SERVICE_ROLE_KEY.trim();
+  }
+  return '';
+};
+
 export const supabaseUrl = getSupabaseUrl();
 export const supabaseAnonKey = getSupabaseAnonKey();
 
@@ -33,13 +40,15 @@ export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
 
 export function getSupabaseClient(): SupabaseClient | null {
   const url = getSupabaseUrl();
-  const key = getSupabaseAnonKey();
+  const isServer = typeof window === 'undefined' && typeof process !== 'undefined';
+  const serviceKey = isServer ? getSupabaseServiceRoleKey() : '';
+  const key = serviceKey || getSupabaseAnonKey();
   if (!url || !key) return null;
   try {
     return createClient(url, key, {
       auth: {
-        persistSession: true,
-        autoRefreshToken: true
+        persistSession: !serviceKey,
+        autoRefreshToken: !serviceKey
       }
     });
   } catch (e) {

@@ -1,0 +1,331 @@
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { supabase } from '../services/supabase';
+
+export interface VerifiedUser {
+  userId: string;
+  email?: string;
+  role?: string;
+  provider: 'jwt' | 'firebase' | 'supabase';
+}
+
+export interface AuthVerificationResult {
+  user?: VerifiedUser;
+  error?: string;
+  status: number;
+}
+
+let cachedFirebaseConfig: { projectId?: string; apiKey?: string } | null = null;
+
+function getFirebaseConfig(): { projectId?: string; apiKey?: string } {
+  if (cachedFirebaseConfig) return cachedFirebaseConfig;
+  try {
+    const configPath = path.resolve(process.cwd(), 'firebase-applet-config.json');
+    if (fs.existsSync(configPath)) {
+      const content = fs.readFileSync(configPath, 'utf8');
+      cachedFirebaseConfig = JSON.parse(content);
+      return cachedFirebaseConfig || {};
+    }
+  } catch (e) {
+    console.warn('Could not read firebase-applet-config.json:', e);
+  }
+  return {};
+}
+
+export function getAuthJwtSecret(): string {
+  return (
+    process.env.AUTH_JWT_SECRET ||
+    process.env.INSTAGRAM_TOKEN_ENCRYPTION_KEY ||
+    'audit-security-key-32-bytes-long!!'
+  );
+}
+
+/**
+ * Creates a cryptographically signed HMAC-SHA256 JWT for testing and authenticated server flows.
+ */
+export function createSignedTestToken(
+  payload: {
+    userId: string;
+    email?: string;
+    role?: string;
+    exp?: number;
+    [key: string]: any;
+  },
+  secret: string = getAuthJwtSecret()
+): string {
+  const header = { alg: 'HS256', typ: 'JWT' };
+  const exp = payload.exp !== undefined ? payload.exp : Math.floor(Date.now() / 1000) + 3600; // default 1 hour
+  const fullPayload = {
+    sub: payload.userId,
+    email: payload.email,
+    role: payload.role || 'member',
+    exp,
+    iat: Math.floor(Date.now() / 1000),
+    ...payload
+  };
+
+  const headerB64 = Buffer.from(JSON.stringify(header)).toString('base64url');
+  const payloadB64 = Buffer.from(JSON.stringify(fullPayload)).toString('base64url');
+  const signature = crypto
+    .createHmac('sha256', secret)
+    .update(`${headerB64}.${payloadB64}`)
+    .digest('base64url');
+
+  return `${headerB64}.${payloadB64}.${signature}`;
+}
+
+// In-memory cache for Google public certificates used to verify RS256 Firebase ID tokens
+interface CertCache {
+  certs: Record<string, string>;
+  expiresAt: number;
+}
+let googleCertCache: CertCache | null = null;
+
+async function getGooglePublicCerts(): Promise<Record<string, string>> {
+  const now = Date.now();
+  if (googleCertCache && googleCertCache.expiresAt > now) {
+    return googleCertCache.certs;
+  }
+  try {
+    const res = await fetch(
+      'https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com',
+      { signal: AbortSignal.timeout(3000) }
+    );
+    if (!res.ok) {
+      throw new Error(`Failed to fetch Google public certs: HTTP ${res.status}`);
+    }
+    const certs: Record<string, string> = await res.json();
+    googleCertCache = {
+      certs,
+      expiresAt: now + 3600 * 1000 // 1 hour cache
+    };
+    return certs;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Cryptographically verifies an incoming authentication token server-side.
+ * Never trusts client-supplied query parameters or arbitrary request headers.
+ * Supports:
+ * 1. HMAC-SHA256 JWTs signed with server secret
+ * 2. Firebase Auth RS256 ID tokens validated against Google public certs or Identity Toolkit API
+ * 3. Supabase Auth tokens validated via supabase.auth.getUser()
+ */
+export async function verifyServerAuthToken(
+  req: { headers?: Record<string, string | string[] | undefined> } | any
+): Promise<AuthVerificationResult> {
+  const headers = req.headers || {};
+  const authHeader =
+    (headers['authorization'] as string) ||
+    (headers['Authorization'] as string);
+
+  if (!authHeader || typeof authHeader !== 'string') {
+    return {
+      status: 401,
+      error: 'Authentication required. Missing Authorization header with Bearer token.'
+    };
+  }
+
+  const match = authHeader.match(/^Bearer\s+(.+)$/i);
+  if (!match || !match[1]?.trim()) {
+    return {
+      status: 401,
+      error: 'Malformed Authorization header. Format must be: Bearer <token>'
+    };
+  }
+
+  const token = match[1].trim();
+  const parts = token.split('.');
+  if (parts.length !== 3) {
+    return {
+      status: 401,
+      error: 'Malformed authentication token: JWT requires three dot-separated segments.'
+    };
+  }
+
+  let header: { alg?: string; typ?: string; kid?: string };
+  let payload: {
+    sub?: string;
+    userId?: string;
+    uid?: string;
+    user_id?: string;
+    email?: string;
+    role?: string;
+    exp?: number;
+    aud?: string;
+    iss?: string;
+    [key: string]: any;
+  };
+
+  try {
+    header = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8'));
+    payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+  } catch {
+    return {
+      status: 401,
+      error: 'Invalid authentication token: Unable to parse token segments.'
+    };
+  }
+
+  // Check token expiration
+  if (typeof payload.exp === 'number') {
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (payload.exp < nowSec) {
+      return {
+        status: 401,
+        error: 'Authentication token has expired. Please re-authenticate.'
+      };
+    }
+  }
+
+  // Branch 1: HMAC-SHA256 Signed JWTs (server-side verification with shared secret)
+  if (header.alg === 'HS256') {
+    const secret = getAuthJwtSecret();
+    const expectedSig = crypto
+      .createHmac('sha256', secret)
+      .update(`${parts[0]}.${parts[1]}`)
+      .digest('base64url');
+
+    const expectedBuf = Buffer.from(expectedSig);
+    const actualBuf = Buffer.from(parts[2]);
+
+    if (
+      expectedBuf.length !== actualBuf.length ||
+      !crypto.timingSafeEqual(expectedBuf, actualBuf)
+    ) {
+      return {
+        status: 401,
+        error: 'Invalid authentication token signature.'
+      };
+    }
+
+    const userId = payload.userId || payload.sub || payload.uid;
+    if (!userId || typeof userId !== 'string' || !userId.trim()) {
+      return {
+        status: 401,
+        error: 'Authentication token is missing a valid user identity (sub/userId).'
+      };
+    }
+
+    return {
+      status: 200,
+      user: {
+        userId: userId.trim(),
+        email: payload.email,
+        role: payload.role,
+        provider: 'jwt'
+      }
+    };
+  }
+
+  // Branch 2: RS256 Firebase ID Tokens
+  if (header.alg === 'RS256') {
+    const fbConfig = getFirebaseConfig();
+    const expectedProjectId = fbConfig.projectId || 'studio-5479557589-52d77';
+
+    // Verify audience and issuer
+    const isFirebaseIssuer =
+      payload.iss === `https://securetoken.google.com/${expectedProjectId}` ||
+      payload.iss?.startsWith('https://securetoken.google.com/');
+    const isMatchingAudience = payload.aud === expectedProjectId;
+
+    if (!isFirebaseIssuer || !isMatchingAudience) {
+      return {
+        status: 401,
+        error: 'Authentication token audience or issuer does not match configured Firebase project.'
+      };
+    }
+
+    // Attempt cryptographic signature verification using Google's public certs
+    if (header.kid) {
+      try {
+        const certs = await getGooglePublicCerts();
+        const certPem = certs[header.kid];
+        if (certPem) {
+          const verifier = crypto.createVerify('RSA-SHA256');
+          verifier.update(`${parts[0]}.${parts[1]}`);
+          const isValid = verifier.verify(certPem, parts[2], 'base64url');
+          if (isValid) {
+            const userId = payload.user_id || payload.sub || payload.uid;
+            if (userId) {
+              return {
+                status: 200,
+                user: {
+                  userId: userId.trim(),
+                  email: payload.email,
+                  role: payload.role,
+                  provider: 'firebase'
+                }
+              };
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Google cert verification exception:', err);
+      }
+    }
+
+    // Fallback: Verify via Google Identity Toolkit API if API key is present
+    if (fbConfig.apiKey) {
+      try {
+        const res = await fetch(
+          `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${fbConfig.apiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ idToken: token }),
+            signal: AbortSignal.timeout(3000)
+          }
+        );
+        if (res.ok) {
+          const data = await res.json();
+          const firstUser = data?.users?.[0];
+          if (firstUser?.localId) {
+            return {
+              status: 200,
+              user: {
+                userId: firstUser.localId,
+                email: firstUser.email,
+                provider: 'firebase'
+              }
+            };
+          }
+        }
+      } catch {
+        // Fallback network unavailable
+      }
+    }
+
+    return {
+      status: 401,
+      error: 'Firebase ID token cryptographic verification failed.'
+    };
+  }
+
+  // Branch 3: Supabase Auth Tokens (if Supabase is configured and client token)
+  if (supabase && (payload.role === 'authenticated' || payload.iss?.includes('supabase'))) {
+    try {
+      const { data, error } = await supabase.auth.getUser(token);
+      if (!error && data?.user?.id) {
+        return {
+          status: 200,
+          user: {
+            userId: data.user.id,
+            email: data.user.email,
+            provider: 'supabase'
+          }
+        };
+      }
+    } catch {
+      // Supabase verification error
+    }
+  }
+
+  return {
+    status: 401,
+    error: 'Unsupported or unverified authentication token algorithm.'
+  };
+}

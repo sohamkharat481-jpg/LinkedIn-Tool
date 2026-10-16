@@ -230,9 +230,15 @@ export default function App() {
     persistenceMessage: string;
   }> => {
     // Call server endpoint
+    const idToken = currentUser ? await currentUser.getIdToken().catch(() => null) : null;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (idToken) {
+      headers['Authorization'] = `Bearer ${idToken}`;
+    }
+
     const response = await fetch(apiUrl('/api/search-leads'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({
         filters,
         clientId: targetClient.id,
@@ -524,6 +530,9 @@ export default function App() {
               }}
               providerStatus={providerStatus}
               onRefreshProviderStatus={() => fetchProviderStatus()}
+              clients={clients}
+              activeClient={activeClient}
+              onSelectClient={handleSelectClient}
             />
           )}
         </main>

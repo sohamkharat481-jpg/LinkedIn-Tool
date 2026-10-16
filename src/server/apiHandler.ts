@@ -4,6 +4,8 @@ import { filterAndDeduplicateLeads } from '../services/deduplication';
 import { ServerLeadProviderService } from './leadProviderService';
 import { testSupabaseHealth } from '../services/supabase';
 import { InstagramBusinessProviderError } from '../services/leadProviders/InstagramBusinessLeadProvider';
+import { InstagramOAuthService } from './instagramOAuthService';
+import { verifyServerAuthToken } from './serverAuthService';
 
 export const apiRouter = express.Router();
 
@@ -154,8 +156,10 @@ export const handleTestConnection = async (req: Request, res: Response) => {
       (req.query?.type as string) ||
       (req.query?.providerType as string) ||
       req.body?.providerType;
+    const workspaceId = (req.query?.workspaceId as string) || req.body?.workspaceId;
+    const clientId = (req.query?.clientId as string) || req.body?.clientId;
 
-    const testResult = await ServerLeadProviderService.testConnection(apiKey, providerType);
+    const testResult = await ServerLeadProviderService.testConnection(apiKey, providerType, workspaceId, clientId);
     const responseStatus =
       testResult.success
         ? 200
@@ -193,8 +197,18 @@ export const handleTestConnection = async (req: Request, res: Response) => {
 apiRouter.all('/provider-status/test', handleTestConnection);
 apiRouter.all('/api/provider-status/test', handleTestConnection);
 
-const executeLeadSearch = async (filters: LeadFilter, providerType?: string, apiKey?: string) => {
+const executeLeadSearch = async (
+  filters: LeadFilter,
+  providerType?: string,
+  apiKey?: string,
+  reqWorkspaceId?: string,
+  reqClientId?: string,
+  req?: Request | any
+) => {
   filters.maxLeads = Math.min(Math.max(Number(filters.maxLeads) || 50, 1), 500);
+
+  const workspaceId = reqWorkspaceId || 'ws-default-01';
+  const clientId = reqClientId;
 
   let resolved: ReturnType<typeof ServerLeadProviderService.resolveApiKey>;
   try {
@@ -207,27 +221,56 @@ const executeLeadSearch = async (filters: LeadFilter, providerType?: string, api
       }
     };
   }
+
   if (
-    !resolved.key ||
-    (resolved.type === 'instagram_business' && !process.env.INSTAGRAM_USER_ID?.trim())
+    !resolved.key &&
+    !(resolved.type === 'instagram_business' && clientId) &&
+    !process.env.INSTAGRAM_ACCESS_TOKEN?.trim()
   ) {
     return {
       status: 422,
       body: {
         error:
           resolved.type === 'instagram_business'
-            ? 'Instagram Business Discovery requires server-side INSTAGRAM_ACCESS_TOKEN and INSTAGRAM_USER_ID configuration.'
+            ? 'Instagram Business Discovery requires a connected Instagram account or server-side credentials.'
             : 'No API key is configured for the selected lead provider.',
         code: 'NO_PROVIDER_CONFIGURED'
       }
     };
   }
 
+  if (resolved.type === 'instagram_business' && clientId) {
+    const authResult = await verifyServerAuthToken(req || { headers: {} });
+    if (!authResult.user) {
+      return {
+        status: authResult.status || 401,
+        body: {
+          error: authResult.error || 'Authentication required to access client Instagram credentials.'
+        }
+      };
+    }
+    const isAuthorized = await InstagramOAuthService.verifyClientAuthorization(
+      workspaceId,
+      clientId.trim(),
+      authResult.user.userId
+    );
+    if (!isAuthorized) {
+      return {
+        status: 403,
+        body: {
+          error: 'Unauthorized: Requester is not permitted to access this client integration.'
+        }
+      };
+    }
+  }
+
   try {
     const rawCandidates: RawLead[] = await ServerLeadProviderService.fetchCandidateLeads(
       filters,
       resolved.key,
-      resolved.type
+      resolved.type,
+      workspaceId,
+      clientId
     );
     const dedupeResult = filterAndDeduplicateLeads(rawCandidates);
     const isSerper = resolved.type === 'serper';
@@ -286,25 +329,27 @@ const executeLeadSearch = async (filters: LeadFilter, providerType?: string, api
 
 // 4. Main Search Leads Endpoint (Executes server-side provider, normalization & deduplication)
 apiRouter.post('/search-leads', async (req: Request, res: Response) => {
-  const { filters, providerType, apiKey } = req.body;
+  const { filters, providerType, apiKey, workspaceId, clientId } = req.body;
   if (!filters || typeof filters !== 'object') {
     res.status(400).json({ error: 'Invalid search filters provided.' });
     return;
   }
 
-  const result = await executeLeadSearch(filters as LeadFilter, providerType, apiKey);
+  const result = await executeLeadSearch(filters as LeadFilter, providerType, apiKey, workspaceId, clientId, req);
   res.status(result.status).json(result.body);
 });
 
 // 5. Server-side Lead Provider Proxy Implementation
 apiRouter.post('/lead-search-proxy', async (req: Request, res: Response) => {
   const filters = req.body.filters || req.body;
+  const workspaceId = req.body.workspaceId;
+  const clientId = req.body.clientId;
   if (!filters || typeof filters !== 'object') {
     res.status(400).json({ error: 'Invalid search filters provided.' });
     return;
   }
 
-  const result = await executeLeadSearch(filters as LeadFilter, req.body.providerType);
+  const result = await executeLeadSearch(filters as LeadFilter, req.body.providerType, undefined, workspaceId, clientId, req);
   if (result.status !== 200) {
     res.status(result.status).json(result.body);
     return;
@@ -397,3 +442,333 @@ Return valid JSON only with keys:
     res.status(500).json({ error: error.message || 'Failed to analyze LinkedIn profile.' });
   }
 });
+
+// Instagram Client-Specific OAuth & Integration Endpoints
+
+// Instagram Client-Specific OAuth & Integration Endpoints
+
+function escapeHtml(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+apiRouter.get('/auth/instagram/start', async (req: Request, res: Response) => {
+  const authResult = await verifyServerAuthToken(req);
+  if (!authResult.user) {
+    res.status(authResult.status || 401).json({ error: authResult.error || 'Authentication required.' });
+    return;
+  }
+  const verifiedUserId = authResult.user.userId;
+
+  const workspaceId = (req.query.workspaceId as string) || 'ws-default-01';
+  const clientId = req.query.clientId as string;
+
+  if (!clientId || typeof clientId !== 'string' || clientId.trim() === '') {
+    res.status(400).json({ error: 'clientId is required to start Instagram OAuth.' });
+    return;
+  }
+
+  // Enforce authorized workspace and client ownership using verified user identity
+  const isAuthorized = await InstagramOAuthService.verifyClientAuthorization(
+    workspaceId,
+    clientId.trim(),
+    verifiedUserId
+  );
+  if (!isAuthorized) {
+    res.status(403).json({ error: 'Unauthorized: Client does not belong to the workspace or requester is not permitted.' });
+    return;
+  }
+
+  const appId = process.env.META_APP_ID || process.env.VITE_META_APP_ID;
+  if (!appId) {
+    res.status(503).json({ error: 'META_APP_ID is not configured on the server.' });
+    return;
+  }
+
+  const redirectUri =
+    process.env.META_OAUTH_REDIRECT_URI ||
+    `${req.protocol}://${req.get('host')}/api/auth/instagram/callback`;
+  const state = InstagramOAuthService.createState(workspaceId, clientId.trim(), verifiedUserId);
+  const graphVersion = process.env.INSTAGRAM_GRAPH_API_VERSION || 'v25.0';
+
+  const params = new URLSearchParams({
+    client_id: appId,
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    scope: 'instagram_basic,instagram_manage_insights,pages_show_list,pages_read_engagement',
+    state
+  });
+
+  const authUrl = `https://www.facebook.com/${graphVersion}/dialog/oauth?${params.toString()}`;
+  res.json({ url: authUrl });
+});
+
+const handleInstagramCallback = async (req: Request, res: Response) => {
+  const { code, state, error, error_description } = req.query;
+  if (error) {
+    const safeError = escapeHtml(error_description || error);
+    res.status(400).send(`<!DOCTYPE html><html><body><h3>Instagram Authorization Failed</h3><p>${safeError}</p><script>setTimeout(() => window.close(), 3000);</script></body></html>`);
+    return;
+  }
+  if (!code || !state || typeof code !== 'string' || typeof state !== 'string') {
+    res.status(400).send(`<!DOCTYPE html><html><body><h3>Invalid Authorization Parameters</h3><script>setTimeout(() => window.close(), 3000);</script></body></html>`);
+    return;
+  }
+
+  const session = InstagramOAuthService.consumeState(state);
+  if (!session || !session.userId) {
+    res.status(400).send(`<!DOCTYPE html><html><body><h3>Invalid or Expired OAuth State</h3><p>Please restart the Instagram connection flow.</p><script>setTimeout(() => window.close(), 3000);</script></body></html>`);
+    return;
+  }
+
+  // Re-verify client authorization using the verified identity bound to the OAuth state
+  const isAuthorized = await InstagramOAuthService.verifyClientAuthorization(
+    session.workspaceId,
+    session.clientId,
+    session.userId
+  );
+  if (!isAuthorized) {
+    res.status(403).send(`<!DOCTYPE html><html><body><h3>Unauthorized</h3><p>Requester is not permitted to connect this client integration.</p><script>setTimeout(() => window.close(), 3000);</script></body></html>`);
+    return;
+  }
+
+  const appId = process.env.META_APP_ID || process.env.VITE_META_APP_ID;
+  const appSecret = process.env.META_APP_SECRET;
+  if (!appId || !appSecret) {
+    res.status(503).send(`<!DOCTYPE html><html><body><h3>Server Configuration Error</h3><p>Meta credentials are not configured.</p></body></html>`);
+    return;
+  }
+
+  const redirectUri =
+    process.env.META_OAUTH_REDIRECT_URI ||
+    `${req.protocol}://${req.get('host')}/api/auth/instagram/callback`;
+  const graphVersion = process.env.INSTAGRAM_GRAPH_API_VERSION || 'v25.0';
+
+  try {
+    // 1. Exchange authorization code for user access token using POST to prevent secrets in URL logs
+    const tokenUrl = `https://graph.facebook.com/${graphVersion}/oauth/access_token`;
+    const tokenParams = new URLSearchParams({
+      client_id: appId,
+      client_secret: appSecret,
+      redirect_uri: redirectUri,
+      code
+    });
+
+    const tokenRes = await fetch(tokenUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: tokenParams.toString()
+    });
+    const tokenData = await tokenRes.json() as any;
+    if (!tokenRes.ok || !tokenData.access_token) {
+      throw new Error(tokenData.error?.message || 'Failed to exchange authorization code for access token.');
+    }
+    let accessToken = tokenData.access_token;
+    const expiresIn = typeof tokenData.expires_in === 'number' ? tokenData.expires_in : undefined;
+    let tokenExpiresAt = expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : undefined;
+
+    // 2. Exchange for long-lived user token via POST when supported by Meta
+    try {
+      const longLivedUrl = `https://graph.facebook.com/${graphVersion}/oauth/access_token`;
+      const longLivedParams = new URLSearchParams({
+        grant_type: 'fb_exchange_token',
+        client_id: appId,
+        client_secret: appSecret,
+        fb_exchange_token: accessToken
+      });
+
+      const longLivedRes = await fetch(longLivedUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: longLivedParams.toString()
+      });
+      if (longLivedRes.ok) {
+        const longLivedData = await longLivedRes.json() as any;
+        if (longLivedData?.access_token) {
+          accessToken = longLivedData.access_token;
+          if (typeof longLivedData.expires_in === 'number') {
+            tokenExpiresAt = new Date(Date.now() + longLivedData.expires_in * 1000).toISOString();
+          }
+        }
+      }
+    } catch {
+      // Retain standard token
+    }
+
+    // 3. Discover linked Instagram Professional Account via Meta Graph API
+    let instagramUserId = '';
+    let instagramUsername = '';
+
+    const pagesRes = await fetch(
+      `https://graph.facebook.com/${graphVersion}/me/accounts?fields=name,instagram_business_account{id,username}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    if (pagesRes.ok) {
+      const pagesData = await pagesRes.json() as any;
+      if (Array.isArray(pagesData?.data)) {
+        for (const page of pagesData.data) {
+          if (page.instagram_business_account?.id) {
+            instagramUserId = page.instagram_business_account.id;
+            instagramUsername = page.instagram_business_account.username || page.name || 'business_account';
+            break;
+          }
+        }
+      }
+    }
+
+    // Fallback: Check user node if granted directly
+    if (!instagramUserId) {
+      const meRes = await fetch(
+        `https://graph.facebook.com/${graphVersion}/me?fields=id,username,name,instagram_business_account{id,username}`,
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+      if (meRes.ok) {
+        const meData = await meRes.json() as any;
+        if (meData?.instagram_business_account?.id) {
+          instagramUserId = meData.instagram_business_account.id;
+          instagramUsername = meData.instagram_business_account.username || meData.name || 'business_account';
+        }
+      }
+    }
+
+    if (!instagramUserId) {
+      throw new Error(
+        'No Instagram Professional (Business or Creator) account could be found linked to your Facebook Page. Please ensure your account is set to Professional and connected to a Facebook Page.'
+      );
+    }
+
+    await InstagramOAuthService.saveIntegration(
+      session.workspaceId,
+      session.clientId,
+      instagramUserId,
+      instagramUsername,
+      accessToken,
+      tokenExpiresAt
+    );
+
+    const safeWsId = JSON.stringify(session.workspaceId);
+    const safeClientId = JSON.stringify(session.clientId);
+
+    res.send(`<!DOCTYPE html>
+      <html>
+        <head><title>Instagram Connected</title></head>
+        <body>
+          <script>
+            (function() {
+              if (window.opener) {
+                var targetOrigin = window.location.origin;
+                window.opener.postMessage({
+                  type: 'OAUTH_AUTH_SUCCESS',
+                  provider: 'instagram',
+                  workspaceId: ${safeWsId},
+                  clientId: ${safeClientId}
+                }, targetOrigin);
+                window.close();
+              } else {
+                window.location.href = '/';
+              }
+            })();
+          </script>
+          <p>Instagram account successfully connected! Closing window...</p>
+        </body>
+      </html>
+    `);
+  } catch (err: any) {
+    const safeMessage = escapeHtml(err?.message || 'Failed to complete Instagram OAuth.');
+    console.error('Instagram OAuth callback error:', safeMessage);
+    res.status(500).send(`<!DOCTYPE html><html><body><h3>Authentication Error</h3><p>${safeMessage}</p><script>setTimeout(() => window.close(), 4000);</script></body></html>`);
+  }
+};
+
+apiRouter.get('/auth/instagram/callback', handleInstagramCallback);
+apiRouter.get('/auth/instagram/callback/', handleInstagramCallback);
+
+apiRouter.get('/instagram/status', async (req: Request, res: Response) => {
+  const authResult = await verifyServerAuthToken(req);
+  if (!authResult.user) {
+    res.status(authResult.status || 401).json({ error: authResult.error || 'Authentication required.' });
+    return;
+  }
+  const verifiedUserId = authResult.user.userId;
+
+  const workspaceId = (req.query.workspaceId as string) || 'ws-default-01';
+  const clientId = req.query.clientId as string;
+  if (!clientId) {
+    res.status(400).json({ error: 'clientId is required.' });
+    return;
+  }
+
+  const isAuthorized = await InstagramOAuthService.verifyClientAuthorization(
+    workspaceId,
+    clientId.trim(),
+    verifiedUserId
+  );
+  if (!isAuthorized) {
+    res.status(403).json({ error: 'Unauthorized: Client does not belong to the workspace or requester is not permitted.' });
+    return;
+  }
+
+  const integration = await InstagramOAuthService.getIntegration(workspaceId, clientId.trim());
+  if (!integration) {
+    res.json({ connected: false });
+    return;
+  }
+
+  res.json({
+    connected: true,
+    instagramUserId: integration.instagramUserId,
+    instagramUsername: integration.instagramUsername,
+    connectionStatus: integration.connectionStatus,
+    updatedAt: integration.updatedAt
+  });
+});
+
+apiRouter.delete('/instagram/disconnect', async (req: Request, res: Response) => {
+  const authResult = await verifyServerAuthToken(req);
+  if (!authResult.user) {
+    res.status(authResult.status || 401).json({ error: authResult.error || 'Authentication required.' });
+    return;
+  }
+  const verifiedUserId = authResult.user.userId;
+
+  const workspaceId = (req.query.workspaceId as string) || (req.body?.workspaceId as string) || 'ws-default-01';
+  const clientId = (req.query.clientId as string) || (req.body?.clientId as string);
+
+  if (!clientId) {
+    res.status(400).json({ error: 'clientId is required.' });
+    return;
+  }
+
+  const isAuthorized = await InstagramOAuthService.verifyClientAuthorization(
+    workspaceId,
+    clientId.trim(),
+    verifiedUserId
+  );
+  if (!isAuthorized) {
+    res.status(403).json({ error: 'Unauthorized: Client does not belong to the workspace or requester is not permitted.' });
+    return;
+  }
+
+  // Attempt Meta permission revocation if active decrypted token exists
+  try {
+    const creds = await InstagramOAuthService.getDecryptedToken(workspaceId, clientId.trim(), verifiedUserId);
+    if (creds?.accessToken) {
+      const graphVersion = process.env.INSTAGRAM_GRAPH_API_VERSION || 'v25.0';
+      await fetch(`https://graph.facebook.com/${graphVersion}/me/permissions`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${creds.accessToken}` }
+      });
+    }
+  } catch {
+    // Revocation failure does not block database deletion
+  }
+
+  const success = await InstagramOAuthService.deleteIntegration(workspaceId, clientId.trim(), verifiedUserId);
+  res.json({ success });
+});
+
