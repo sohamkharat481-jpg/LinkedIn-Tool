@@ -6,7 +6,9 @@ import {
   buildOverpassQuery,
   mapOsmElementToLead,
   OverpassApiError,
+  OVERPASS_DEFAULT_TOTAL_BUDGET_MS,
   OverpassLeadProvider,
+  OVERPASS_REQUEST_TIMEOUT_MS,
   OverpassRequestDiagnostics,
   OverpassSearchOptions
 } from '../src/services/leadProviders/OverpassLeadProvider';
@@ -256,7 +258,7 @@ test('bounds retries for request timeouts', async () => {
 
   await assert.rejects(provider.search({ ...filters, city: 'timeout retry test' }), (error: unknown) => {
     assert.ok(error instanceof OverpassApiError);
-    assert.match(error.message, /timed out \(15s per-attempt limit\)/);
+    assert.match(error.message, /timed out \(5s per-attempt limit\)/);
     return true;
   });
   assert.equal(calls, 3);
@@ -472,6 +474,62 @@ test('returns a genuine empty result without retries', async () => {
   const leads = await provider.search({ ...filters, city: 'empty result test' });
   assert.deepEqual(leads, []);
   assert.equal(calls, 1);
+});
+
+test('uses a runtime-bounded default budget and returns a structured overall deadline error', async () => {
+  assert.equal(OVERPASS_DEFAULT_TOTAL_BUDGET_MS, 6000);
+  assert.ok(OVERPASS_DEFAULT_TOTAL_BUDGET_MS < 8000);
+  assert.equal(OVERPASS_REQUEST_TIMEOUT_MS, 5000);
+
+  const provider = createTestProvider((_input, init) =>
+    new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener(
+        'abort',
+        () => reject(new DOMException('aborted', 'AbortError')),
+        { once: true }
+      );
+    })
+  );
+  const startedAt = Date.now();
+
+  await assert.rejects(
+    provider.search(filters, { totalBudgetMs: 80, maxAttempts: 1 }),
+    (error: unknown) => {
+      assert.ok(error instanceof OverpassApiError);
+      assert.match(error.message, /Total request budget exceeded \(80ms\)/);
+      assert.equal(error.diagnostics.timeoutFired, true);
+      assert.equal(error.diagnostics.failureOrigin, 'application_deadline');
+      assert.equal(error.diagnostics.failurePhase, 'request');
+      return true;
+    }
+  );
+  assert.ok(Date.now() - startedAt < 1000);
+});
+
+test('enforces the shorter per-request timeout before the overall search deadline', async () => {
+  const provider = createTestProvider((_input, init) =>
+    new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener(
+        'abort',
+        () => reject(new DOMException('aborted', 'AbortError')),
+        { once: true }
+      );
+    })
+  );
+
+  await assert.rejects(
+    provider.search(filters, {
+      totalBudgetMs: OVERPASS_REQUEST_TIMEOUT_MS + 1000,
+      maxAttempts: 1
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof OverpassApiError);
+      assert.match(error.message, /Overpass request timed out \(5s per-attempt limit\)/);
+      assert.equal(error.diagnostics.timeoutFired, true);
+      assert.equal(error.diagnostics.failureOrigin, 'application_deadline');
+      return true;
+    }
+  );
 });
 
 test('bypasses cached data when performing an explicitly fresh check', async () => {

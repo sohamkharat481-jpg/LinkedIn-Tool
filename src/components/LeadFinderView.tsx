@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Client, LeadFilter, LeadProviderConfig, SeniorityLevel, CompanySizeRange, RawLead, SearchProgressState, ProviderStatusInfo } from '../types';
 import { Search, Sparkles, Filter, CheckCircle2, Loader2, AlertTriangle, ArrowRight, ShieldCheck, Tag, XCircle, Settings, Link, User, Globe, Building2 } from 'lucide-react';
 import { apiUrl } from '../services/apiClient';
+import type { LeadPersistenceStatus } from '../services/supabaseDataService';
 
 interface LeadFinderViewProps {
   clients: Client[];
@@ -12,6 +13,8 @@ interface LeadFinderViewProps {
     candidatesFound: number;
     duplicatesRemoved: number;
     finalCount: number;
+    persistenceStatus: LeadPersistenceStatus;
+    persistenceMessage: string;
   }>;
   onNavigateToLeads: () => void;
   onNavigateToSettings: () => void;
@@ -108,6 +111,8 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
     candidatesFound: number;
     duplicatesRemoved: number;
     finalCount: number;
+    persistenceStatus: LeadPersistenceStatus;
+    persistenceMessage: string;
   } | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
 
@@ -236,7 +241,9 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
       setSearchResultSummary({
         candidatesFound: result.candidatesFound,
         duplicatesRemoved: result.duplicatesRemoved,
-        finalCount: result.finalCount
+        finalCount: result.finalCount,
+        persistenceStatus: result.persistenceStatus,
+        persistenceMessage: result.persistenceMessage
       });
     } catch (err: any) {
       setSearchError(err.message || 'An error occurred while finding leads.');
@@ -847,8 +854,11 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
               <h3 className="text-lg font-bold text-emerald-900">
                 Search completed — {searchResultSummary.finalCount} unique leads found.
               </h3>
-              <p className="text-xs text-emerald-700 mt-0.5">
-                Saved directly to client database for <span className="font-bold">{activeClient?.name}</span>.
+              <p className={`text-xs mt-0.5 ${searchResultSummary.persistenceStatus === 'confirmed' ? 'text-emerald-700' : 'text-amber-800'}`}>
+                {searchResultSummary.persistenceMessage}
+                {searchResultSummary.persistenceStatus === 'confirmed' && (
+                  <> Client: <span className="font-bold">{activeClient?.name}</span>.</>
+                )}
               </p>
             </div>
           </div>

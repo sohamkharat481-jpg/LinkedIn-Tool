@@ -13,6 +13,7 @@ import {
 } from './types';
 import { dbService } from './services/storage';
 import { SupabaseDataService } from './services/supabaseDataService';
+import type { LeadPersistenceStatus } from './services/supabaseDataService';
 import { initAuthListener, setCachedAccessToken, googleSignIn, googleSignOut } from './services/auth';
 import { apiUrl } from './services/apiClient';
 
@@ -233,6 +234,8 @@ export default function App() {
     candidatesFound: number;
     duplicatesRemoved: number;
     finalCount: number;
+    persistenceStatus: LeadPersistenceStatus;
+    persistenceMessage: string;
   }> => {
     // Call server endpoint
     const response = await fetch(apiUrl('/api/search-leads'), {
@@ -313,7 +316,9 @@ export default function App() {
       uniqueLeads: rawLeads,
       candidatesFound: data.metrics.rawCandidatesCount,
       duplicatesRemoved: data.metrics.totalDuplicatesRemoved + saveResult.duplicatesSkipped,
-      finalCount: saveResult.added
+      finalCount: saveResult.added,
+      persistenceStatus: saveResult.persistenceStatus,
+      persistenceMessage: saveResult.persistenceMessage
     };
   };
 

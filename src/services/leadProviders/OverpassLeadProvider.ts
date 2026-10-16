@@ -8,7 +8,7 @@ import {
 
 const OVERPASS_ENDPOINT = 'https://overpass-api.de/api/interpreter';
 const MAX_RESULTS = 500;
-const REQUEST_TIMEOUT_MS = 15000;
+export const OVERPASS_REQUEST_TIMEOUT_MS = 5000;
 const MIN_REQUEST_INTERVAL_MS = 10000;
 const MAX_DAILY_REQUESTS_PER_INSTANCE = 90;
 const CACHE_TTL_MS = 15 * 60 * 1000;
@@ -17,7 +17,7 @@ const INITIAL_RETRY_DELAY_MS = 500;
 const MAX_RETRY_DELAY_MS = 2000;
 const MAX_RETRY_AFTER_MS = 15000;
 const RETRYABLE_HTTP_STATUSES = new Set([429, 500, 502, 503, 504]);
-const DEFAULT_TOTAL_BUDGET_MS = 60000;
+export const OVERPASS_DEFAULT_TOTAL_BUDGET_MS = 6000;
 
 export interface OverpassSearchOptions {
   bypassCache?: boolean;
@@ -336,11 +336,11 @@ export class OverpassLeadProvider implements LeadProvider {
         const remainingMs = deadline - Date.now();
         if (remainingMs <= 0) throw this.totalBudgetError(totalBudgetMs);
 
-        const requestTimeoutMs = Math.min(REQUEST_TIMEOUT_MS, remainingMs);
+        const requestTimeoutMs = Math.min(OVERPASS_REQUEST_TIMEOUT_MS, remainingMs);
         const timeoutReason =
-          remainingMs <= REQUEST_TIMEOUT_MS
+          remainingMs <= OVERPASS_REQUEST_TIMEOUT_MS
             ? `Total request budget exceeded (${totalBudgetMs}ms).`
-            : `Overpass request timed out (${REQUEST_TIMEOUT_MS / 1000}s per-attempt limit).`;
+            : `Overpass request timed out (${OVERPASS_REQUEST_TIMEOUT_MS / 1000}s per-attempt limit).`;
         const controller = new AbortController();
         attemptCount = attempt;
         const requestStartedAt = Date.now();
@@ -659,7 +659,7 @@ export class OverpassLeadProvider implements LeadProvider {
 }
 
 function normalizeBudget(value?: number): number {
-  if (value === undefined || !Number.isFinite(value)) return DEFAULT_TOTAL_BUDGET_MS;
+  if (value === undefined || !Number.isFinite(value)) return OVERPASS_DEFAULT_TOTAL_BUDGET_MS;
   return Math.min(Math.max(Math.floor(value), 1), 120000);
 }
 

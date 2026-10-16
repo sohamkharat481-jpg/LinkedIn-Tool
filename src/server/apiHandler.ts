@@ -280,7 +280,7 @@ const executeLeadSearch = async (filters: LeadFilter, providerType?: string, api
           ? 429
           : error.httpStatus && error.httpStatus >= 500
           ? 503
-          : error.message.includes('timed out')
+          : error.diagnostics.timeoutFired || error.message.includes('timed out')
           ? 504
           : 502;
       return {

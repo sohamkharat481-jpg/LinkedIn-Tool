@@ -13,6 +13,96 @@ function generateUuid(): string {
   });
 }
 
+export type LeadPersistenceStatus = 'confirmed' | 'local_only' | 'partial' | 'not_needed';
+
+export interface LeadSaveResult {
+  added: number;
+  duplicatesSkipped: number;
+  persistenceStatus: LeadPersistenceStatus;
+  persistenceMessage: string;
+}
+
+interface PersistedLeadIdentity {
+  id: string;
+  profile_url: string;
+}
+
+export interface LeadPersistenceWriter {
+  upsertLeads(): Promise<{ data: PersistedLeadIdentity[] | null; error: unknown | null }>;
+  upsertClientLinks(
+    leads: PersistedLeadIdentity[]
+  ): Promise<{ confirmedCount: number; error: unknown | null }>;
+}
+
+export async function persistLeadsAndLinks(
+  localResult: { added: number; duplicatesSkipped: number },
+  leadCount: number,
+  writer?: LeadPersistenceWriter
+): Promise<LeadSaveResult> {
+  if (leadCount === 0) {
+    return {
+      ...localResult,
+      persistenceStatus: 'not_needed',
+      persistenceMessage: 'No new leads required persistence.'
+    };
+  }
+
+  if (!writer) {
+    return {
+      ...localResult,
+      persistenceStatus: 'local_only',
+      persistenceMessage: 'Leads were saved in this browser only; Supabase is not configured.'
+    };
+  }
+
+  let leadResult: Awaited<ReturnType<LeadPersistenceWriter['upsertLeads']>>;
+  try {
+    leadResult = await writer.upsertLeads();
+  } catch {
+    return {
+      ...localResult,
+      persistenceStatus: 'local_only',
+      persistenceMessage: 'Leads were saved in this browser, but Supabase lead persistence failed.'
+    };
+  }
+
+  if (leadResult.error || !Array.isArray(leadResult.data) || leadResult.data.length === 0) {
+    return {
+      ...localResult,
+      persistenceStatus: 'local_only',
+      persistenceMessage: 'Leads were saved in this browser, but Supabase did not confirm lead persistence.'
+    };
+  }
+
+  let linkResult: Awaited<ReturnType<LeadPersistenceWriter['upsertClientLinks']>>;
+  try {
+    linkResult = await writer.upsertClientLinks(leadResult.data);
+  } catch {
+    linkResult = { confirmedCount: 0, error: new Error('Client-link upsert failed.') };
+  }
+
+  if (
+    linkResult.error ||
+    linkResult.confirmedCount !== leadResult.data.length ||
+    leadResult.data.length !== leadCount
+  ) {
+    return {
+      ...localResult,
+      persistenceStatus: 'partial',
+      persistenceMessage:
+        leadResult.data.length !== leadCount
+          ? 'Supabase confirmed only some lead records; persistence is incomplete.'
+          : 'Some lead records were persisted, but Supabase did not confirm all client links.'
+    };
+  }
+
+  return {
+    ...localResult,
+    persistenceStatus: 'confirmed',
+    persistenceMessage: 'Supabase confirmed lead persistence and client links.'
+  };
+}
+
 export class SupabaseDataService {
   /**
    * Check if Supabase client is configured and operational
@@ -252,52 +342,62 @@ export class SupabaseDataService {
     clientId: string,
     newLeads: LeadRecord[],
     searchId?: string
-  ): Promise<{ added: number; duplicatesSkipped: number }> {
+  ): Promise<LeadSaveResult> {
     // First deduplicate and save in local storage service for synchronous UI update
     const localResult = dbService.saveLeadsForClient(workspaceId, clientId, newLeads);
 
     if (supabase && newLeads.length > 0) {
-      try {
-        const leadRows = newLeads.map((l) => ({
-          id: l.id && l.id.length > 20 ? l.id : generateUuid(),
-          workspace_id: workspaceId,
-          full_name: l.fullName,
-          headline: l.headline,
-          current_job_title: l.currentJobTitle,
-          company_name: l.companyName,
-          location: l.location,
-          profile_url: l.profileUrl,
-          connections_or_followers: l.connectionsOrFollowers,
-          last_activity_date: l.lastActivityDate,
-          source: l.source || 'LeadOcean B2B People Search API',
-          lead_type: l.leadType || null,
-          business_category: l.businessCategory || null,
-          business_website: l.businessWebsite || null,
-          business_phone: l.businessPhone || null,
-          business_address: l.businessAddress || null,
-          business_city: l.businessCity || null,
-          business_country: l.businessCountry || null,
-          latitude: l.latitude ?? null,
-          longitude: l.longitude ?? null,
-          osm_type: l.osmType || null,
-          osm_id: l.osmId ?? null,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        }));
+      const client = supabase;
+      const leadRows = newLeads.map((l) => ({
+        id: l.id && l.id.length > 20 ? l.id : generateUuid(),
+        workspace_id: workspaceId,
+        full_name: l.fullName,
+        headline: l.headline,
+        current_job_title: l.currentJobTitle,
+        company_name: l.companyName,
+        location: l.location,
+        profile_url: l.profileUrl,
+        connections_or_followers: l.connectionsOrFollowers,
+        last_activity_date: l.lastActivityDate,
+        source: l.source || 'LeadOcean B2B People Search API',
+        lead_type: l.leadType || null,
+        business_category: l.businessCategory || null,
+        business_website: l.businessWebsite || null,
+        business_phone: l.businessPhone || null,
+        business_address: l.businessAddress || null,
+        business_city: l.businessCity || null,
+        business_country: l.businessCountry || null,
+        latitude: l.latitude ?? null,
+        longitude: l.longitude ?? null,
+        osm_type: l.osmType || null,
+        osm_id: l.osmId ?? null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }));
 
-        // Upsert into leads table with conflict resolution on (workspace_id, profile_url)
-        const { data: insertedLeads, error: leadsError } = await supabase
-          .from('leads')
-          .upsert(leadRows, { onConflict: 'workspace_id,profile_url' })
-          .select('id, profile_url');
+      const persistenceWriter: LeadPersistenceWriter = {
+        async upsertLeads() {
+          const { error: upsertError } = await client
+            .from('leads')
+            .upsert(leadRows, {
+              onConflict: 'workspace_id,profile_url',
+              ignoreDuplicates: true
+            });
+          if (upsertError) return { data: null, error: upsertError };
 
-        if (!leadsError && Array.isArray(insertedLeads)) {
-          // Link with client_leads
-          const clientLeadRows = insertedLeads.map((il: any) => ({
+          const { data, error } = await client
+            .from('leads')
+            .select('id, profile_url')
+            .eq('workspace_id', workspaceId)
+            .in('profile_url', leadRows.map((lead) => lead.profile_url));
+          return { data, error };
+        },
+        async upsertClientLinks(persistedLeads) {
+          const clientLeadRows = persistedLeads.map((lead) => ({
             id: generateUuid(),
             workspace_id: workspaceId,
             client_id: clientId,
-            lead_id: il.id,
+            lead_id: lead.id,
             search_id: searchId || null,
             status: 'Not Contacted',
             notes: '',
@@ -305,16 +405,30 @@ export class SupabaseDataService {
             updated_at: new Date().toISOString()
           }));
 
-          await supabase
+          const { error } = await client
             .from('client_leads')
-            .upsert(clientLeadRows, { onConflict: 'client_id,lead_id' });
+            .upsert(clientLeadRows, {
+              onConflict: 'client_id,lead_id',
+              ignoreDuplicates: true
+            });
+          if (error) return { confirmedCount: 0, error };
+
+          const { data, error: verificationError } = await client
+            .from('client_leads')
+            .select('lead_id')
+            .eq('workspace_id', workspaceId)
+            .eq('client_id', clientId)
+            .in('lead_id', persistedLeads.map((lead) => lead.id));
+          return {
+            confirmedCount: Array.isArray(data) ? data.length : 0,
+            error: verificationError
+          };
         }
-      } catch (err) {
-        console.warn('Supabase saveLeadsForClient error:', err);
-      }
+      };
+      return persistLeadsAndLinks(localResult, newLeads.length, persistenceWriter);
     }
 
-    return localResult;
+    return persistLeadsAndLinks(localResult, newLeads.length);
   }
 
   /**
