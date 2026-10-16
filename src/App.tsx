@@ -74,10 +74,26 @@ export default function App() {
   const [exportTargetClientName, setExportTargetClientName] = useState<string>('');
   const [exportTargetClientId, setExportTargetClientId] = useState<string | undefined>(undefined);
 
-  const fetchProviderStatus = async (cfg?: LeadProviderConfig) => {
+
+  const fetchProviderStatus = async (
+    cfg?: LeadProviderConfig,
+    workspaceId?: string,
+    clientId?: string
+  ) => {
     const activeCfg = cfg || providerConfig;
     try {
-      const res = await fetch(apiUrl(`/api/provider-status?type=${activeCfg.providerType}`));
+      let url = apiUrl(`/api/provider-status?type=${activeCfg.providerType}`);
+      if (activeCfg.providerType === 'instagram_business' && workspaceId && clientId) {
+        url = apiUrl(`/api/instagram/status?workspaceId=${workspaceId}&clientId=${clientId}`);
+      }
+
+      const idToken = currentUser ? await currentUser.getIdToken().catch(() => null) : null;
+      const headers: Record<string, string> = {};
+      if (idToken) {
+        headers['Authorization'] = `Bearer ${idToken}`;
+      }
+
+      const res = await fetch(url, { headers });
       if (!res.ok) {
         throw new Error(`Provider status API returned HTTP ${res.status}.`);
       }

@@ -772,3 +772,59 @@ apiRouter.delete('/instagram/disconnect', async (req: Request, res: Response) =>
   res.json({ success });
 });
 
+
+apiRouter.get('/instagram/status', async (req: Request, res: Response) => {
+  const authResult = await verifyServerAuthToken(req);
+  if (!authResult.user) {
+    res.status(401).json({ error: 'Authentication required.' });
+    return;
+  }
+
+  const workspaceId = req.query.workspaceId as string;
+  const clientId = req.query.clientId as string;
+
+  if (!workspaceId || !clientId) {
+    res.status(400).json({ error: 'workspaceId and clientId are required.' });
+    return;
+  }
+
+  const isAuth = await InstagramOAuthService.verifyClientAuthorization(
+    workspaceId,
+    clientId.trim(),
+    authResult.user.userId
+  );
+
+  if (!isAuth) {
+    res.status(403).json({ error: 'Unauthorized.' });
+    return;
+  }
+
+  try {
+    const integration = await InstagramOAuthService.getIntegration(workspaceId, clientId.trim());
+    
+    if (!integration) {
+      res.json({
+        status: 'Not Configured',
+        message: 'Instagram Business Discovery is not connected for this client.'
+      });
+      return;
+    }
+
+    if (integration.connectionStatus === 'Expired' || integration.connectionStatus === 'Revoked') {
+      res.json({
+        status: 'Error',
+        message: `Instagram connection for this client is ${integration.connectionStatus.toLowerCase()}. Please reconnect.`
+      });
+      return;
+    }
+
+    res.json({
+      status: 'Connected',
+      message: 'Instagram Business Discovery is connected.',
+      providerName: 'Instagram Graph API Business Discovery'
+    });
+  } catch (error) {
+    console.error('API /instagram/status error:', error);
+    res.status(500).json({ error: 'Failed to fetch Instagram status.' });
+  }
+});
