@@ -312,9 +312,7 @@ export class SupabaseDataService {
               businessCity: item.business_city || undefined,
               businessCountry: item.business_country || undefined,
               latitude: typeof item.latitude === 'number' ? item.latitude : undefined,
-              longitude: typeof item.longitude === 'number' ? item.longitude : undefined,
-              osmType: item.osm_type || undefined,
-              osmId: typeof item.osm_id === 'number' ? item.osm_id : undefined
+              longitude: typeof item.longitude === 'number' ? item.longitude : undefined
             };
           });
 
@@ -369,8 +367,6 @@ export class SupabaseDataService {
         business_country: l.businessCountry || null,
         latitude: l.latitude ?? null,
         longitude: l.longitude ?? null,
-        osm_type: l.osmType || null,
-        osm_id: l.osmId ?? null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       }));

@@ -81,7 +81,7 @@ export class SerperSearchLeadProvider implements LeadProvider {
    * Extracts clean, genuine Lead record from Serper organic search item.
    * Discards non-profile links or malformed snippets.
    */
-  extractLeadRecord(item: any, filters: LeadFilter): RawLead | null {
+  extractLeadRecord(item: any, _filters: LeadFilter): RawLead | null {
     const rawLink = item.link || item.formattedUrl || '';
 
     // Strictly validate that link is a LinkedIn individual profile
@@ -108,8 +108,8 @@ export class SerperSearchLeadProvider implements LeadProvider {
     }
 
     // 2. Job Title & Company Extraction
-    let jobTitle = filters.jobTitles[0] || 'Executive';
-    let company = 'Enterprise';
+    let jobTitle = '';
+    let company = '';
 
     if (titleParts.length > 1) {
       let candidate = titleParts[1].replace(/LinkedIn/i, '').trim();
@@ -125,25 +125,24 @@ export class SerperSearchLeadProvider implements LeadProvider {
       }
     }
 
-    // 3. Fallback Company Extraction from subsequent title parts
-    if (company === 'Enterprise' && titleParts.length > 2) {
+    // Company names are accepted only when present in the indexed result title.
+    if (!company && titleParts.length > 2) {
       const candidateCompany = titleParts[2].replace(/LinkedIn/i, '').trim();
       if (candidateCompany && !candidateCompany.toLowerCase().includes('linkedin')) {
         company = candidateCompany;
       }
     }
 
-    // 4. Location
-    const location = filters.city
-      ? `${filters.city}, ${filters.country || 'United States'}`
-      : filters.country || 'United States';
+    if (!jobTitle || !company) {
+      return null;
+    }
 
     return {
       fullName,
-      headline: snippet || `${jobTitle} at ${company} | ${location}`,
+      headline: snippet || rawTitle,
       currentJobTitle: jobTitle,
       companyName: company,
-      location,
+      location: '',
       profileUrl,
       connectionsOrFollowers: 'N/A', // Public Google SERP does not expose follower counts
       lastActivityDate: 'N/A', // Public Google SERP does not expose activity timestamps

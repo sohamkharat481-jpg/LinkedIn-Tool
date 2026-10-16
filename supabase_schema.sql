@@ -65,8 +65,6 @@ CREATE TABLE IF NOT EXISTS public.leads (
   business_country TEXT,
   latitude DOUBLE PRECISION,
   longitude DOUBLE PRECISION,
-  osm_type TEXT,
-  osm_id BIGINT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   CONSTRAINT unique_workspace_profile_url UNIQUE(workspace_id, profile_url)
@@ -81,9 +79,7 @@ ALTER TABLE public.leads
   ADD COLUMN IF NOT EXISTS business_city TEXT,
   ADD COLUMN IF NOT EXISTS business_country TEXT,
   ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION,
-  ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION,
-  ADD COLUMN IF NOT EXISTS osm_type TEXT,
-  ADD COLUMN IF NOT EXISTS osm_id BIGINT;
+  ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION;
 
 -- 5. CLIENT LEADS TABLE (Junction table linking Leads to Clients with status & notes)
 CREATE TABLE IF NOT EXISTS public.client_leads (
@@ -127,9 +123,6 @@ CREATE TABLE IF NOT EXISTS public.export_history (
 -- INDEXES FOR PERFORMANCE
 CREATE INDEX IF NOT EXISTS idx_clients_workspace ON public.clients(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_leads_workspace ON public.leads(workspace_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_osm_identifier
-  ON public.leads(workspace_id, osm_type, osm_id)
-  WHERE osm_type IS NOT NULL AND osm_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_client_leads_client ON public.client_leads(client_id);
 CREATE INDEX IF NOT EXISTS idx_searches_client ON public.lead_searches(client_id);
 

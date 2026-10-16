@@ -41,9 +41,8 @@ This guide details how to deploy the **LinkedIn Lead Finder** full-stack applica
    In the Vercel project settings under **Environment Variables** (Select Target: **Production**):
    - `SUPABASE_URL`: `https://your-project.supabase.co`
    - `SUPABASE_ANON_KEY`: `your-supabase-anon-key`
-   - `GOOGLE_MAPS_API_KEY`: `your-google-maps-api-key` (Primary Google Maps Places provider - server-side only)
-   - `SERPER_API_KEY`: `your-serper-api-key` (Optional fallback provider - server-side only)
-   - `LEADOCEAN_API_KEY`: `your-leadocean-api-key` (Optional fallback provider - server-side only)
+   - `SERPER_API_KEY`: `your-serper-api-key` (Serper.dev search provider - server-side only)
+   - `LEADOCEAN_API_KEY`: `your-leadocean-api-key` (LeadOcean people search provider - server-side only)
    - `VITE_SUPABASE_URL`: `https://your-project.supabase.co`
    - `VITE_SUPABASE_ANON_KEY`: `your-supabase-anon-key`
 
@@ -52,13 +51,9 @@ This guide details how to deploy the **LinkedIn Lead Finder** full-stack applica
 
 ---
 
-## 4. Enable OpenStreetMap Overpass
+## 4. Configure a lead provider
 
-OpenStreetMap Overpass is an optional, keyless business provider. Google Maps remains the default provider. To use Overpass with an existing Supabase database, first apply [`supabase_migrations/20260607_add_osm_business_leads.sql`](./supabase_migrations/20260607_add_osm_business_leads.sql) in the Supabase SQL Editor. This only adds nullable business and OSM identity columns and an index; do not apply it to production without reviewing and approving the database change.
-
-Then open **Settings → Lead Discovery Data Provider**, select **OpenStreetMap Overpass**, and save. No API key is required. This selection applies to the current app session; after a page reload, Google Maps remains the default until Overpass is selected again. Search with both a city and country. Results contain only business tags present in OpenStreetMap; absent phone, website, address, city, and country values remain empty. Overpass availability and coverage vary, and searches may time out or be rate limited. Attribute OpenStreetMap when using or redistributing its data.
-
-The provider health check uses a single live, read-only request within 100 metres of a fixed central London point and an 8-second total budget. It reports connected only when Overpass returns a named business record. Failures include sanitized phase timings for request start, response headers and status, response-body completion, and JSON parsing. Operators may optionally set `OVERPASS_HEALTH_CHECK_BUDGET_MS` to a value from 1,000 to 15,000 milliseconds; this is a diagnostics timeout setting, not an API credential.
+Select either **Serper.dev** or **LeadOcean** in **Settings → Lead Discovery Data Provider**. Configure the selected provider's server-side API key in the Vercel project environment. Provider selection is explicit; the application does not automatically switch to another provider when the selected provider is unavailable.
 
 ---
 
@@ -67,5 +62,5 @@ The provider health check uses a single live, read-only request within 100 metre
 Once deployed, verify your production deployment at your assigned Vercel domain (`https://your-project.vercel.app`):
 - `GET /api/health` -> Returns service status (`ok`).
 - `GET /api/supabase-status` -> Verifies Supabase connection, database query, and RLS persistence.
-- `GET /api/provider-status?type=google_search` -> Reports the configured real provider without exposing its key.
+- `GET /api/provider-status?type=serper` -> Reports the selected provider configuration without exposing its key.
 - `POST /api/provider-status/test` -> Executes a live test against the server-configured provider.

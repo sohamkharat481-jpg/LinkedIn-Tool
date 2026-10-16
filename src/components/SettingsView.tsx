@@ -57,10 +57,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [providerType, setProviderType] = useState<LeadProviderConfig['providerType']>(
     providerConfig.providerType
   );
-  const [apiKeyInput, setApiKeyInput] = useState(providerConfig.apiKey || '');
-  const [endpointInput, setEndpointInput] = useState(providerConfig.customEndpoint || '');
-  const [providerSavedNotice, setProviderSavedNotice] = useState(false);
-
   // Health check test state
   const [isTestingHealth, setIsTestingHealth] = useState(false);
   const [healthTestResult, setHealthTestResult] = useState<ProviderStatusInfo | null>(null);
@@ -93,18 +89,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     fetchSupabaseDiag();
   }, []);
 
-  const handleSaveProviderConfig = (e: React.FormEvent) => {
-    e.preventDefault();
-    onUpdateProviderConfig({
-      providerType,
-      apiKey: apiKeyInput.trim(),
-      customEndpoint: endpointInput.trim()
-    });
-    setProviderSavedNotice(true);
-    setTimeout(() => setProviderSavedNotice(false), 3000);
-    onRefreshProviderStatus();
-  };
-
   const handleRunHealthCheck = async () => {
     setIsTestingHealth(true);
     setHealthTestResult(null);
@@ -113,8 +97,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          providerType,
-          customEndpoint: endpointInput.trim()
+          providerType
         })
       });
       const data = await res.json();
@@ -254,68 +237,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <span>Overall Status Message: <span className="font-bold text-white">{activeDiagnostics.message}</span></span>
           <span className="text-[10px] bg-slate-700 px-2 py-0.5 rounded text-slate-300 font-mono">Secrets Hidden</span>
         </div>
-        {activeDiagnostics.diagnostics?.googleError && (
-          <details className="p-3 bg-slate-950/70 rounded-xl border border-slate-700 text-xs text-slate-300">
-            <summary className="font-semibold cursor-pointer">Google Places structured error (secret values redacted)</summary>
-            {activeDiagnostics.diagnostics.permissionDiagnosis && (
-              <div className="mt-3 space-y-1">
-                <p>
-                  <span className="font-semibold text-white">Reason:</span>{' '}
-                  {activeDiagnostics.diagnostics.permissionDiagnosis.reason ||
-                    activeDiagnostics.diagnostics.permissionDiagnosis.category}
-                  {activeDiagnostics.diagnostics.permissionDiagnosis.consumerProject
-                    ? ` — consumer ${activeDiagnostics.diagnostics.permissionDiagnosis.consumerProject}`
-                    : ''}
-                </p>
-                <p className="text-slate-200">{activeDiagnostics.diagnostics.permissionDiagnosis.action}</p>
-              </div>
-            )}
-            <pre className="mt-3 overflow-x-auto whitespace-pre-wrap break-words text-[11px] text-slate-300">
-              {JSON.stringify(
-                {
-                  credentialSource: activeDiagnostics.diagnostics.credentialSource,
-                  request: activeDiagnostics.diagnostics.request,
-                  googleError: activeDiagnostics.diagnostics.googleError
-                },
-                null,
-                2
-              )}
-            </pre>
-          </details>
-        )}
-        {activeDiagnostics.diagnostics?.providerId && (
-          <details className="p-3 bg-slate-950/70 rounded-xl border border-slate-700 text-xs text-slate-300">
-            <summary className="font-semibold cursor-pointer">Sanitized network diagnostics</summary>
-            <p className="mt-2 text-slate-400">
-              Fetch-level timings cannot distinguish DNS, TCP, or TLS phases unless the runtime reports a specific native error code.
-            </p>
-            <pre className="mt-3 overflow-x-auto whitespace-pre-wrap break-words text-[11px] text-slate-300">
-              {JSON.stringify(
-                {
-                  providerId: activeDiagnostics.diagnostics.providerId,
-                  upstreamHostname: activeDiagnostics.diagnostics.upstreamHostname,
-                  requestId: activeDiagnostics.diagnostics.requestId,
-                  deploymentSha: activeDiagnostics.diagnostics.deploymentSha,
-                  requestStartedAt: activeDiagnostics.diagnostics.requestStartedAt,
-                  responseHeadersReceived: activeDiagnostics.diagnostics.responseHeadersReceived,
-                  responseHeadersElapsedMs: activeDiagnostics.diagnostics.responseHeadersElapsedMs,
-                  httpStatus: activeDiagnostics.diagnostics.httpStatus,
-                  responseBodyCompletedElapsedMs:
-                    activeDiagnostics.diagnostics.responseBodyCompletedElapsedMs,
-                  elapsedMs: activeDiagnostics.diagnostics.elapsedMs,
-                  timeoutFired: activeDiagnostics.diagnostics.timeoutFired,
-                  failureOrigin: activeDiagnostics.diagnostics.failureOrigin,
-                  failurePhase: activeDiagnostics.diagnostics.failurePhase,
-                  errorName: activeDiagnostics.diagnostics.errorName,
-                  errorCode: activeDiagnostics.diagnostics.errorCode,
-                  causeCode: activeDiagnostics.diagnostics.causeCode
-                },
-                null,
-                2
-              )}
-            </pre>
-          </details>
-        )}
       </div>
 
       {/* Card 1: Lead Discovery Provider Abstraction */}
@@ -326,7 +247,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <div>
               <h2 className="text-base font-bold text-gray-900">Lead Discovery Data Provider</h2>
               <p className="text-xs text-gray-500">
-                Select a source for business listings or public LinkedIn search results.
+                Select a provider for public LinkedIn search results.
               </p>
             </div>
           </div>
@@ -344,86 +265,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               }}
               className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
             >
-              <option value="google_search">Google Maps Places API (New)</option>
-              <option value="overpass">OpenStreetMap Overpass (free, no API key)</option>
-              <option value="wikidata">Wikidata (experimental, cafes only; free)</option>
               <option value="serper">Serper.dev</option>
               <option value="leadocean">LeadOcean</option>
             </select>
           </label>
 
-          {providerType === 'overpass' ? (
-            <div className="max-w-3xl rounded-2xl border border-blue-200 bg-blue-50 p-4 text-xs text-blue-900 space-y-2">
-              <p className="font-bold">OpenStreetMap Overpass API — no API key required</p>
-              <p>
-                Requires both city and country in the search filters. Only mapped business data is returned;
-                missing contact and address fields stay empty. Requests are bounded, cached, and rate-limited.
-              </p>
-              <p>
-                © OpenStreetMap contributors · Data available under the{' '}
-                <a
-                  href="https://www.openstreetmap.org/copyright"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="underline"
-                >
-                  Open Database License
-                </a>
-                .
-              </p>
-            </div>
-          ) : providerType === 'wikidata' ? (
-            <div className="max-w-3xl rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-950 space-y-2">
-              <p className="font-bold">Wikidata Query Service — experimental, no API key required</p>
-              <p>
-                This source is limited to cafes within 25 km of a city whose Wikidata item has an English label and coordinates. Coverage is incomplete; phone and website are populated only when Wikidata provides them. Empty results are reported as no leads found.
-              </p>
-              <p>
-                Structured data is available under CC0. Use this source only for bounded searches and consult the{' '}
-                <a
-                  href="https://www.mediawiki.org/wiki/Wikidata_Query_Service/User_Manual"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="underline"
-                >
-                  Wikidata Query Service documentation
-                </a>
-                .
-              </p>
-            </div>
-          ) : (
-            <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-2xl space-y-3">
+          <div className="p-4 bg-blue-50/70 border border-blue-200 rounded-2xl space-y-3">
               <div className="flex items-start gap-3">
-                <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                <CheckCircle2 className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
                 <div className="space-y-1">
-                  <h3 className="text-xs font-bold text-emerald-900 uppercase tracking-wider">
-                    Google Maps Platform Places API (New)
+                  <h3 className="text-xs font-bold text-blue-900 uppercase tracking-wider">
+                    Server-configured provider credentials
                   </h3>
-                  <p className="text-xs text-emerald-800">
-                    Authentication is secured via the server-side <code className="bg-emerald-100 font-mono px-1 py-0.5 rounded text-emerald-900 font-bold">GOOGLE_MAPS_API_KEY</code> environment variable. No provider API keys are sent from or exposed to the browser.
+                  <p className="text-xs text-blue-800">
+                    Configure the selected provider's API key on the server. Credentials are not sent from or exposed to the browser.
                   </p>
                 </div>
               </div>
-
-              <div className="p-3 bg-white border border-emerald-100 rounded-xl text-xs space-y-2">
-                <p className="font-bold text-gray-800">Business Listing Data:</p>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
-                  <span className="text-emerald-700 font-semibold">✓ Business names</span>
-                  <span className="text-emerald-700 font-semibold">✓ Business categories</span>
-                  <span className="text-emerald-700 font-semibold">✓ Locations</span>
-                  <span className="text-emerald-700 font-semibold">✓ Websites and Maps links</span>
-                  <span className="text-emerald-700 font-semibold">✓ Public business phone numbers</span>
-                  <span className="text-emerald-700 font-semibold">✓ Ratings and reviews</span>
-                  <span className="text-emerald-700 font-semibold">✓ Real provider results</span>
-                  <span className="text-emerald-700 font-semibold">✓ Composite deduplication</span>
-                </div>
-              </div>
-
-              <p className="text-[11px] text-gray-500 pt-1">
-                Serper and LeadOcean remain available as server-configured fallback providers when Google Maps Places is not configured.
-              </p>
-            </div>
-          )}
+          </div>
 
           <div className="flex items-center justify-between pt-2">
             <button

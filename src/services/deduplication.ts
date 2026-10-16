@@ -54,35 +54,15 @@ export function generatePersonCompositeKey(lead: RawLead): string {
  */
 export function isValidLeadRecord(lead: RawLead): boolean {
   if (!lead) return false;
-
-  if (lead.leadType === 'business') {
-    const hasCommonBusinessFields = Boolean(
-      lead.companyName?.trim() &&
-      lead.businessCategory?.trim()
-    );
-    if (lead.source === 'OpenStreetMap (Overpass API)') {
-      return Boolean(
-        hasCommonBusinessFields &&
-        lead.osmType &&
-        Number.isSafeInteger(lead.osmId) &&
-        lead.profileUrl === `https://www.openstreetmap.org/${lead.osmType}/${lead.osmId}`
-      );
-    }
-    return Boolean(
-      hasCommonBusinessFields &&
-      lead.source === 'Wikidata Query Service' &&
-      /^https:\/\/www\.wikidata\.org\/entity\/Q[1-9]\d*$/.test(lead.profileUrl)
-    );
-  }
   
-  const hasName = Boolean(lead.fullName && lead.fullName.trim().length >= 2);
-  const hasJobTitle = Boolean(lead.currentJobTitle && lead.currentJobTitle.trim().length >= 2);
-  const hasCompany = Boolean(lead.companyName && lead.companyName.trim().length >= 1);
+  const isPresent = (value: string | undefined) =>
+    Boolean(value?.trim() && !['n/a', 'na', 'unknown'].includes(value.trim().toLowerCase()));
+  const hasName = Boolean(isPresent(lead.fullName) && lead.fullName.trim().length >= 2);
+  const hasJobTitle = Boolean(isPresent(lead.currentJobTitle) && lead.currentJobTitle.trim().length >= 2);
+  const hasCompany = Boolean(isPresent(lead.companyName));
   const hasUrl = Boolean(
     lead.profileUrl &&
     (lead.profileUrl.trim().toLowerCase().includes('linkedin.com') ||
-      lead.profileUrl.trim().toLowerCase().includes('google.com/maps') ||
-      lead.profileUrl.trim().toLowerCase().includes('maps.google.com') ||
       lead.profileUrl.trim().toLowerCase().startsWith('http://') ||
       lead.profileUrl.trim().toLowerCase().startsWith('https://'))
   );
@@ -103,27 +83,8 @@ export function filterAndDeduplicateLeads(candidates: RawLead[]): DeduplicationR
   // Step 3 & 4: Normalize LinkedIn profile URLs and remove duplicate profile URLs
   const uniqueUrlLeadsMap = new Map<string, RawLead>();
   let duplicateProfilesRemoved = 0;
-  let duplicateBusinessesRemoved = 0;
-  const seenBusinessIds = new Set<string>();
-  const seenBusinessAddresses = new Set<string>();
 
   for (const rawLead of validRecords) {
-    if (rawLead.leadType === 'business') {
-      const businessId = `${rawLead.source}:${rawLead.profileUrl}`;
-      const address = rawLead.businessAddress?.trim().toLowerCase();
-      const addressKey = address
-        ? `${rawLead.companyName.trim().toLowerCase()}|${address}`
-        : '';
-      if (seenBusinessIds.has(businessId) || (addressKey && seenBusinessAddresses.has(addressKey))) {
-        duplicateBusinessesRemoved++;
-        continue;
-      }
-      seenBusinessIds.add(businessId);
-      if (addressKey) seenBusinessAddresses.add(addressKey);
-      uniqueUrlLeadsMap.set(rawLead.profileUrl, rawLead);
-      continue;
-    }
-
     const normalizedUrl = normalizeLinkedInUrl(rawLead.profileUrl);
     const normalizedLead = {
       ...rawLead,
@@ -137,18 +98,11 @@ export function filterAndDeduplicateLeads(candidates: RawLead[]): DeduplicationR
     }
   }
 
-  const leadsAfterUrlDedupe = Array.from(uniqueUrlLeadsMap.values()).filter(
-    lead => lead.leadType !== 'business'
-  );
-  const businessLeads = Array.from(uniqueUrlLeadsMap.values()).filter(
-    lead => lead.leadType === 'business'
-  );
-
   // Step 5: Remove duplicate people using composite key (name + company + profile URL)
   const uniquePeopleMap = new Map<string, RawLead>();
   let duplicatePeopleRemoved = 0;
 
-  for (const lead of leadsAfterUrlDedupe) {
+  for (const lead of uniqueUrlLeadsMap.values()) {
     const compositeKey = generatePersonCompositeKey(lead);
     if (uniquePeopleMap.has(compositeKey)) {
       duplicatePeopleRemoved++;
@@ -158,16 +112,15 @@ export function filterAndDeduplicateLeads(candidates: RawLead[]): DeduplicationR
   }
 
   // Step 6: Return final unique leads
-  const finalUniqueLeads = [...Array.from(uniquePeopleMap.values()), ...businessLeads];
-  const totalDuplicatesRemoved =
-    duplicateProfilesRemoved + duplicatePeopleRemoved + duplicateBusinessesRemoved;
+  const finalUniqueLeads = Array.from(uniquePeopleMap.values());
+  const totalDuplicatesRemoved = duplicateProfilesRemoved + duplicatePeopleRemoved;
 
   return {
     rawCandidatesCount,
     validRecordsCount,
     duplicateProfilesRemoved,
     duplicatePeopleRemoved,
-    duplicateBusinessesRemoved,
+    duplicateBusinessesRemoved: 0,
     totalDuplicatesRemoved,
     finalUniqueLeads
   };

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Client, LeadFilter, LeadProviderConfig, SeniorityLevel, CompanySizeRange, RawLead, SearchProgressState, ProviderStatusInfo } from '../types';
+import { Client, LeadFilter, SeniorityLevel, CompanySizeRange, RawLead, SearchProgressState, ProviderStatusInfo } from '../types';
 import { Search, Sparkles, Filter, CheckCircle2, Loader2, AlertTriangle, ArrowRight, ShieldCheck, Tag, XCircle, Settings, Link, User, Globe, Building2 } from 'lucide-react';
 import { apiUrl } from '../services/apiClient';
 import type { LeadPersistenceStatus } from '../services/supabaseDataService';
@@ -19,7 +19,6 @@ interface LeadFinderViewProps {
   onNavigateToLeads: () => void;
   onNavigateToSettings: () => void;
   providerStatus: ProviderStatusInfo;
-  providerType: LeadProviderConfig['providerType'];
   onEnableMockMode?: () => void;
 }
 
@@ -69,7 +68,6 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
   onNavigateToLeads,
   onNavigateToSettings,
   providerStatus,
-  providerType,
   onEnableMockMode
 }) => {
   // Search Mode state: 'manual' | 'profile'
@@ -202,7 +200,7 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
     }
 
     const activeJobTitles = overrideFilters ? overrideFilters.jobTitles : jobTitles;
-    if (providerType !== 'overpass' && providerType !== 'wikidata' && activeJobTitles.length === 0) {
+    if (activeJobTitles.length === 0) {
       setSearchError('At least one job title is required.');
       return;
     }
@@ -268,11 +266,7 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
     handleRunSearch(filters);
   };
 
-  const isNotConfigured =
-    providerType !== 'overpass' &&
-    providerType !== 'wikidata' &&
-    !providerStatus.isMock &&
-    providerStatus.status === 'Not Configured';
+  const isNotConfigured = !providerStatus.isMock && providerStatus.status === 'Not Configured';
 
   return (
     <div id="lead-finder-section" className="space-y-6 max-w-5xl mx-auto scroll-mt-6">
@@ -327,7 +321,7 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
               onClick={onNavigateToSettings}
               className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded-xl transition-colors shadow-xs"
             >
-              <Settings className="w-4 h-4 text-white" /> Configure LeadOcean API Key in Settings
+            <Settings className="w-4 h-4 text-white" /> Configure the selected provider in Settings
             </button>
           </div>
         </div>

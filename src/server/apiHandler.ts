@@ -3,9 +3,6 @@ import { LeadFilter, RawLead } from '../types';
 import { filterAndDeduplicateLeads } from '../services/deduplication';
 import { ServerLeadProviderService } from './leadProviderService';
 import { testSupabaseHealth } from '../services/supabase';
-import { GooglePlacesApiError } from '../services/leadProviders/googlePlacesErrors';
-import { OverpassApiError } from '../services/leadProviders/OverpassLeadProvider';
-import { WikidataProviderError } from '../services/leadProviders/WikidataLeadProvider';
 
 export const apiRouter = express.Router();
 
@@ -87,7 +84,6 @@ apiRouter.get('/diagnostics', async (req: Request, res: Response) => {
         appUrl: process.env.APP_URL || process.env.VERCEL_URL || 'Google Cloud Run Dev Environment'
       },
       providers: {
-        GOOGLE_MAPS_API_KEY: providerDiag.GOOGLE_MAPS_API_KEY,
         SERPER_API_KEY: providerDiag.SERPER_API_KEY,
         LEADOCEAN_API_KEY: providerDiag.LEADOCEAN_API_KEY,
         activeProvider: providerDiag.ActiveProvider
@@ -121,7 +117,11 @@ apiRouter.get('/provider-status', (req: Request, res: Response) => {
     res.json(statusInfo);
   } catch (error: any) {
     console.error('API /provider-status error:', error);
-    res.status(500).json({ error: error.message || 'Failed to check provider status.' });
+    const unsupportedProvider =
+      error instanceof Error && error.message.startsWith('Unsupported lead provider:');
+    res.status(unsupportedProvider ? 400 : 500).json({
+      error: error.message || 'Failed to check provider status.'
+    });
   }
 });
 
@@ -142,7 +142,6 @@ apiRouter.get('/provider-status/diagnostics', (req: Request, res: Response) => {
 export const handleTestConnection = async (req: Request, res: Response) => {
   try {
     const apiKey =
-      (req.headers['x-goog-api-key'] as string) ||
       (req.headers['x-provider-api-key'] as string) ||
       (req.query?.key as string) ||
       (req.query?.apiKey as string) ||
@@ -152,10 +151,7 @@ export const handleTestConnection = async (req: Request, res: Response) => {
       (req.query?.providerType as string) ||
       req.body?.providerType;
 
-    const requestId = req.get('x-vercel-id');
-    const testResult = await ServerLeadProviderService.testConnection(apiKey, providerType, {
-      requestId
-    });
+    const testResult = await ServerLeadProviderService.testConnection(apiKey, providerType);
     const responseStatus =
       testResult.success
         ? 200
@@ -165,11 +161,14 @@ export const handleTestConnection = async (req: Request, res: Response) => {
     res.status(responseStatus).json(testResult);
   } catch (error: any) {
     console.error('API /provider-status/test error:', error);
-    res.status(500).json({
+    const unsupportedProvider =
+      error instanceof Error && error.message.startsWith('Unsupported lead provider:');
+    res.status(unsupportedProvider ? 400 : 500).json({
       success: false,
-      httpStatus: 500,
-      provider: 'Google Maps Platform Places API (New)',
-      endpoint: 'https://places.googleapis.com/v1/places:searchText',
+      httpStatus: unsupportedProvider ? 400 : 500,
+      provider: 'Selected lead provider',
+      endpoint: 'Not available',
+      endpointStatus: 'Not available',
       placesReturned: 0,
       responseTime: '0ms',
       responseTimeMs: 0,
@@ -178,6 +177,10 @@ export const handleTestConnection = async (req: Request, res: Response) => {
       authStatus: 'Internal Error',
       message: error.message || 'Failed to execute provider connection test.',
       sanitizedProviderError: error.message || 'Internal server error',
+      isMock: false,
+      lastSuccessfulRequest: 'None yet',
+      lastError: error.message || 'Internal server error',
+      isExternal: true,
       timestamp: new Date().toISOString()
     });
   }
@@ -189,14 +192,23 @@ apiRouter.all('/api/provider-status/test', handleTestConnection);
 const executeLeadSearch = async (filters: LeadFilter, providerType?: string, apiKey?: string) => {
   filters.maxLeads = Math.min(Math.max(Number(filters.maxLeads) || 50, 1), 500);
 
-  const resolved = ServerLeadProviderService.resolveApiKey(apiKey, providerType);
-  if (!['overpass', 'wikidata'].includes(resolved.type) && (!resolved.key || resolved.key.trim() === '')) {
+  let resolved: ReturnType<typeof ServerLeadProviderService.resolveApiKey>;
+  try {
+    resolved = ServerLeadProviderService.resolveApiKey(apiKey, providerType);
+  } catch (error) {
+    return {
+      status: 400,
+      body: {
+        error: error instanceof Error ? error.message : 'Unsupported lead provider.'
+      }
+    };
+  }
+  if (!resolved.key) {
     return {
       status: 422,
       body: {
-        error: 'No real lead provider is configured.',
-        code: 'NO_PROVIDER_CONFIGURED',
-        message: 'Configure a Google Maps Places, Serper, or LeadOcean API key on the server, or select a no-key OpenStreetMap or experimental Wikidata provider.'
+        error: 'No API key is configured for the selected lead provider.',
+        code: 'NO_PROVIDER_CONFIGURED'
       }
     };
   }
@@ -208,43 +220,17 @@ const executeLeadSearch = async (filters: LeadFilter, providerType?: string, api
       resolved.type
     );
     const dedupeResult = filterAndDeduplicateLeads(rawCandidates);
-    const isGooglePlaces = resolved.type === 'google_places';
     const isSerper = resolved.type === 'serper';
-    const isOverpass = resolved.type === 'overpass';
-    const isWikidata = resolved.type === 'wikidata';
-    if (isWikidata && dedupeResult.finalUniqueLeads.length === 0) {
-      return {
-        status: 404,
-        body: {
-          success: false,
-          error: 'Wikidata returned no cafe records for this search.',
-          code: 'WIKIDATA_NO_RESULTS',
-          provider: 'Wikidata Query Service'
-        }
-      };
-    }
 
     return {
       status: 200,
       body: {
         success: true,
         provider: {
-          id: isOverpass
-            ? 'openstreetmap-overpass-provider'
-            : isWikidata
-            ? 'wikidata-cafe-provider'
-            : isGooglePlaces
-            ? 'google-maps-places-provider'
-            : isSerper
+          id: isSerper
             ? 'serper-search-provider'
             : 'leadocean-b2b-provider',
-          name: isOverpass
-            ? 'OpenStreetMap Overpass API'
-            : isWikidata
-            ? 'Wikidata Query Service (experimental cafes)'
-            : isGooglePlaces
-            ? 'Google Maps Platform Places API (New)'
-            : isSerper
+          name: isSerper
             ? 'Serper.dev Google Search API'
             : 'LeadOcean B2B People Search API',
           isMock: false
@@ -263,45 +249,6 @@ const executeLeadSearch = async (filters: LeadFilter, providerType?: string, api
     };
   } catch (error: any) {
     console.error('API lead search error:', error);
-    if (error instanceof GooglePlacesApiError) {
-      return {
-        status: 502,
-        body: {
-          error: error.message,
-          code: 'GOOGLE_PLACES_API_ERROR',
-          providerHttpStatus: error.httpStatus,
-          ...error.diagnostics
-        }
-      };
-    }
-    if (error instanceof OverpassApiError) {
-      const status =
-        error.httpStatus === 429
-          ? 429
-          : error.httpStatus && error.httpStatus >= 500
-          ? 503
-          : error.diagnostics.timeoutFired || error.message.includes('timed out')
-          ? 504
-          : 502;
-      return {
-        status,
-        body: {
-          error: error.message,
-          code: 'OVERPASS_API_ERROR',
-          providerHttpStatus: error.httpStatus
-        }
-      };
-    }
-    if (error instanceof WikidataProviderError) {
-      return {
-        status: error.timedOut ? 504 : error.httpStatus || 502,
-        body: {
-          error: error.message,
-          code: error.timedOut ? 'WIKIDATA_TIMEOUT' : 'WIKIDATA_API_ERROR',
-          providerHttpStatus: error.httpStatus
-        }
-      };
-    }
     return {
       status: 502,
       body: {

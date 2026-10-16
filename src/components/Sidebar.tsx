@@ -82,15 +82,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="flex items-center gap-1.5 mt-1">
           {providerStatus.status === 'Connected' ? (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-              <ShieldCheck className="w-3 h-3" /> Provider: {
-                providerStatus.providerName.includes('Overpass')
-                  ? 'OpenStreetMap'
-                  : providerStatus.providerName.includes('Google Maps')
-                  ? 'Google Maps Places'
-                  : providerStatus.providerName.includes('Serper')
-                  ? 'Serper.dev'
-                  : 'LeadOcean'
-              }
+              <ShieldCheck className="w-3 h-3" /> Provider: {providerStatus.providerName}
             </span>
           ) : providerStatus.status === 'Not Configured' ? (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">

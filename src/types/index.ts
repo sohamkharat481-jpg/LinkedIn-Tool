@@ -38,8 +38,6 @@ export interface RawLead {
   businessCountry?: string;
   latitude?: number;
   longitude?: number;
-  osmType?: 'node' | 'way' | 'relation';
-  osmId?: number;
 }
 
 export interface LeadRecord {
@@ -68,8 +66,6 @@ export interface LeadRecord {
   businessCountry?: string;
   latitude?: number;
   longitude?: number;
-  osmType?: 'node' | 'way' | 'relation';
-  osmId?: number;
 }
 
 export interface Client {
@@ -136,7 +132,7 @@ export interface SearchProgressState {
 }
 
 export interface LeadProviderConfig {
-  providerType: 'mock' | 'rapidapi' | 'custom_proxy' | 'google_search' | 'leadocean' | 'serper' | 'overpass' | 'wikidata';
+  providerType: 'leadocean' | 'serper';
   apiKey?: string;
   customEndpoint?: string;
 }
@@ -172,65 +168,4 @@ export interface ProviderStatusInfo {
   lastError: string;
   responseTimeMs: string | number;
   isExternal: boolean;
-  diagnostics?: {
-    apiKeyDetected?: boolean;
-    providerInitialized?: boolean;
-    httpStatusCode?: number;
-    upstreamHttpStatus?: number;
-    attemptCount?: number;
-    elapsedMs?: number;
-    timeoutReason?: string;
-    requestStartedAt?: string;
-    requestStartedElapsedMs?: number;
-    responseHeadersElapsedMs?: number;
-    httpStatus?: number;
-    responseBodyCompletedElapsedMs?: number;
-    jsonParsingCompletedElapsedMs?: number;
-    jsonParsingDurationMs?: number;
-    providerId?: string;
-    upstreamHostname?: string;
-    requestId?: string;
-    deploymentSha?: string;
-    responseHeadersReceived?: boolean;
-    timeoutFired?: boolean;
-    failureOrigin?: 'application_deadline' | 'fetch_rejection' | 'http_response' | 'response_error';
-    errorName?: string;
-    errorCode?: string;
-    causeCode?: string;
-    failurePhase?:
-      | 'request'
-      | 'http_status'
-      | 'response_body'
-      | 'json_parse'
-      | 'result_mapping'
-      | 'rate_limit_wait';
-    providerErrorMessage?: string;
-    googleErrorMessage?: string;
-    credentialSource?: string;
-    request?: {
-      method: string;
-      url: string;
-      headers: {
-        contentType: string;
-        apiKey: string;
-        fieldMask: string;
-      };
-      body: {
-        textQuery: string;
-        pageSize: number;
-      };
-    };
-    googleError?: {
-      code?: number;
-      status?: string;
-      message: string;
-      details: unknown[];
-    };
-    permissionDiagnosis?: {
-      category: string;
-      reason?: string;
-      action: string;
-      consumerProject?: string;
-    };
-  };
 }

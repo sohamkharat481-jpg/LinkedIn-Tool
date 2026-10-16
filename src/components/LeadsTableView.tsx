@@ -221,21 +221,6 @@ export const LeadsTableView: React.FC<LeadsTableViewProps> = ({
         </div>
       </div>
 
-      {leads.some(lead => lead.source === 'OpenStreetMap (Overpass API)') && (
-        <p className="px-4 text-[11px] text-gray-500">
-          OpenStreetMap contributors · Data available under the{' '}
-          <a
-            href="https://www.openstreetmap.org/copyright"
-            target="_blank"
-            rel="noreferrer"
-            className="text-blue-600 underline"
-          >
-            Open Database License
-          </a>
-          .
-        </p>
-      )}
-
       {/* Main Table */}
       {processedLeads.length === 0 ? (
         <div className="p-12 text-center text-gray-500 text-sm">
@@ -325,7 +310,7 @@ export const LeadsTableView: React.FC<LeadsTableViewProps> = ({
                         rel="noreferrer"
                         className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 font-semibold hover:underline bg-blue-50 px-2 py-1 rounded-md border border-blue-200 text-[11px]"
                       >
-                        {lead.leadType === 'business' ? 'OSM object' : 'Profile'} <ExternalLink className="w-3 h-3" />
+                        {lead.leadType === 'business' ? 'Business record' : 'Profile'} <ExternalLink className="w-3 h-3" />
                       </a>
                     </td>
                     <td className="py-3 px-4 text-gray-600">{lead.connectionsOrFollowers}</td>

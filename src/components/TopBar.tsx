@@ -106,15 +106,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           <div className="hidden lg:flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border">
             {providerStatus.status === 'Connected' ? (
               <span className="flex items-center gap-1 text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full font-semibold">
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" /> Provider: {
-                  providerStatus.providerName.includes('Overpass')
-                    ? 'OpenStreetMap'
-                    : providerStatus.providerName.includes('Google Maps')
-                    ? 'Google Maps Places'
-                    : providerStatus.providerName.includes('Serper')
-                    ? 'Serper.dev'
-                    : 'LeadOcean'
-                }
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />                 Provider: {providerStatus.providerName}
               </span>
             ) : providerStatus.status === 'Not Configured' ? (
               <span className="flex items-center gap-1 text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full font-semibold">

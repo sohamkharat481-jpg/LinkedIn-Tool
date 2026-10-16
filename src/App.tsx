@@ -51,16 +51,16 @@ export default function App() {
   const [isGoogleConnected, setIsGoogleConnected] = useState<boolean>(false);
 
   const [providerConfig, setProviderConfig] = useState<LeadProviderConfig>({
-    providerType: 'google_search'
+    providerType: 'serper'
   });
 
   const [providerStatus, setProviderStatus] = useState<ProviderStatusInfo>({
     configured: false,
-    providerName: 'Google Maps Platform Places API (New)',
+    providerName: 'Serper.dev Google Search API',
     status: 'Not Configured',
-    message: 'Google Maps API key is not configured. Please set GOOGLE_MAPS_API_KEY in Vercel environment variables.',
+    message: 'Serper.dev API key is not configured. Please set SERPER_API_KEY.',
     isMock: false,
-    endpointStatus: 'https://places.googleapis.com/v1/places:searchText',
+    endpointStatus: 'https://google.serper.dev/search',
     authStatus: 'Not Configured',
     lastSuccessfulRequest: 'None yet',
     lastError: 'None',
@@ -85,15 +85,9 @@ export default function App() {
       setProviderStatus(data);
     } catch (error: unknown) {
       const providerName =
-        activeCfg.providerType === 'overpass'
-          ? 'OpenStreetMap Overpass API'
-          : activeCfg.providerType === 'wikidata'
-          ? 'Wikidata Query Service (experimental cafes)'
-          : activeCfg.providerType === 'leadocean'
+        activeCfg.providerType === 'leadocean'
           ? 'LeadOcean B2B People Search API'
-          : activeCfg.providerType === 'serper'
-          ? 'Serper.dev Google Search API'
-          : 'Google Maps Platform Places API (New)';
+          : 'Serper.dev Google Search API';
       const message = error instanceof Error ? error.message : 'Unknown provider status error.';
       setProviderStatus({
         configured: false,
@@ -102,15 +96,9 @@ export default function App() {
         message: `Unable to load provider status: ${message}`,
         isMock: false,
         endpointStatus:
-          activeCfg.providerType === 'overpass'
-            ? 'https://overpass-api.de/api/interpreter'
-            : activeCfg.providerType === 'wikidata'
-            ? 'https://query.wikidata.org/sparql'
-            : activeCfg.providerType === 'leadocean'
+          activeCfg.providerType === 'leadocean'
             ? 'https://api.leadocean.io/v1/people/search'
-            : activeCfg.providerType === 'serper'
-            ? 'https://google.serper.dev/search'
-            : 'https://places.googleapis.com/v1/places:searchText',
+            : 'https://google.serper.dev/search',
         authStatus: 'Unavailable',
         lastSuccessfulRequest: 'None yet',
         lastError: message,
@@ -284,9 +272,7 @@ export default function App() {
       businessCity: raw.businessCity,
       businessCountry: raw.businessCountry,
       latitude: raw.latitude,
-      longitude: raw.longitude,
-      osmType: raw.osmType,
-      osmId: raw.osmId
+      longitude: raw.longitude
     }));
 
     // Deduplicate against existing client leads and save to Supabase
@@ -485,7 +471,6 @@ export default function App() {
                   onNavigateToLeads={() => setActiveTab('clients')}
                   onNavigateToSettings={() => setActiveTab('settings')}
                   providerStatus={providerStatus}
-                  providerType={providerConfig.providerType}
                 />
               </div>
             </div>
