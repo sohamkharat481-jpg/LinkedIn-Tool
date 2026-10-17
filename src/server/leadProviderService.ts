@@ -445,7 +445,7 @@ export class ServerLeadProviderService {
     let userId = process.env.INSTAGRAM_USER_ID;
 
     if (type === 'instagram_business') {
-      const ws = workspaceId || 'ws-default-01';
+      const ws = workspaceId || 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
       const cl = clientId;
       if (ws && cl) {
         const integrationMeta = await InstagramOAuthService.getIntegration(ws, cl);

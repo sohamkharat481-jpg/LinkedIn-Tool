@@ -207,7 +207,7 @@ const executeLeadSearch = async (
 ) => {
   filters.maxLeads = Math.min(Math.max(Number(filters.maxLeads) || 50, 1), 500);
 
-  const workspaceId = reqWorkspaceId || 'ws-default-01';
+  const workspaceId = reqWorkspaceId || 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
   const clientId = reqClientId;
 
   let resolved: ReturnType<typeof ServerLeadProviderService.resolveApiKey>;
@@ -457,6 +457,17 @@ function escapeHtml(value: unknown): string {
     .replace(/'/g, '&#039;');
 }
 
+export function getOAuthRedirectUri(req: Request): string {
+  if (process.env.META_OAUTH_REDIRECT_URI) {
+    return process.env.META_OAUTH_REDIRECT_URI.trim();
+  }
+  const host = req.get('host') || 'localhost:3000';
+  const forwardedProto = (req.headers['x-forwarded-proto'] as string)?.split(',')[0].trim();
+  const isLocal = host.includes('localhost') || host.includes('127.0.0.1');
+  const protocol = isLocal ? (forwardedProto || req.protocol || 'http') : 'https';
+  return `${protocol}://${host}/api/auth/instagram/callback`;
+}
+
 apiRouter.get('/auth/instagram/start', async (req: Request, res: Response) => {
   const authResult = await verifyServerAuthToken(req);
   if (!authResult.user) {
@@ -465,22 +476,28 @@ apiRouter.get('/auth/instagram/start', async (req: Request, res: Response) => {
   }
   const verifiedUserId = authResult.user.userId;
 
-  const workspaceId = (req.query.workspaceId as string) || 'ws-default-01';
+  const workspaceId = (req.query.workspaceId as string) || 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
   const clientId = req.query.clientId as string;
+  
+  console.warn(`[AuthDiagnostic] OAuth start request: ws=${workspaceId}, client=${clientId}, isDefault=${workspaceId === 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'}`);
 
   if (!clientId || typeof clientId !== 'string' || clientId.trim() === '') {
+    console.warn(`[AuthDiagnostic] OAuth start failed: missing clientId`);
     res.status(400).json({ error: 'clientId is required to start Instagram OAuth.' });
     return;
   }
 
   // Enforce authorized workspace and client ownership using verified user identity
-  const isAuthorized = await InstagramOAuthService.verifyClientAuthorization(
+  const authCheck = await InstagramOAuthService.verifyClientAuthorizationDetailed(
     workspaceId.trim(),
     clientId.trim(),
-    verifiedUserId
+    verifiedUserId,
+    authResult.user.email
   );
-  if (!isAuthorized) {
-    res.status(403).json({ error: 'Unauthorized: Client does not belong to the workspace or requester is not permitted.' });
+  if (!authCheck.authorized) {
+    res.status(authCheck.status || 403).json({
+      error: authCheck.error || 'Unauthorized: Client does not belong to the workspace or requester is not permitted.'
+    });
     return;
   }
 
@@ -490,9 +507,7 @@ apiRouter.get('/auth/instagram/start', async (req: Request, res: Response) => {
     return;
   }
 
-  const redirectUri =
-    process.env.META_OAUTH_REDIRECT_URI ||
-    `${req.protocol}://${req.get('host')}/api/auth/instagram/callback`;
+  const redirectUri = getOAuthRedirectUri(req);
   const state = InstagramOAuthService.createState(workspaceId, clientId.trim(), verifiedUserId);
   const graphVersion = process.env.INSTAGRAM_GRAPH_API_VERSION || 'v25.0';
 
@@ -544,9 +559,7 @@ const handleInstagramCallback = async (req: Request, res: Response) => {
     return;
   }
 
-  const redirectUri =
-    process.env.META_OAUTH_REDIRECT_URI ||
-    `${req.protocol}://${req.get('host')}/api/auth/instagram/callback`;
+  const redirectUri = getOAuthRedirectUri(req);
   const graphVersion = process.env.INSTAGRAM_GRAPH_API_VERSION || 'v25.0';
 
   try {
@@ -696,7 +709,7 @@ apiRouter.get('/instagram/status', async (req: Request, res: Response) => {
   }
   const verifiedUserId = authResult.user.userId;
 
-  const workspaceId = (req.query.workspaceId as string) || 'ws-default-01';
+  const workspaceId = (req.query.workspaceId as string) || 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
   const clientId = req.query.clientId as string;
   if (!clientId) {
     res.status(400).json({ error: 'clientId is required.' });
@@ -736,7 +749,7 @@ apiRouter.delete('/instagram/disconnect', async (req: Request, res: Response) =>
   }
   const verifiedUserId = authResult.user.userId;
 
-  const workspaceId = (req.query.workspaceId as string) || (req.body?.workspaceId as string) || 'ws-default-01';
+  const workspaceId = (req.query.workspaceId as string) || (req.body?.workspaceId as string) || 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
   const clientId = (req.query.clientId as string) || (req.body?.clientId as string);
 
   if (!clientId) {
@@ -744,13 +757,16 @@ apiRouter.delete('/instagram/disconnect', async (req: Request, res: Response) =>
     return;
   }
 
-  const isAuthorized = await InstagramOAuthService.verifyClientAuthorization(
+  const authCheck = await InstagramOAuthService.verifyClientAuthorizationDetailed(
     workspaceId,
     clientId.trim(),
-    verifiedUserId
+    verifiedUserId,
+    authResult.user.email
   );
-  if (!isAuthorized) {
-    res.status(403).json({ error: 'Unauthorized: Client does not belong to the workspace or requester is not permitted.' });
+  if (!authCheck.authorized) {
+    res.status(authCheck.status || 403).json({
+      error: authCheck.error || 'Unauthorized: Client does not belong to the workspace or requester is not permitted.'
+    });
     return;
   }
 
@@ -788,14 +804,17 @@ apiRouter.get('/instagram/status', async (req: Request, res: Response) => {
     return;
   }
 
-  const isAuth = await InstagramOAuthService.verifyClientAuthorization(
+  const authCheck = await InstagramOAuthService.verifyClientAuthorizationDetailed(
     workspaceId,
     clientId.trim(),
-    authResult.user.userId
+    authResult.user.userId,
+    authResult.user.email
   );
 
-  if (!isAuth) {
-    res.status(403).json({ error: 'Unauthorized.' });
+  if (!authCheck.authorized) {
+    res.status(authCheck.status || 403).json({
+      error: authCheck.error || 'Unauthorized.'
+    });
     return;
   }
 
@@ -826,5 +845,23 @@ apiRouter.get('/instagram/status', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('API /instagram/status error:', error);
     res.status(500).json({ error: 'Failed to fetch Instagram status.' });
+  }
+});
+  
+apiRouter.get('/auth/diagnostic', async (req: Request, res: Response) => {
+  try {
+    const status = await testSupabaseHealth();
+    res.json({
+      status: status.failureCategory === 'NONE' ? 'HEALTHY' : 'DIAGNOSTIC_FAILURE',
+      supabaseClient: status.SUPABASE_CLIENT,
+      databaseQuery: status.DATABASE_QUERY,
+      authService: status.AUTH_SERVICE,
+      failureCategory: status.failureCategory || 'NONE',
+      detail: status.diagnosticsDetail || 'Supabase service is healthy and operational.',
+      hasServiceRoleKey: status.hasServiceRoleKey,
+      missingVariables: status.missingVariableNames
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Diagnostic check failed' });
   }
 });

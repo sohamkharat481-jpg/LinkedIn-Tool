@@ -3,6 +3,8 @@ import { apiRouter, handleTestConnection } from './apiHandler';
 
 const app = express();
 
+app.set('trust proxy', 1);
+
 app.use(express.json());
 
 // CORS Middleware for Vercel serverless environment

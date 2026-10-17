@@ -7,6 +7,7 @@ import {
 } from '../src/server/instagramOAuthService';
 import { encryptAccessToken, decryptAccessToken } from '../src/server/cryptoService';
 import { ServerLeadProviderService } from '../src/server/leadProviderService';
+import { testSupabaseHealth, isPlaceholderUrl, isPlaceholderKey } from '../src/services/supabase';
 
 const originalEncryptionKey = process.env.INSTAGRAM_TOKEN_ENCRYPTION_KEY;
 const originalToken = process.env.INSTAGRAM_ACCESS_TOKEN;
@@ -230,4 +231,25 @@ test('Audit 6: Disconnect removes integration and denies subsequent credential a
 
   const afterCreds = await InstagramOAuthService.getDecryptedToken(ws, client);
   assert.equal(afterCreds, null);
+});
+
+test('Audit 7: Placeholder detection identifies default URLs and dummy keys without network calls', () => {
+  assert.equal(isPlaceholderUrl('https://your-project.supabase.co'), true);
+  assert.equal(isPlaceholderUrl('https://example.com'), true);
+  assert.equal(isPlaceholderUrl('https://myrealproject.supabase.co'), false);
+
+  assert.equal(isPlaceholderKey('your-supabase-anon-key'), true);
+  assert.equal(isPlaceholderKey('placeholder_key'), true);
+  assert.equal(isPlaceholderKey('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh5eiIsInJvbGUiOiJhbm9uIn0.abcdefghijklmnopqrstuvwxyz1234567890'), false);
+});
+
+test('Audit 8: Diagnostic health check accurately reports placeholder configuration without exposing credentials', async () => {
+  const result = await testSupabaseHealth();
+  assert.ok(result);
+  assert.equal(result.failureCategory, 'PLACEHOLDER_CONFIGURATION');
+  assert.equal(result.DATABASE_QUERY, 'SKIPPED');
+  // Confirm credentials are never exposed in result
+  assert.equal((result as any).url, undefined);
+  assert.equal((result as any).key, undefined);
+  assert.equal((result as any).token, undefined);
 });

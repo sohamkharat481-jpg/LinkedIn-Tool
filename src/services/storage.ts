@@ -20,8 +20,10 @@ const STORAGE_KEYS = {
   SUPABASE_CONFIG: 'llf_supabase_config_v1'
 };
 
+const DEFAULT_WORKSPACE_UUID = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
+
 const DEFAULT_WORKSPACE: Workspace = {
-  id: 'ws-default-01',
+  id: DEFAULT_WORKSPACE_UUID,
   name: 'Acme Growth Agency',
   description: 'Primary agency workspace'
 };
@@ -34,6 +36,93 @@ const SEED_SEARCHES: SearchHistoryRecord[] = [];
 
 // In-Memory Storage & LocalStorage Synchronization
 class StorageService {
+  constructor() {
+    this.migrateLocalStorageIfNeeded();
+  }
+
+  private migrateLocalStorageIfNeeded(): void {
+    try {
+      if (typeof window === 'undefined') return;
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const workspacesRaw = localStorage.getItem(STORAGE_KEYS.WORKSPACES);
+      if (!workspacesRaw) return;
+      const workspaces: Workspace[] = JSON.parse(workspacesRaw);
+      let needsMigration = false;
+      const idMapping = new Map<string, string>();
+
+      const migratedWorkspaces = workspaces.map(ws => {
+        if (!uuidRegex.test(ws.id)) {
+          needsMigration = true;
+          const newId = ws.id === 'ws-default-01' 
+            ? DEFAULT_WORKSPACE_UUID
+            : (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : 'b1eebc99-9c0b-4ef8-bb6d-6bb9bd380a12');
+          idMapping.set(ws.id, newId);
+          return { ...ws, id: newId };
+        }
+        return ws;
+      });
+
+      if (needsMigration) {
+        localStorage.setItem(STORAGE_KEYS.WORKSPACES, JSON.stringify(migratedWorkspaces));
+
+        const activeId = localStorage.getItem(STORAGE_KEYS.ACTIVE_WORKSPACE_ID);
+        if (activeId && idMapping.has(activeId)) {
+          localStorage.setItem(STORAGE_KEYS.ACTIVE_WORKSPACE_ID, idMapping.get(activeId)!);
+        }
+
+        const clientsRaw = localStorage.getItem(STORAGE_KEYS.CLIENTS);
+        if (clientsRaw) {
+          const clients: Client[] = JSON.parse(clientsRaw);
+          const migratedClients = clients.map(c => {
+            if (idMapping.has(c.workspaceId)) {
+              return { ...c, workspaceId: idMapping.get(c.workspaceId)! };
+            }
+            return c;
+          });
+          localStorage.setItem(STORAGE_KEYS.CLIENTS, JSON.stringify(migratedClients));
+        }
+
+        const leadsRaw = localStorage.getItem(STORAGE_KEYS.LEADS);
+        if (leadsRaw) {
+          const leads: LeadRecord[] = JSON.parse(leadsRaw);
+          const migratedLeads = leads.map(l => {
+            if (idMapping.has(l.workspaceId)) {
+              return { ...l, workspaceId: idMapping.get(l.workspaceId)! };
+            }
+            return l;
+          });
+          localStorage.setItem(STORAGE_KEYS.LEADS, JSON.stringify(migratedLeads));
+        }
+
+        const searchesRaw = localStorage.getItem(STORAGE_KEYS.SEARCHES);
+        if (searchesRaw) {
+          const searches: SearchHistoryRecord[] = JSON.parse(searchesRaw);
+          const migratedSearches = searches.map(s => {
+            if (idMapping.has(s.workspaceId)) {
+              return { ...s, workspaceId: idMapping.get(s.workspaceId)! };
+            }
+            return s;
+          });
+          localStorage.setItem(STORAGE_KEYS.SEARCHES, JSON.stringify(migratedSearches));
+        }
+
+        const giRaw = localStorage.getItem(STORAGE_KEYS.GOOGLE_INTEGRATIONS);
+        if (giRaw) {
+          const gi: GoogleIntegration[] = JSON.parse(giRaw);
+          const migratedGi = gi.map(g => {
+            if (idMapping.has(g.workspaceId)) {
+              return { ...g, workspaceId: idMapping.get(g.workspaceId)! };
+            }
+            return g;
+          });
+          localStorage.setItem(STORAGE_KEYS.GOOGLE_INTEGRATIONS, JSON.stringify(migratedGi));
+        }
+      }
+    } catch (e) {
+      console.warn('LocalStorage migration error:', e);
+    }
+  }
+
   private getItem<T>(key: string, defaultValue: T): T {
     try {
       const data = localStorage.getItem(key);
@@ -76,8 +165,14 @@ class StorageService {
   }
 
   createWorkspace(name: string, description: string): Workspace {
+    const id = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' 
+      ? crypto.randomUUID() 
+      : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+          const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+          return v.toString(16);
+        });
     const newWs: Workspace = {
-      id: `ws-${Date.now()}`,
+      id,
       name,
       description
     };

@@ -32,7 +32,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<NavTab>('finder');
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [activeWorkspace, setActiveWorkspace] = useState<Workspace>({
-    id: 'ws-default-01',
+    id: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
     name: 'Acme Growth Agency',
     description: 'Primary agency workspace'
   });
