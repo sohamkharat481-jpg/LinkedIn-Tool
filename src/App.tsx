@@ -51,17 +51,17 @@ export default function App() {
   const [isGoogleConnected, setIsGoogleConnected] = useState<boolean>(false);
 
   const [providerConfig, setProviderConfig] = useState<LeadProviderConfig>({
-    providerType: 'serper'
+    providerType: 'wikidata'
   });
 
   const [providerStatus, setProviderStatus] = useState<ProviderStatusInfo>({
-    configured: false,
-    providerName: 'Serper.dev Google Search API',
-    status: 'Not Configured',
-    message: 'Serper.dev API key is not configured. Please set SERPER_API_KEY.',
+    configured: true,
+    providerName: 'Wikidata Query Service',
+    status: 'Connected',
+    message: 'Wikidata is the active provider.',
     isMock: false,
-    endpointStatus: 'https://google.serper.dev/search',
-    authStatus: 'Not Configured',
+    endpointStatus: 'https://query.wikidata.org',
+    authStatus: 'Public (No Key Required)',
     lastSuccessfulRequest: 'None yet',
     lastError: 'None',
     responseTimeMs: 'N/A',
@@ -83,9 +83,6 @@ export default function App() {
     const activeCfg = cfg || providerConfig;
     try {
       let url = apiUrl(`/api/provider-status?type=${activeCfg.providerType}`);
-      if (activeCfg.providerType === 'instagram_business' && workspaceId && clientId) {
-        url = apiUrl(`/api/instagram/status?workspaceId=${workspaceId}&clientId=${clientId}`);
-      }
 
       const idToken = currentUser ? await currentUser.getIdToken().catch(() => null) : null;
       const headers: Record<string, string> = {};
@@ -100,25 +97,15 @@ export default function App() {
       const data: ProviderStatusInfo = await res.json();
       setProviderStatus(data);
     } catch (error: unknown) {
-      const providerName =
-        activeCfg.providerType === 'leadocean'
-          ? 'LeadOcean B2B People Search API'
-          : activeCfg.providerType === 'instagram_business'
-          ? 'Instagram Graph API Business Discovery'
-          : 'Serper.dev Google Search API';
+      const providerName = 'Wikidata SPARQL Query Service';
       const message = error instanceof Error ? error.message : 'Unknown provider status error.';
       setProviderStatus({
-        configured: false,
+        configured: true,
         providerName,
         status: 'Error',
         message: `Unable to load provider status: ${message}`,
         isMock: false,
-        endpointStatus:
-          activeCfg.providerType === 'leadocean'
-            ? 'https://api.leadocean.io/v1/people/search'
-            : activeCfg.providerType === 'instagram_business'
-            ? 'https://graph.facebook.com'
-            : 'https://google.serper.dev/search',
+        endpointStatus: 'https://query.wikidata.org',
         authStatus: 'Unavailable',
         lastSuccessfulRequest: 'None yet',
         lastError: message,
@@ -132,7 +119,20 @@ export default function App() {
     setIsLoadingData(true);
     setSupabaseError(null);
     try {
-      const clientList = await SupabaseDataService.getClients(wsId);
+      let clientList = await SupabaseDataService.getClients(wsId);
+      if (clientList.length === 0) {
+        try {
+          const newDefaultClient = await SupabaseDataService.createClient(
+            wsId,
+            'Global Coaches & Consultants Outreach',
+            'Business, Executive & Life Coaches',
+            'Default client for worldwide lead discovery'
+          );
+          clientList = [newDefaultClient];
+        } catch (e) {
+          console.warn('Failed to create default client:', e);
+        }
+      }
       setClients(clientList);
 
       if (clientList.length > 0) {
@@ -284,12 +284,12 @@ export default function App() {
       location: raw.location,
       profileUrl: raw.profileUrl,
       connectionsOrFollowers:
-        raw.leadType === 'business' ? raw.connectionsOrFollowers || '' : raw.connectionsOrFollowers || '500+ connections',
+        raw.leadType === 'business' ? raw.connectionsOrFollowers || '' : raw.connectionsOrFollowers || 'N/A (Wikidata Entity)',
       lastActivityDate: raw.lastActivityDate || 'N/A',
       dateAdded: dateToday,
       status: 'Not Contacted',
       notes: '',
-      source: raw.source || 'LeadOcean B2B People Search API',
+      source: raw.source || 'Wikidata SPARQL Query Service',
       leadType: raw.leadType,
       businessCategory: raw.businessCategory,
       businessWebsite: raw.businessWebsite,
@@ -298,7 +298,16 @@ export default function App() {
       businessCity: raw.businessCity,
       businessCountry: raw.businessCountry,
       latitude: raw.latitude,
-      longitude: raw.longitude
+      longitude: raw.longitude,
+      relevanceScore: raw.relevanceScore,
+      relevanceExplanation: raw.relevanceExplanation,
+      relevanceBreakdown: raw.relevanceBreakdown,
+      b2bClassification: raw.b2bClassification,
+      isDeceased: raw.isDeceased,
+      dateOfDeath: raw.dateOfDeath,
+      dateOfBirth: raw.dateOfBirth,
+      entityPeriod: raw.entityPeriod,
+      activeEvidence: raw.activeEvidence
     }));
 
     // Deduplicate against existing client leads and save to Supabase

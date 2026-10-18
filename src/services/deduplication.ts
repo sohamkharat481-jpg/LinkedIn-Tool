@@ -36,18 +36,28 @@ export function normalizeLinkedInUrl(url: string): string {
 
 export function normalizeProfileUrl(url: string): string {
   if (!url || typeof url !== 'string') return '';
-  const normalized = normalizeLinkedInUrl(url);
+  const trimmed = url.trim();
 
   try {
-    const parsed = new URL(normalized);
+    const parsed = new URL(trimmed);
     const hostname = parsed.hostname.replace(/^www\./, '');
-    if (hostname !== 'instagram.com') return normalized;
+    
+    // Canonicalize Wikidata URLs to standard https format
+    if (hostname.includes('wikidata.org')) {
+      const match = parsed.pathname.match(/\/(wiki|entity)\/(Q\d+)/i);
+      if (match) {
+        return `https://www.wikidata.org/wiki/${match[2].toUpperCase()}`;
+      }
+      return `https://${hostname}${parsed.pathname}`;
+    }
 
-    const username = parsed.pathname.split('/').filter(Boolean);
-    if (username.length !== 1 || !/^[a-z0-9._]{1,30}$/i.test(username[0])) return '';
-    return `https://www.instagram.com/${username[0].toLowerCase()}/`;
+    if (hostname === 'linkedin.com') {
+      return normalizeLinkedInUrl(url);
+    }
+
+    return trimmed;
   } catch {
-    return '';
+    return trimmed;
   }
 }
 
@@ -64,31 +74,35 @@ export function generatePersonCompositeKey(lead: RawLead): string {
 
 /**
  * Validates required fields:
- * - Full Name must not be empty or blank
+ * - Full Name must not be empty or blank (>= 2 chars)
  * - Current Job Title must not be empty
- * - Company Name must not be empty
- * - Profile URL must be present and contain "linkedin.com"
+ * - Profile URL must be present and valid
  */
 export function isValidLeadRecord(lead: RawLead): boolean {
   if (!lead) return false;
   
   const isPresent = (value: string | undefined) =>
     Boolean(value?.trim() && !['n/a', 'na', 'unknown'].includes(value.trim().toLowerCase()));
+
   const hasName = Boolean(isPresent(lead.fullName) && lead.fullName.trim().length >= 2);
   const hasJobTitle = Boolean(isPresent(lead.currentJobTitle) && lead.currentJobTitle.trim().length >= 2);
-  const hasCompany = Boolean(isPresent(lead.companyName));
-  if (lead.leadType === 'business') {
-    const profileUrl = normalizeProfileUrl(lead.profileUrl);
-    return hasName && hasCompany && Boolean(profileUrl.startsWith('https://www.instagram.com/'));
-  }
-  const hasUrl = Boolean(
-    lead.profileUrl &&
-      (lead.profileUrl.trim().toLowerCase().includes('linkedin.com') ||
-        lead.profileUrl.trim().toLowerCase().startsWith('http://') ||
-        lead.profileUrl.trim().toLowerCase().startsWith('https://'))
+
+  const rawUrl = (lead.profileUrl || '').trim().toLowerCase();
+  const hasValidUrl = Boolean(
+    rawUrl &&
+      (rawUrl.includes('wikidata.org') ||
+        rawUrl.includes('linkedin.com') ||
+        rawUrl.startsWith('http://') ||
+        rawUrl.startsWith('https://'))
   );
 
-  return hasName && hasJobTitle && hasCompany && hasUrl;
+  // A lead is valid if it has a real name, job title, valid profile URL, and either an organization or valid profile source
+  const hasCompanyOrSource = Boolean(
+    (lead.companyName && lead.companyName.trim().length >= 2) ||
+    lead.source?.includes('Wikidata')
+  );
+
+  return hasName && hasJobTitle && hasValidUrl && hasCompanyOrSource;
 }
 
 /**

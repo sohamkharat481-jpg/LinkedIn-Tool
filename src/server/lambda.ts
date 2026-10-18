@@ -1,5 +1,5 @@
 import express from 'express';
-import { apiRouter, handleTestConnection } from './apiHandler';
+import { apiRouter } from './apiHandler';
 
 const app = express();
 
@@ -40,9 +40,7 @@ app.get('/health', (_req, res) => {
   });
 });
 
-// Explicit top-level binding for provider test endpoint
-app.all('/api/provider-status/test', handleTestConnection);
-app.all('/provider-status/test', handleTestConnection);
+
 
 // Mount apiRouter
 app.use('/api', apiRouter);

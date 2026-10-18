@@ -123,10 +123,16 @@ class StorageService {
     }
   }
 
+  private memoryStore = new Map<string, string>();
+
   private getItem<T>(key: string, defaultValue: T): T {
     try {
-      const data = localStorage.getItem(key);
-      return data ? JSON.parse(data) : defaultValue;
+      if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
+        const data = localStorage.getItem(key);
+        return data ? JSON.parse(data) : defaultValue;
+      }
+      const mem = this.memoryStore.get(key);
+      return mem ? JSON.parse(mem) : defaultValue;
     } catch {
       return defaultValue;
     }
@@ -134,9 +140,13 @@ class StorageService {
 
   private setItem<T>(key: string, value: T): void {
     try {
-      localStorage.setItem(key, JSON.stringify(value));
+      const serialized = JSON.stringify(value);
+      this.memoryStore.set(key, serialized);
+      if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
+        localStorage.setItem(key, serialized);
+      }
     } catch (e) {
-      console.error('LocalStorage write error:', e);
+      console.error('Storage write error:', e);
     }
   }
 
@@ -331,7 +341,7 @@ class StorageService {
       } else {
         allLeads.unshift({
           ...lead,
-          id: `lead-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+          id: lead.id || `lead-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
           workspaceId,
           clientId
         });

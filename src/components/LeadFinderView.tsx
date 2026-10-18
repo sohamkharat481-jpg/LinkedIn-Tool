@@ -98,7 +98,6 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
 
   const [country, setCountry] = useState('United States');
   const [city, setCity] = useState('');
-  const [instagramUsernameInput, setInstagramUsernameInput] = useState('');
 
   const [seniority, setSeniority] = useState<SeniorityLevel[]>(['Director', 'VP', 'C-Level']);
   const [companySize, setCompanySize] = useState<CompanySizeRange[]>(['11-50', '51-200']);
@@ -114,6 +113,7 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
     finalCount: number;
     persistenceStatus: LeadPersistenceStatus;
     persistenceMessage: string;
+    uniqueLeads?: RawLead[];
   } | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
 
@@ -202,17 +202,23 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
       return;
     }
 
-    const activeJobTitles = overrideFilters ? overrideFilters.jobTitles : jobTitles;
-    if (providerType !== 'instagram_business' && activeJobTitles.length === 0) {
+    let activeJobTitles = overrideFilters ? overrideFilters.jobTitles : [...jobTitles];
+    if (activeJobTitles.length === 0 && titleInput.trim()) {
+      activeJobTitles = [titleInput.trim()];
+      setJobTitles(activeJobTitles);
+      setTitleInput('');
+    }
+
+    if (activeJobTitles.length === 0) {
       setSearchError('At least one job title is required.');
       return;
     }
-    if (
-      providerType === 'instagram_business' &&
-      !instagramUsernameInput.split(/[\s,]+/).some(username => username.trim())
-    ) {
-      setSearchError('Enter at least one Instagram business or creator username to look up.');
-      return;
+
+    let activeIndustries = overrideFilters ? overrideFilters.industry : [...industries];
+    if (industryInput.trim() && !activeIndustries.includes(industryInput.trim())) {
+      activeIndustries.push(industryInput.trim());
+      setIndustries(activeIndustries);
+      setIndustryInput('');
     }
 
     setIsSearching(true);
@@ -221,18 +227,14 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
 
     const filters: LeadFilter = {
       ...(overrideFilters || {
-        jobTitles,
-        industry: industries,
+        jobTitles: activeJobTitles,
+        industry: activeIndustries,
         country,
         city: city.trim() || undefined,
         seniority,
         companySize,
         maxLeads: Math.min(Math.max(maxLeads, 1), 500)
-      }),
-      instagramUsernames:
-        providerType === 'instagram_business'
-          ? instagramUsernameInput.split(/[\s,]+/).filter(Boolean)
-          : undefined
+      })
     };
 
     try {
@@ -257,7 +259,8 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
         duplicatesRemoved: result.duplicatesRemoved,
         finalCount: result.finalCount,
         persistenceStatus: result.persistenceStatus,
-        persistenceMessage: result.persistenceMessage
+        persistenceMessage: result.persistenceMessage,
+        uniqueLeads: result.uniqueLeads
       });
     } catch (err: any) {
       setSearchError(err.message || 'An error occurred while finding leads.');
@@ -353,7 +356,6 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
       )}
 
       {/* Mode Selector Tabs */}
-      {providerType !== 'instagram_business' && (
         <div className="flex bg-gray-100 p-1 rounded-2xl max-w-md gap-1">
           <button
             type="button"
@@ -380,10 +382,9 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
             B. LinkedIn Profile Mode
           </button>
         </div>
-      )}
 
       {/* PROFILE MODE VIEW */}
-      {providerType !== 'instagram_business' && searchMode === 'profile' && (
+      {searchMode === 'profile' && (
         <div className="bg-white rounded-2xl border border-gray-200/90 shadow-xs p-6 space-y-6">
           <div className="space-y-1">
             <h2 className="text-base font-bold text-gray-900 flex items-center gap-2">
@@ -486,7 +487,7 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
 
               <div className="flex items-center justify-between pt-2">
                 <span className="text-[11px] text-purple-700 italic">
-                  Ready to discover matching real B2B leads from LeadOcean using this profile's ICP.
+                  Ready to discover matching real B2B leads from Wikidata using this profile's ICP.
                 </span>
                 <button
                   type="button"
@@ -521,9 +522,7 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
             {/* Job Titles */}
             <div>
               <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
-                {providerType === 'instagram_business'
-                  ? 'Job Titles (Not used by Instagram Business Discovery)'
-                  : 'Job Titles * (Multiple Allowed)'}
+                Job Titles * (Multiple Allowed)
               </label>
               <div className="flex gap-2 mb-2">
                 <input
@@ -548,27 +547,7 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
                 </button>
               </div>
 
-              {providerType === 'instagram_business' && (
-                <div className="rounded-xl border border-fuchsia-200 bg-fuchsia-50 p-4 space-y-2">
-                  <label
-                    htmlFor="instagram-business-usernames"
-                    className="block text-xs font-bold uppercase tracking-wider text-fuchsia-950"
-                  >
-                    Target Instagram usernames *
-                  </label>
-                  <textarea
-                    id="instagram-business-usernames"
-                    value={instagramUsernameInput}
-                    onChange={event => setInstagramUsernameInput(event.target.value)}
-                    placeholder="@business_one, business.two"
-                    rows={3}
-                    className="w-full rounded-xl border border-fuchsia-200 bg-white px-3 py-2 text-xs"
-                  />
-                  <p className="text-[11px] text-fuchsia-900">
-                    Meta Business Discovery looks up usernames you provide; it cannot discover arbitrary accounts by niche or location. Niche and location above are search context only and are not verified or added to returned profiles. Up to 20 usernames per request; results cannot exceed the number of eligible usernames.
-                  </p>
-                </div>
-              )}
+
 
               {/* Selected Tags */}
               <div className="flex flex-wrap gap-1.5 min-h-[36px]">
@@ -608,9 +587,7 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
             {/* Industry */}
             <div>
               <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
-                {providerType === 'instagram_business'
-                  ? 'Business niche (context only)'
-                  : 'Industry (Multiple Allowed)'}
+                Industry (Multiple Allowed)
               </label>
               <div className="flex gap-2 mb-2">
                 <input
@@ -675,9 +652,7 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-gray-100">
             <div>
               <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
-                {providerType === 'instagram_business'
-                  ? 'Target country (context only)'
-                  : 'Country *'}
+                Country *
               </label>
               <select
                 value={country}
@@ -694,9 +669,7 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
 
             <div>
               <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
-                {providerType === 'instagram_business'
-                  ? 'Target city (context only)'
-                  : 'City (Optional)'}
+                City (Optional)
               </label>
               <input
                 type="text"
@@ -888,48 +861,116 @@ export const LeadFinderView: React.FC<LeadFinderViewProps> = ({
       )}
 
       {/* Completion Summary Card */}
-      {searchResultSummary && (
-        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-6 space-y-4">
-          <div className="flex items-center gap-3">
-            <CheckCircle2 className="w-7 h-7 text-emerald-600 shrink-0" />
-            <div>
-              <h3 className="text-lg font-bold text-emerald-900">
-                Search completed — {searchResultSummary.finalCount} unique leads found.
-              </h3>
-              <p className={`text-xs mt-0.5 ${searchResultSummary.persistenceStatus === 'confirmed' ? 'text-emerald-700' : 'text-amber-800'}`}>
-                {searchResultSummary.persistenceMessage}
-                {searchResultSummary.persistenceStatus === 'confirmed' && (
-                  <> Client: <span className="font-bold">{activeClient?.name}</span>.</>
-                )}
-              </p>
-            </div>
-          </div>
+      {searchResultSummary && (() => {
+        const leads = searchResultSummary.uniqueLeads || [];
+        const qualifiedCount = leads.filter((l) => l.b2bClassification === 'Qualified Prospect').length;
+        const contactAvailableCount = leads.filter((l) => l.b2bClassification === 'Contact Available').length;
+        const relevantCount = leads.filter((l) => l.b2bClassification === 'Relevant').length;
+        const discoveredCount = leads.filter((l) => l.b2bClassification === 'Discovered' || !l.b2bClassification).length;
+        const deceasedCount = leads.filter((l) => l.isDeceased).length;
+        const modernCount = leads.filter((l) => !l.isDeceased && l.entityPeriod !== 'historical').length;
+        const avgScore = leads.length > 0
+          ? Math.round(leads.reduce((acc, l) => acc + (l.relevanceScore || 0), 0) / leads.length)
+          : 0;
 
-          <div className="grid grid-cols-3 gap-3 text-center bg-white/80 p-3 rounded-xl border border-emerald-100">
-            <div>
-              <p className="text-[10px] text-gray-500 font-semibold uppercase">Candidates Discovered</p>
-              <p className="text-base font-bold text-gray-900">{searchResultSummary.candidatesFound}</p>
+        return (
+          <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <CheckCircle2 className="w-7 h-7 text-emerald-600 shrink-0" />
+              <div>
+                <h3 className="text-lg font-bold text-emerald-900">
+                  Search completed — {searchResultSummary.finalCount} unique leads found.
+                </h3>
+                <p className={`text-xs mt-0.5 ${searchResultSummary.persistenceStatus === 'confirmed' ? 'text-emerald-700' : 'text-amber-800'}`}>
+                  {searchResultSummary.persistenceMessage}
+                  {searchResultSummary.persistenceStatus === 'confirmed' && (
+                    <> Client: <span className="font-bold">{activeClient?.name}</span>.</>
+                  )}
+                </p>
+              </div>
             </div>
-            <div>
-              <p className="text-[10px] text-amber-700 font-semibold uppercase">Duplicates Removed</p>
-              <p className="text-base font-bold text-amber-600">-{searchResultSummary.duplicatesRemoved}</p>
-            </div>
-            <div>
-              <p className="text-[10px] text-emerald-700 font-semibold uppercase">Final Unique Leads</p>
-              <p className="text-base font-bold text-emerald-700">{searchResultSummary.finalCount}</p>
-            </div>
-          </div>
 
-          <div className="flex justify-end pt-2">
-            <button
-              onClick={onNavigateToLeads}
-              className="flex items-center gap-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition-all shadow-xs"
-            >
-              View Discovered Leads <ArrowRight className="w-4 h-4" />
-            </button>
+            {/* Pipeline Volume Stats */}
+            <div className="grid grid-cols-3 gap-3 text-center bg-white/80 p-3 rounded-xl border border-emerald-100">
+              <div>
+                <p className="text-[10px] text-gray-500 font-semibold uppercase">Candidates Discovered</p>
+                <p className="text-base font-bold text-gray-900">{searchResultSummary.candidatesFound}</p>
+              </div>
+              <div>
+                <p className="text-[10px] text-amber-700 font-semibold uppercase">Duplicates Removed</p>
+                <p className="text-base font-bold text-amber-600">-{searchResultSummary.duplicatesRemoved}</p>
+              </div>
+              <div>
+                <p className="text-[10px] text-emerald-700 font-semibold uppercase">Final Unique Leads</p>
+                <p className="text-base font-bold text-emerald-700">{searchResultSummary.finalCount}</p>
+              </div>
+            </div>
+
+            {/* B2B Prospect Intelligence Breakdown */}
+            {leads.length > 0 && (
+              <div className="bg-white/90 rounded-xl p-4 border border-emerald-200/60 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-gray-100 pb-2">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                    <span className="text-xs font-bold text-gray-900">B2B Lead Status Classification</span>
+                  </div>
+                  <span className="text-[11px] font-semibold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                    Avg Relevance Score: {avgScore}/100
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
+                  <div className="p-2.5 rounded-lg bg-emerald-50/70 border border-emerald-200">
+                    <p className="text-[10px] uppercase font-bold text-emerald-800">Qualified Prospects</p>
+                    <p className="text-sm font-extrabold text-emerald-700 mt-0.5">{qualifiedCount}</p>
+                    <p className="text-[9px] text-gray-500 mt-0.5">High fit + website</p>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-blue-50/70 border border-blue-200">
+                    <p className="text-[10px] uppercase font-bold text-blue-800">Contact Available</p>
+                    <p className="text-sm font-extrabold text-blue-700 mt-0.5">{contactAvailableCount}</p>
+                    <p className="text-[9px] text-gray-500 mt-0.5">Website on record</p>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-purple-50/70 border border-purple-200">
+                    <p className="text-[10px] uppercase font-bold text-purple-800">Relevant</p>
+                    <p className="text-sm font-extrabold text-purple-700 mt-0.5">{relevantCount}</p>
+                    <p className="text-[9px] text-gray-500 mt-0.5">Role matches search</p>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-gray-50/80 border border-gray-200">
+                    <p className="text-[10px] uppercase font-bold text-gray-700">Discovered</p>
+                    <p className="text-sm font-extrabold text-gray-700 mt-0.5">{discoveredCount}</p>
+                    <p className="text-[9px] text-gray-500 mt-0.5">Genuine entity</p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between text-[11px] text-gray-600 pt-1">
+                  <div className="flex items-center gap-3">
+                    <span>
+                      Modern / Contemporary: <span className="font-bold text-gray-900">{modernCount}</span>
+                    </span>
+                    {deceasedCount > 0 && (
+                      <span className="text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                        Historical / Deceased Identified: <span className="font-bold">{deceasedCount}</span>
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[10px] text-gray-500 italic">
+                    Missing data is not treated as negative proof.
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-end pt-2">
+              <button
+                onClick={onNavigateToLeads}
+                className="flex items-center gap-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition-all shadow-xs"
+              >
+                View Discovered Leads <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 };

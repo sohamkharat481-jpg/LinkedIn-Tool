@@ -144,7 +144,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </span>
           </div>
           <p className="text-slate-300 text-sm leading-relaxed">
-            Discover real B2B leads via Serper.dev Google public web search, maintain strict client isolation, apply automated deduplication, and export directly to Google Sheets.
+            Discover real B2B leads via Wikidata SPARQL Query Service, maintain strict client isolation, apply automated deduplication, and export directly to Google Sheets.
           </p>
         </div>
 
@@ -362,7 +362,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <p className="text-xs text-gray-500 mt-1 leading-relaxed">
               {providerStatus.status === 'Connected'
                 ? `${providerStatus.providerName} completed a live request.`
-                : providerStatus.message || 'SERPER_API_KEY must be configured in Vercel environment variables.'}
+                : providerStatus.message || 'Wikidata SPARQL Query Service is configured and ready.'}
             </p>
           </div>
 

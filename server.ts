@@ -1,7 +1,7 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { apiRouter, handleTestConnection } from './src/server/apiHandler';
+import { apiRouter } from './src/server/apiHandler';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -45,9 +45,6 @@ app.get('/health', (_req, res) => {
     timestamp: new Date().toISOString()
   });
 });
-
-app.all('/api/provider-status/test', handleTestConnection);
-app.all('/provider-status/test', handleTestConnection);
 
 // API Routes
 app.use('/api', apiRouter);

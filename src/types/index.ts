@@ -17,7 +17,21 @@ export interface LeadFilter {
   companySize: CompanySizeRange[];
   maxLeads: number;
   keywords?: string;
-  instagramUsernames?: string[];
+}
+
+export type B2BLeadClassification = 'Discovered' | 'Relevant' | 'Contact Available' | 'Qualified Prospect';
+export type EntityPeriod = 'modern' | 'historical' | 'deceased';
+
+export interface RelevanceBreakdown {
+  occupationMatch: boolean;
+  occupationPoints: number;
+  nicheMatch: boolean;
+  nichePoints: number;
+  websiteAvailable: boolean;
+  websitePoints: number;
+  activityEvidence: boolean;
+  activityPoints: number;
+  details: string[];
 }
 
 export interface RawLead {
@@ -39,6 +53,16 @@ export interface RawLead {
   businessCountry?: string;
   latitude?: number;
   longitude?: number;
+  // B2B Lead Relevance & Historical Intelligence
+  relevanceScore?: number;
+  relevanceExplanation?: string;
+  relevanceBreakdown?: RelevanceBreakdown;
+  b2bClassification?: B2BLeadClassification;
+  isDeceased?: boolean;
+  dateOfDeath?: string;
+  dateOfBirth?: string;
+  entityPeriod?: EntityPeriod;
+  activeEvidence?: string;
 }
 
 export interface LeadRecord {
@@ -67,6 +91,16 @@ export interface LeadRecord {
   businessCountry?: string;
   latitude?: number;
   longitude?: number;
+  // B2B Lead Relevance & Historical Intelligence
+  relevanceScore?: number;
+  relevanceExplanation?: string;
+  relevanceBreakdown?: RelevanceBreakdown;
+  b2bClassification?: B2BLeadClassification;
+  isDeceased?: boolean;
+  dateOfDeath?: string;
+  dateOfBirth?: string;
+  entityPeriod?: EntityPeriod;
+  activeEvidence?: string;
 }
 
 export interface Client {
@@ -133,7 +167,7 @@ export interface SearchProgressState {
 }
 
 export interface LeadProviderConfig {
-  providerType: 'leadocean' | 'serper' | 'instagram_business';
+  providerType: 'wikidata';
   apiKey?: string;
   customEndpoint?: string;
 }

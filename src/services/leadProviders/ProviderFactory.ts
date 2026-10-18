@@ -1,11 +1,9 @@
 import { LeadProviderConfig } from '../../types';
 import { LeadProvider } from './LeadProvider';
-import { InstagramBusinessLeadProvider } from './InstagramBusinessLeadProvider';
-import { LeadOceanLeadProvider } from './LeadOceanLeadProvider';
-import { SerperSearchLeadProvider } from './SerperSearchLeadProvider';
+import { WikidataLeadProvider } from './WikidataLeadProvider';
 
 let currentConfig: LeadProviderConfig = {
-  providerType: 'serper',
+  providerType: 'wikidata',
   apiKey: '',
   customEndpoint: ''
 };
@@ -20,34 +18,7 @@ export class ProviderFactory {
   }
 
   static getProvider(): LeadProvider {
-    if (currentConfig.providerType === 'serper') {
-      const serperKey =
-        currentConfig.apiKey ||
-        process.env.SERPER_API_KEY ||
-        process.env.SERPER_SEARCH_API_KEY ||
-        '';
-      if (!serperKey) {
-        throw new Error('Serper.dev is selected but no API key is configured.');
-      }
-      return new SerperSearchLeadProvider(serperKey, currentConfig.customEndpoint);
-    }
-
-    if (currentConfig.providerType === 'leadocean') {
-      const leadOceanKey =
-        currentConfig.apiKey ||
-        process.env.LEADOCEAN_API_KEY ||
-        process.env.LEAD_PROVIDER_API_KEY ||
-        '';
-      if (!leadOceanKey) {
-        throw new Error('LeadOcean is selected but no API key is configured.');
-      }
-      return new LeadOceanLeadProvider(leadOceanKey, currentConfig.customEndpoint);
-    }
-
-    if (currentConfig.providerType === 'instagram_business') {
-      return new InstagramBusinessLeadProvider();
-    }
-
-    throw new Error(`Unsupported lead provider: ${currentConfig.providerType}`);
+    return new WikidataLeadProvider();
   }
 }
+
