@@ -156,21 +156,37 @@ export function calculateRelevanceScore(
   if (matchedTitle) {
     occupationPoints = 35;
     occupationMatch = true;
-    details.push(`Occupation (+35): Documented role matches requested title '${matchedTitle}'`);
+    details.push(`Occupation (+35): Documented role directly matches requested title '${matchedTitle}'`);
   } else {
-    // Check known broad business roles only if search requested a related business category
-    const broadMatches = ['consultant', 'coach', 'entrepreneur', 'founder', 'business', 'director', 'manager', 'ceo'];
-    const searchHasBroad = searchTitles.some((st) => broadMatches.some((bm) => st.includes(bm)));
-    const matchedBroad = broadMatches.find((bm) => headlineLower.includes(bm) || currentTitleLower.includes(bm));
+    // Check strict semantic synonyms rather than broad generic words
+    let semanticMatched = '';
+    for (const st of searchTitles) {
+      if (st.includes('founder') || st.includes('company founder')) {
+        if (/\b(entrepreneur|co-founder|owner|startup)\b/.test(headlineLower) || /\b(entrepreneur|co-founder|owner|startup)\b/.test(currentTitleLower)) {
+          semanticMatched = 'entrepreneur / co-founder';
+          break;
+        }
+      } else if (st.includes('consultant')) {
+        if (/\b(advisor|adviser|consultancy)\b/.test(headlineLower) || /\b(advisor|adviser|consultancy)\b/.test(currentTitleLower)) {
+          semanticMatched = 'advisor / consultant';
+          break;
+        }
+      } else if (st.includes('coach')) {
+        if (/\b(mentor|trainer)\b/.test(headlineLower) || /\b(mentor|trainer)\b/.test(currentTitleLower)) {
+          semanticMatched = 'coach / mentor';
+          break;
+        }
+      }
+    }
 
-    if (searchHasBroad && matchedBroad) {
+    if (semanticMatched) {
       occupationPoints = 25;
       occupationMatch = true;
-      details.push(`Occupation (+25): Documented role matches related category '${matchedBroad}'`);
+      details.push(`Occupation (+25): Documented role semantically matches requested category (${semanticMatched})`);
     } else {
-      occupationPoints = 10;
+      occupationPoints = 0;
       occupationMatch = false;
-      details.push('Occupation (+10): Documented role does not directly match requested titles');
+      details.push('Occupation (+0): Documented role does not match requested occupation');
     }
   }
 
@@ -243,7 +259,10 @@ export function calculateRelevanceScore(
     details.push('Activity (+5): Contemporary living individual; current day-to-day activity unconfirmed');
   }
 
-  const score = Math.min(Math.max(occupationPoints + nichePoints + websitePoints + activityPoints, 0), 100);
+  let score = Math.min(Math.max(occupationPoints + nichePoints + websitePoints + activityPoints, 0), 100);
+  if (!occupationMatch) {
+    score = Math.min(score, 45); // Unrelated occupation cannot exceed 45% score
+  }
 
   const breakdown: RelevanceBreakdown = {
     occupationMatch,

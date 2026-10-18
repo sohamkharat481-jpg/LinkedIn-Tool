@@ -190,3 +190,53 @@ test('WikidataLeadProvider search returns genuine Wikidata entities with transpa
     assert.equal((lead as any).email, undefined, 'Never fabricate email');
   }
 });
+
+test('irrelevant occupation matches are correctly identified and classified as Discovered', () => {
+  const filters: LeadFilter = {
+    jobTitles: ['Founder'],
+    industry: [],
+    country: 'United States',
+    seniority: [],
+    companySize: [],
+    maxLeads: 5
+  };
+
+  const unrelatedLead = {
+    fullName: 'Jane Manager',
+    headline: 'Administrative office manager',
+    currentJobTitle: 'Manager',
+    businessWebsite: 'https://janemanager.com',
+    isDeceased: false,
+    entityPeriod: 'modern' as const
+  };
+
+  const res = calculateRelevanceScore(unrelatedLead, filters);
+  assert.equal(res.breakdown.occupationMatch, false);
+  assert.equal(res.classification, 'Discovered');
+  assert.ok(res.score < 70);
+});
+
+test('deceased entities with confirmed death date never receive living badge or qualified prospect status', () => {
+  const filters: LeadFilter = {
+    jobTitles: ['Consultant'],
+    industry: [],
+    country: 'United States',
+    seniority: [],
+    companySize: [],
+    maxLeads: 5
+  };
+
+  const deadLead = {
+    fullName: 'Late Consultant',
+    headline: 'Management consultant (1920-1995)',
+    currentJobTitle: 'Consultant',
+    businessWebsite: 'https://consultantarchive.org',
+    isDeceased: true,
+    entityPeriod: 'deceased' as const
+  };
+
+  const res = calculateRelevanceScore(deadLead, filters);
+  assert.equal(res.breakdown.activityPoints, 0);
+  assert.equal(res.classification, 'Discovered');
+});
+
