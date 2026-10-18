@@ -341,6 +341,9 @@ export const LeadsTableView: React.FC<LeadsTableViewProps> = ({
                 <th className="py-3 px-4 min-w-[140px]">Company</th>
                 <th className="py-3 px-4 min-w-[120px]">Location</th>
                 <th className="py-3 px-4 min-w-[160px]">Official Website</th>
+                <th className="py-3 px-4 min-w-[150px]">Public Business Email</th>
+                <th className="py-3 px-4 min-w-[130px]">Business Phone</th>
+                <th className="py-3 px-4 min-w-[120px]">Contact Status</th>
                 <th className="py-3 px-4 min-w-[100px] text-center">Source Link</th>
                 <th className="py-3 px-4 min-w-[130px]">Outreach Status</th>
                 <th className="py-3 px-4 min-w-[120px]">Notes</th>
@@ -448,6 +451,41 @@ export const LeadsTableView: React.FC<LeadsTableViewProps> = ({
                       ) : (
                         <span className="text-gray-400 italic">None on record</span>
                       )}
+                    </td>
+
+                    {/* Public Business Email */}
+                    <td className="py-3 px-4 text-gray-600">
+                      {lead.businessEmail ? (
+                        <a
+                          href={`mailto:${lead.businessEmail}`}
+                          className="text-blue-600 hover:underline truncate block max-w-[140px]"
+                          title={lead.businessEmail}
+                        >
+                          {lead.businessEmail}
+                        </a>
+                      ) : (
+                        <span className="text-gray-400 italic">Not listed</span>
+                      )}
+                    </td>
+
+                    {/* Business Phone */}
+                    <td className="py-3 px-4 text-gray-600">
+                      {lead.businessPhone ? (
+                        <span className="font-semibold text-gray-800">{lead.businessPhone}</span>
+                      ) : (
+                        <span className="text-gray-400 italic">Not listed</span>
+                      )}
+                    </td>
+
+                    {/* Contact Verification Status */}
+                    <td className="py-3 px-4">
+                      <span className={`inline-block px-2 py-0.5 rounded-md border text-[11px] font-semibold ${
+                        lead.contactVerificationStatus === 'Available'
+                          ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                          : 'bg-gray-100 text-gray-600 border-gray-200'
+                      }`}>
+                        {lead.contactVerificationStatus || (lead.businessWebsite || lead.businessEmail || lead.businessPhone ? 'Available' : 'Not listed')}
+                      </span>
                     </td>
 
                     {/* Wikidata Source Link */}

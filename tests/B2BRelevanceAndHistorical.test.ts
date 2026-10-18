@@ -240,3 +240,39 @@ test('deceased entities with confirmed death date never receive living badge or 
   assert.equal(res.classification, 'Discovered');
 });
 
+test('contact property extraction and verification status handling', () => {
+  const leadWithContact: RawLead = {
+    fullName: 'Contact Person',
+    headline: 'CEO',
+    currentJobTitle: 'CEO',
+    companyName: 'Corp',
+    location: 'US',
+    profileUrl: 'https://www.wikidata.org/wiki/Q123',
+    businessWebsite: 'https://example.com',
+    businessEmail: 'info@example.com',
+    businessPhone: '+1-555-0199',
+    contactVerificationStatus: 'Available'
+  };
+
+  assert.equal(leadWithContact.businessEmail, 'info@example.com');
+  assert.equal(leadWithContact.businessPhone, '+1-555-0199');
+  assert.equal(leadWithContact.contactVerificationStatus, 'Available');
+
+  const leadWithoutContact: RawLead = {
+    fullName: 'No Contact Person',
+    headline: 'CEO',
+    currentJobTitle: 'CEO',
+    companyName: 'Corp',
+    location: 'US',
+    profileUrl: 'https://www.wikidata.org/wiki/Q124',
+    businessWebsite: undefined,
+    businessEmail: undefined,
+    businessPhone: undefined,
+    contactVerificationStatus: 'Not listed'
+  };
+
+  assert.equal(leadWithoutContact.businessEmail, undefined);
+  assert.equal(leadWithoutContact.contactVerificationStatus, 'Not listed');
+});
+
+

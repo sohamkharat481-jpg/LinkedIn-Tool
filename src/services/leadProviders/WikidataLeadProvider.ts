@@ -178,7 +178,7 @@ export class WikidataLeadProvider implements LeadProvider {
     const limit = Math.min(Math.max(Number(filters.maxLeads) || 20, 1), 100);
 
     return `
-      SELECT DISTINCT ?item ?itemLabel ?itemDescription ?website ?countryLabel ?dateOfDeath ?dateOfBirth WHERE {
+      SELECT DISTINCT ?item ?itemLabel ?itemDescription ?website ?countryLabel ?dateOfDeath ?dateOfBirth ?email ?phone ?linkedin WHERE {
         ?item wdt:P31 wd:Q5 ;
               wdt:P106 ?occ .
         VALUES ?occ { ${occValues} }
@@ -187,6 +187,9 @@ export class WikidataLeadProvider implements LeadProvider {
         OPTIONAL { ?item wdt:P27 ?country . }
         OPTIONAL { ?item wdt:P570 ?dateOfDeath . }
         OPTIONAL { ?item wdt:P569 ?dateOfBirth . }
+        OPTIONAL { ?item wdt:P968 ?email . }
+        OPTIONAL { ?item wdt:P1329 ?phone . }
+        OPTIONAL { ?item wdt:P6634 ?linkedin . }
         SERVICE wikibase:label { bd:serviceParam wikibase:language "en,en-US,en-GB". }
       }
       LIMIT ${limit}
@@ -203,9 +206,22 @@ export class WikidataLeadProvider implements LeadProvider {
     const description = binding.itemDescription?.value || '';
     const rawWebsite = binding.website?.value ? binding.website.value.trim() : undefined;
     const website = rawWebsite && /^https?:\/\//i.test(rawWebsite) ? rawWebsite : undefined;
+    
+    const rawEmail = binding.email?.value ? binding.email.value.replace(/^mailto:/i, '').trim() : undefined;
+    const email = rawEmail && rawEmail.includes('@') ? rawEmail : undefined;
+
+    const rawPhone = binding.phone?.value ? binding.phone.value.trim() : undefined;
+    const phone = rawPhone && rawPhone.length >= 5 ? rawPhone : undefined;
+
+    const rawLinkedin = binding.linkedin?.value ? binding.linkedin.value.trim() : undefined;
+    const linkedInProfileUrl = rawLinkedin ? (rawLinkedin.startsWith('http') ? rawLinkedin : `https://www.linkedin.com/in/${rawLinkedin}`) : undefined;
+
     const country = binding.countryLabel?.value ? binding.countryLabel.value.trim() : 'N/A';
     const dateOfDeath = binding.dateOfDeath?.value;
     const dateOfBirth = binding.dateOfBirth?.value;
+
+    const hasContact = Boolean(website || email || phone || linkedInProfileUrl);
+    const contactVerificationStatus = hasContact ? 'Available' : 'Not listed';
 
     const baseLead: RawLead = {
       fullName: label,
@@ -217,7 +233,12 @@ export class WikidataLeadProvider implements LeadProvider {
       connectionsOrFollowers: 'N/A',
       lastActivityDate: 'N/A',
       source: SOURCE_NAME,
-      businessWebsite: website
+      businessWebsite: website,
+      businessEmail: email,
+      businessPhone: phone,
+      linkedInProfileUrl: linkedInProfileUrl,
+      contactSource: SOURCE_NAME,
+      contactVerificationStatus
     };
 
     return enrichRawLead(baseLead, filters, undefined, dateOfDeath, dateOfBirth);

@@ -53,6 +53,10 @@ export interface RawLead {
   businessCountry?: string;
   latitude?: number;
   longitude?: number;
+  businessEmail?: string;
+  linkedInProfileUrl?: string;
+  contactSource?: string;
+  contactVerificationStatus?: 'Available' | 'Not listed' | 'Not checked' | 'Verification failed';
   // B2B Lead Relevance & Historical Intelligence
   relevanceScore?: number;
   relevanceExplanation?: string;
@@ -91,6 +95,10 @@ export interface LeadRecord {
   businessCountry?: string;
   latitude?: number;
   longitude?: number;
+  businessEmail?: string;
+  linkedInProfileUrl?: string;
+  contactSource?: string;
+  contactVerificationStatus?: 'Available' | 'Not listed' | 'Not checked' | 'Verification failed';
   // B2B Lead Relevance & Historical Intelligence
   relevanceScore?: number;
   relevanceExplanation?: string;
