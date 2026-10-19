@@ -312,7 +312,26 @@ export class SupabaseDataService {
               businessCity: item.business_city || undefined,
               businessCountry: item.business_country || undefined,
               latitude: typeof item.latitude === 'number' ? item.latitude : undefined,
-              longitude: typeof item.longitude === 'number' ? item.longitude : undefined
+              longitude: typeof item.longitude === 'number' ? item.longitude : undefined,
+              businessEmail: item.business_email || item.businessEmail || undefined,
+              linkedInProfileUrl: item.linkedin_profile_url || item.linkedInProfileUrl || undefined,
+              contactSource: item.contact_source || item.contactSource || undefined,
+              contactVerificationStatus: item.contact_verification_status || item.contactVerificationStatus || undefined,
+              instagramUsername: item.instagram_username || item.instagramUsername || undefined,
+              instagramProfileUrl: item.instagram_profile_url || item.instagramProfileUrl || undefined,
+              instagramVerificationStatus: item.instagram_verification_status || item.instagramVerificationStatus || undefined,
+              instagramVerificationEvidence: item.instagram_verification_evidence || item.instagramVerificationEvidence || undefined,
+              instagramDiscoverySource: item.instagram_discovery_source || item.instagramDiscoverySource || undefined,
+              instagramLastCheckedAt: item.instagram_last_checked_at || item.instagramLastCheckedAt || undefined,
+              relevanceScore: typeof item.relevance_score === 'number' ? item.relevance_score : item.relevanceScore,
+              relevanceExplanation: item.relevance_explanation || item.relevanceExplanation,
+              relevanceBreakdown: item.relevance_breakdown || item.relevanceBreakdown,
+              b2bClassification: item.b2b_classification || item.b2bClassification,
+              isDeceased: typeof item.is_deceased === 'boolean' ? item.is_deceased : item.isDeceased,
+              dateOfDeath: item.date_of_death || item.dateOfDeath,
+              dateOfBirth: item.date_of_birth || item.dateOfBirth,
+              entityPeriod: item.entity_period || item.entityPeriod,
+              activeEvidence: item.active_evidence || item.activeEvidence
             };
           });
 
@@ -367,6 +386,25 @@ export class SupabaseDataService {
         business_country: l.businessCountry || null,
         latitude: l.latitude ?? null,
         longitude: l.longitude ?? null,
+        business_email: l.businessEmail || null,
+        linkedin_profile_url: l.linkedInProfileUrl || null,
+        contact_source: l.contactSource || null,
+        contact_verification_status: l.contactVerificationStatus || null,
+        instagram_username: l.instagramUsername || null,
+        instagram_profile_url: l.instagramProfileUrl || null,
+        instagram_verification_status: l.instagramVerificationStatus || null,
+        instagram_verification_evidence: l.instagramVerificationEvidence || null,
+        instagram_discovery_source: l.instagramDiscoverySource || null,
+        instagram_last_checked_at: l.instagramLastCheckedAt || null,
+        relevance_score: l.relevanceScore ?? null,
+        relevance_explanation: l.relevanceExplanation || null,
+        relevance_breakdown: l.relevanceBreakdown || null,
+        b2b_classification: l.b2bClassification || null,
+        is_deceased: l.isDeceased ?? null,
+        date_of_death: l.dateOfDeath || null,
+        date_of_birth: l.dateOfBirth || null,
+        entity_period: l.entityPeriod || null,
+        active_evidence: l.activeEvidence || null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       }));
@@ -471,6 +509,44 @@ export class SupabaseDataService {
     }
 
     dbService.updateLeadNotes(workspaceId, leadId, notes);
+  }
+
+  /**
+   * Update lead Instagram information in Supabase and local cache.
+   */
+  static async updateLeadInstagram(
+    workspaceId: string,
+    leadId: string,
+    instagramData: {
+      instagramUsername?: string;
+      instagramProfileUrl?: string;
+      instagramVerificationStatus?: 'Verified' | 'Needs Review' | 'Unverified' | 'Not Found';
+      instagramVerificationEvidence?: string;
+      instagramDiscoverySource?: string;
+      instagramLastCheckedAt?: string;
+    }
+  ): Promise<void> {
+    if (supabase) {
+      try {
+        await supabase
+          .from('leads')
+          .update({
+            instagram_username: instagramData.instagramUsername || null,
+            instagram_profile_url: instagramData.instagramProfileUrl || null,
+            instagram_verification_status: instagramData.instagramVerificationStatus || null,
+            instagram_verification_evidence: instagramData.instagramVerificationEvidence || null,
+            instagram_discovery_source: instagramData.instagramDiscoverySource || null,
+            instagram_last_checked_at: instagramData.instagramLastCheckedAt || new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', leadId)
+          .eq('workspace_id', workspaceId);
+      } catch (err) {
+        console.warn('Supabase updateLeadInstagram error:', err);
+      }
+    }
+
+    dbService.updateLeadInstagram(workspaceId, leadId, instagramData);
   }
 
   /**

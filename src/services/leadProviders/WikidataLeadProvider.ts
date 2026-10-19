@@ -178,7 +178,7 @@ export class WikidataLeadProvider implements LeadProvider {
     const limit = Math.min(Math.max(Number(filters.maxLeads) || 20, 1), 100);
 
     return `
-      SELECT DISTINCT ?item ?itemLabel ?itemDescription ?website ?countryLabel ?dateOfDeath ?dateOfBirth ?email ?phone ?linkedin WHERE {
+      SELECT DISTINCT ?item ?itemLabel ?itemDescription ?website ?countryLabel ?dateOfDeath ?dateOfBirth ?email ?phone ?linkedin ?instagram WHERE {
         ?item wdt:P31 wd:Q5 ;
               wdt:P106 ?occ .
         VALUES ?occ { ${occValues} }
@@ -190,6 +190,7 @@ export class WikidataLeadProvider implements LeadProvider {
         OPTIONAL { ?item wdt:P968 ?email . }
         OPTIONAL { ?item wdt:P1329 ?phone . }
         OPTIONAL { ?item wdt:P6634 ?linkedin . }
+        OPTIONAL { ?item wdt:P2003 ?instagram . }
         SERVICE wikibase:label { bd:serviceParam wikibase:language "en,en-US,en-GB". }
       }
       LIMIT ${limit}
@@ -205,7 +206,9 @@ export class WikidataLeadProvider implements LeadProvider {
 
     const description = binding.itemDescription?.value || '';
     const rawWebsite = binding.website?.value ? binding.website.value.trim() : undefined;
-    const website = rawWebsite && /^https?:\/\//i.test(rawWebsite) ? rawWebsite : undefined;
+    const website = rawWebsite && /^https?:\/\//i.test(rawWebsite)
+      ? rawWebsite.replace(/^https?:\/\//i, (m: string) => m.toLowerCase())
+      : undefined;
     
     const rawEmail = binding.email?.value ? binding.email.value.replace(/^mailto:/i, '').trim() : undefined;
     const email = rawEmail && rawEmail.includes('@') ? rawEmail : undefined;
@@ -216,11 +219,19 @@ export class WikidataLeadProvider implements LeadProvider {
     const rawLinkedin = binding.linkedin?.value ? binding.linkedin.value.trim() : undefined;
     const linkedInProfileUrl = rawLinkedin ? (rawLinkedin.startsWith('http') ? rawLinkedin : `https://www.linkedin.com/in/${rawLinkedin}`) : undefined;
 
+    const rawInstagram = binding.instagram?.value ? binding.instagram.value.trim().replace(/^@/, '') : undefined;
+    const instagramUsername = rawInstagram && /^[a-zA-Z0-9._]{1,30}$/.test(rawInstagram) ? rawInstagram : undefined;
+    const instagramProfileUrl = instagramUsername ? `https://www.instagram.com/${instagramUsername}/` : undefined;
+    const instagramDiscoverySource = instagramUsername ? 'Wikidata (P2003)' : undefined;
+    const instagramVerificationStatus = instagramUsername ? 'Verified' : undefined;
+    const instagramVerificationEvidence = instagramUsername ? `Official Wikidata statement (P2003) verified for ${label}` : undefined;
+    const instagramLastCheckedAt = instagramUsername ? new Date().toISOString() : undefined;
+
     const country = binding.countryLabel?.value ? binding.countryLabel.value.trim() : 'N/A';
     const dateOfDeath = binding.dateOfDeath?.value;
     const dateOfBirth = binding.dateOfBirth?.value;
 
-    const hasContact = Boolean(website || email || phone || linkedInProfileUrl);
+    const hasContact = Boolean(website || email || phone || linkedInProfileUrl || instagramUsername);
     const contactVerificationStatus = hasContact ? 'Available' : 'Not listed';
 
     const baseLead: RawLead = {
@@ -238,7 +249,13 @@ export class WikidataLeadProvider implements LeadProvider {
       businessPhone: phone,
       linkedInProfileUrl: linkedInProfileUrl,
       contactSource: SOURCE_NAME,
-      contactVerificationStatus
+      contactVerificationStatus,
+      instagramUsername,
+      instagramProfileUrl,
+      instagramVerificationStatus,
+      instagramVerificationEvidence,
+      instagramDiscoverySource,
+      instagramLastCheckedAt
     };
 
     return enrichRawLead(baseLead, filters, undefined, dateOfDeath, dateOfBirth);

@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { LeadRecord, LeadStatus, B2BLeadClassification, EntityPeriod } from '../types';
+import { LeadRecord, LeadStatus, B2BLeadClassification, EntityPeriod, InstagramVerificationStatus } from '../types';
 import {
   ExternalLink,
   Search,
@@ -15,14 +15,30 @@ import {
   X,
   AlertTriangle,
   Globe,
-  Award
+  Award,
+  Loader2,
+  Instagram,
+  Check,
+  Sparkles
 } from 'lucide-react';
+import { apiUrl } from '../services/apiClient';
 
 interface LeadsTableViewProps {
   leads: LeadRecord[];
   clientName?: string;
   onUpdateStatus: (leadId: string, status: LeadStatus) => void;
   onUpdateNotes: (leadId: string, notes: string) => void;
+  onUpdateInstagram?: (
+    leadId: string,
+    instagramData: {
+      instagramUsername?: string;
+      instagramProfileUrl?: string;
+      instagramVerificationStatus?: InstagramVerificationStatus;
+      instagramVerificationEvidence?: string;
+      instagramDiscoverySource?: string;
+      instagramLastCheckedAt?: string;
+    }
+  ) => void;
   onDeleteLeads: (leadIds: string[]) => void;
   onExportToSheets: (selectedLeads: LeadRecord[]) => void;
   isGoogleConnected: boolean;
@@ -41,6 +57,7 @@ export const LeadsTableView: React.FC<LeadsTableViewProps> = ({
   clientName,
   onUpdateStatus,
   onUpdateNotes,
+  onUpdateInstagram,
   onDeleteLeads,
   onExportToSheets,
   isGoogleConnected
@@ -53,6 +70,7 @@ export const LeadsTableView: React.FC<LeadsTableViewProps> = ({
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [classificationFilter, setClassificationFilter] = useState<string>('ALL');
   const [periodFilter, setPeriodFilter] = useState<string>('ALL'); // 'ALL' | 'MODERN_ACTIVE' | 'EXCLUDE_DECEASED' | 'HISTORICAL_DECEASED'
+  const [instagramFilter, setInstagramFilter] = useState<string>('ALL'); // 'ALL' | 'Verified' | 'Needs Review' | 'Unverified' | 'Not Found' | 'Not Checked'
   const [sortBy, setSortBy] = useState<'dateAdded' | 'fullName' | 'companyName' | 'status' | 'relevanceScore'>('dateAdded');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
@@ -67,6 +85,16 @@ export const LeadsTableView: React.FC<LeadsTableViewProps> = ({
   // Transparency / Relevance Breakdown Modal state
   const [explainingLead, setExplainingLead] = useState<LeadRecord | null>(null);
 
+  // Instagram Discovery & Verification State
+  const [discoveringInstagramIds, setDiscoveringInstagramIds] = useState<Set<string>>(new Set());
+  const [batchDiscovering, setBatchDiscovering] = useState<boolean>(false);
+  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
+  const [editingInstagramLead, setEditingInstagramLead] = useState<LeadRecord | null>(null);
+  const [instagramFormUsername, setInstagramFormUsername] = useState<string>('');
+  const [instagramFormStatus, setInstagramFormStatus] = useState<InstagramVerificationStatus>('Verified');
+  const [instagramFormEvidence, setInstagramFormEvidence] = useState<string>('');
+  const [explainingInstagramLead, setExplainingInstagramLead] = useState<LeadRecord | null>(null);
+
   // Filtered & Sorted Leads
   const processedLeads = useMemo(() => {
     return leads
@@ -76,7 +104,8 @@ export const LeadsTableView: React.FC<LeadsTableViewProps> = ({
           lead.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
           lead.companyName.toLowerCase().includes(searchQuery.toLowerCase()) ||
           lead.currentJobTitle.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          lead.headline.toLowerCase().includes(searchQuery.toLowerCase());
+          lead.headline.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          (lead.instagramUsername && lead.instagramUsername.toLowerCase().includes(searchQuery.toLowerCase()));
 
         const matchesStatus = statusFilter === 'ALL' || lead.status === statusFilter;
 
@@ -93,7 +122,14 @@ export const LeadsTableView: React.FC<LeadsTableViewProps> = ({
           matchesPeriod = Boolean(lead.isDeceased || lead.entityPeriod === 'historical');
         }
 
-        return matchesQuery && matchesStatus && matchesClassification && matchesPeriod;
+        let matchesInstagram = true;
+        if (instagramFilter === 'Not Checked') {
+          matchesInstagram = !lead.instagramVerificationStatus && !lead.instagramUsername;
+        } else if (instagramFilter !== 'ALL') {
+          matchesInstagram = lead.instagramVerificationStatus === instagramFilter;
+        }
+
+        return matchesQuery && matchesStatus && matchesClassification && matchesPeriod && matchesInstagram;
       })
       .sort((a, b) => {
         if (sortBy === 'relevanceScore') {
@@ -110,7 +146,7 @@ export const LeadsTableView: React.FC<LeadsTableViewProps> = ({
           return valB.localeCompare(valA);
         }
       });
-  }, [leads, searchQuery, statusFilter, classificationFilter, periodFilter, sortBy, sortOrder]);
+  }, [leads, searchQuery, statusFilter, classificationFilter, periodFilter, instagramFilter, sortBy, sortOrder]);
 
   // Paginated Slice
   const totalPages = Math.max(1, Math.ceil(processedLeads.length / pageSize));
@@ -168,6 +204,95 @@ export const LeadsTableView: React.FC<LeadsTableViewProps> = ({
     }
   };
 
+  const handleDiscoverInstagram = async (lead: LeadRecord) => {
+    if (!onUpdateInstagram) return;
+    setDiscoveringInstagramIds((prev) => new Set(prev).add(lead.id));
+
+    try {
+      const response = await fetch(apiUrl('/api/discover-instagram'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lead })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.result) {
+          onUpdateInstagram(lead.id, data.result);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to discover Instagram for lead:', err);
+    } finally {
+      setDiscoveringInstagramIds((prev) => {
+        const next = new Set(prev);
+        next.delete(lead.id);
+        return next;
+      });
+    }
+  };
+
+  const handleBatchDiscoverInstagram = async () => {
+    if (!onUpdateInstagram || selectedIds.length === 0 || batchDiscovering) return;
+    setBatchDiscovering(true);
+    setBatchProgress({ current: 0, total: selectedIds.length });
+
+    const targetLeads = leads.filter((l) => selectedIds.includes(l.id));
+
+    try {
+      const response = await fetch(apiUrl('/api/batch-discover-instagram'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ leads: targetLeads })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.results) {
+          for (const [key, res] of Object.entries<any>(data.results)) {
+            const matchedLead = targetLeads.find((l) => l.id === key || l.profileUrl === key || l.fullName === key);
+            if (matchedLead) {
+              onUpdateInstagram(matchedLead.id, res);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Batch Instagram discovery failed:', err);
+    } finally {
+      setBatchDiscovering(false);
+      setBatchProgress(null);
+    }
+  };
+
+  const handleOpenInstagramModal = (lead: LeadRecord) => {
+    setEditingInstagramLead(lead);
+    setInstagramFormUsername(lead.instagramUsername || '');
+    setInstagramFormStatus(lead.instagramVerificationStatus || 'Verified');
+    setInstagramFormEvidence(
+      lead.instagramVerificationEvidence ||
+        (lead.businessWebsite ? `Official Instagram handle listed for ${lead.fullName} on website` : `Verified profile for ${lead.fullName}`)
+    );
+  };
+
+  const handleSaveInstagramModal = () => {
+    if (editingInstagramLead && onUpdateInstagram) {
+      const cleanUsername = instagramFormUsername.trim().replace(/^@/, '');
+      const hasUsername = Boolean(cleanUsername);
+
+      onUpdateInstagram(editingInstagramLead.id, {
+        instagramUsername: hasUsername ? cleanUsername : undefined,
+        instagramProfileUrl: hasUsername ? `https://www.instagram.com/${cleanUsername}/` : undefined,
+        instagramVerificationStatus: hasUsername ? instagramFormStatus : 'Not Found',
+        instagramVerificationEvidence: instagramFormEvidence.trim() || `Profile updated manually for ${editingInstagramLead.fullName}`,
+        instagramDiscoverySource: 'Manual Verification',
+        instagramLastCheckedAt: new Date().toISOString()
+      });
+
+      setEditingInstagramLead(null);
+    }
+  };
+
   const getClassificationBadge = (classification?: B2BLeadClassification) => {
     switch (classification) {
       case 'Qualified Prospect':
@@ -211,7 +336,7 @@ export const LeadsTableView: React.FC<LeadsTableViewProps> = ({
             <Search className="w-4 h-4 text-gray-400 absolute left-3 top-2.5" />
             <input
               type="text"
-              placeholder="Search by name, company, title..."
+              placeholder="Search by name, company, title, Instagram..."
               value={searchQuery}
               onChange={(e) => {
                 setSearchQuery(e.target.value);
@@ -250,6 +375,23 @@ export const LeadsTableView: React.FC<LeadsTableViewProps> = ({
             <option value="MODERN_ACTIVE">Modern & Potentially Active</option>
             <option value="EXCLUDE_DECEASED">Exclude Deceased</option>
             <option value="HISTORICAL_DECEASED">Historical / Deceased Only</option>
+          </select>
+
+          {/* Instagram Status Filter */}
+          <select
+            value={instagramFilter}
+            onChange={(e) => {
+              setInstagramFilter(e.target.value);
+              setCurrentPage(1);
+            }}
+            className="text-xs font-medium bg-white border border-gray-300 rounded-xl px-3 py-2 focus:outline-none cursor-pointer"
+          >
+            <option value="ALL">All Instagram Statuses</option>
+            <option value="Verified">Verified Instagram</option>
+            <option value="Needs Review">Needs Review</option>
+            <option value="Unverified">Unverified</option>
+            <option value="Not Found">Not Found</option>
+            <option value="Not Checked">Not Checked</option>
           </select>
 
           {/* Outreach Status Filter */}
@@ -292,12 +434,31 @@ export const LeadsTableView: React.FC<LeadsTableViewProps> = ({
         {/* Action Buttons */}
         <div className="flex items-center gap-2">
           {selectedIds.length > 0 && (
-            <button
-              onClick={handleDeleteSelected}
-              className="flex items-center gap-1.5 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-xs font-semibold px-3 py-2 rounded-xl transition-colors"
-            >
-              <Trash2 className="w-3.5 h-3.5" /> Delete ({selectedIds.length})
-            </button>
+            <>
+              <button
+                onClick={handleBatchDiscoverInstagram}
+                disabled={batchDiscovering}
+                className="flex items-center gap-1.5 bg-gradient-to-r from-pink-50 to-purple-50 hover:from-pink-100 hover:to-purple-100 text-pink-700 border border-pink-200 text-xs font-semibold px-3 py-2 rounded-xl transition-colors disabled:opacity-50 cursor-pointer shadow-2xs"
+              >
+                {batchDiscovering ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-pink-600" />
+                    <span>Finding Instagram ({selectedIds.length})...</span>
+                  </>
+                ) : (
+                  <>
+                    <Instagram className="w-3.5 h-3.5 text-pink-600" />
+                    <span>Find Instagram ({selectedIds.length})</span>
+                  </>
+                )}
+              </button>
+              <button
+                onClick={handleDeleteSelected}
+                className="flex items-center gap-1.5 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-xs font-semibold px-3 py-2 rounded-xl transition-colors"
+              >
+                <Trash2 className="w-3.5 h-3.5" /> Delete ({selectedIds.length})
+              </button>
+            </>
           )}
 
           <button
@@ -343,6 +504,7 @@ export const LeadsTableView: React.FC<LeadsTableViewProps> = ({
                 <th className="py-3 px-4 min-w-[160px]">Official Website</th>
                 <th className="py-3 px-4 min-w-[150px]">Public Business Email</th>
                 <th className="py-3 px-4 min-w-[130px]">Business Phone</th>
+                <th className="py-3 px-4 min-w-[200px]">Business Instagram</th>
                 <th className="py-3 px-4 min-w-[120px]">Contact Status</th>
                 <th className="py-3 px-4 min-w-[100px] text-center">Source Link</th>
                 <th className="py-3 px-4 min-w-[130px]">Outreach Status</th>
@@ -474,6 +636,107 @@ export const LeadsTableView: React.FC<LeadsTableViewProps> = ({
                         <span className="font-semibold text-gray-800">{lead.businessPhone}</span>
                       ) : (
                         <span className="text-gray-400 italic">Not listed</span>
+                      )}
+                    </td>
+
+                    {/* Business Instagram Profile & Verification */}
+                    <td className="py-3 px-4">
+                      {discoveringInstagramIds.has(lead.id) ? (
+                        <div className="flex items-center gap-1.5 text-pink-600 font-semibold text-[11px]">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Searching...</span>
+                        </div>
+                      ) : lead.instagramUsername ? (
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1.5">
+                            <a
+                              href={lead.instagramProfileUrl || `https://www.instagram.com/${lead.instagramUsername}/`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-pink-600 hover:text-pink-700 font-bold hover:underline inline-flex items-center gap-1 max-w-[140px] truncate text-[11px]"
+                              title={`Open Instagram profile for @${lead.instagramUsername}`}
+                            >
+                              <Instagram className="w-3.5 h-3.5 shrink-0 text-pink-500" />
+                              <span className="truncate">@{lead.instagramUsername}</span>
+                              <ExternalLink className="w-2.5 h-2.5 shrink-0 opacity-70" />
+                            </a>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <span
+                              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold border ${
+                                lead.instagramVerificationStatus === 'Verified'
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  : lead.instagramVerificationStatus === 'Needs Review'
+                                  ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                  : lead.instagramVerificationStatus === 'Unverified'
+                                  ? 'bg-slate-50 text-slate-700 border-slate-200'
+                                  : 'bg-rose-50 text-rose-700 border-rose-200'
+                              }`}
+                            >
+                              {lead.instagramVerificationStatus === 'Verified' ? (
+                                <ShieldCheck className="w-3 h-3 text-emerald-600 shrink-0" />
+                              ) : lead.instagramVerificationStatus === 'Needs Review' ? (
+                                <AlertTriangle className="w-3 h-3 text-amber-600 shrink-0" />
+                              ) : null}
+                              {lead.instagramVerificationStatus || 'Verified'}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setExplainingInstagramLead(lead)}
+                              title="View verification evidence and source"
+                              className="text-gray-400 hover:text-blue-600 p-0.5 rounded hover:bg-gray-100 cursor-pointer"
+                            >
+                              <Info className="w-3 h-3" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenInstagramModal(lead)}
+                              title="Edit profile handle or status"
+                              className="text-gray-400 hover:text-gray-700 p-0.5 rounded hover:bg-gray-100 cursor-pointer"
+                            >
+                              <Edit3 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+                      ) : lead.instagramVerificationStatus === 'Not Found' ? (
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] font-semibold text-gray-500 bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded">
+                            Not listed
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleDiscoverInstagram(lead)}
+                            className="text-[10px] text-pink-600 hover:text-pink-800 font-semibold hover:underline cursor-pointer"
+                          >
+                            Re-check
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenInstagramModal(lead)}
+                            title="Add handle manually"
+                            className="text-gray-400 hover:text-gray-600 p-0.5 rounded hover:bg-gray-100 cursor-pointer"
+                          >
+                            <Edit3 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleDiscoverInstagram(lead)}
+                            className="inline-flex items-center gap-1 bg-gradient-to-r from-pink-50 to-purple-50 hover:from-pink-100 hover:to-purple-100 text-pink-700 border border-pink-200 text-[10px] font-bold px-2 py-1 rounded-md transition-all shadow-2xs cursor-pointer"
+                          >
+                            <Instagram className="w-3 h-3 text-pink-600" /> Find Profile
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenInstagramModal(lead)}
+                            title="Enter handle manually"
+                            className="text-gray-400 hover:text-gray-600 p-0.5 rounded hover:bg-gray-100 cursor-pointer"
+                          >
+                            <Edit3 className="w-3 h-3" />
+                          </button>
+                        </div>
                       )}
                     </td>
 
@@ -702,6 +965,189 @@ export const LeadsTableView: React.FC<LeadsTableViewProps> = ({
                 className="px-3.5 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-xl hover:bg-blue-700"
               >
                 Save Note
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Instagram Verification Evidence Modal */}
+      {explainingInstagramLead && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl border border-gray-200 max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center justify-between border-b pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-gradient-to-tr from-pink-500 to-purple-600 text-white rounded-xl shadow-xs">
+                  <Instagram className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-gray-900">Instagram Verification Evidence</h4>
+                  <p className="text-xs text-gray-500">{explainingInstagramLead.fullName}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setExplainingInstagramLead(null)}
+                className="text-gray-400 hover:text-gray-600 p-1 rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div className="p-3 bg-gray-50 rounded-xl border border-gray-200 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-500 font-medium">Handle</span>
+                  {explainingInstagramLead.instagramUsername ? (
+                    <a
+                      href={explainingInstagramLead.instagramProfileUrl || `https://www.instagram.com/${explainingInstagramLead.instagramUsername}/`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-pink-600 font-bold hover:underline flex items-center gap-1"
+                    >
+                      @{explainingInstagramLead.instagramUsername}
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  ) : (
+                    <span className="text-gray-400 italic">None on record</span>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-500 font-medium">Verification Status</span>
+                  <span className="font-bold text-gray-900">{explainingInstagramLead.instagramVerificationStatus || 'Unverified'}</span>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-500 font-medium">Discovery Source</span>
+                  <span className="font-semibold text-gray-700">{explainingInstagramLead.instagramDiscoverySource || 'Official Records'}</span>
+                </div>
+
+                {explainingInstagramLead.instagramLastCheckedAt && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-500 font-medium">Last Checked</span>
+                    <span className="text-gray-600 font-mono text-[11px]">{new Date(explainingInstagramLead.instagramLastCheckedAt).toLocaleString()}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl space-y-1">
+                <div className="flex items-center gap-1.5 font-bold text-emerald-900">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>Documented Verification Proof</span>
+                </div>
+                <p className="text-emerald-800 text-[11px] leading-relaxed">
+                  {explainingInstagramLead.instagramVerificationEvidence ||
+                    'Discovered through authentic public domain statements or verified official business website.'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                onClick={() => setExplainingInstagramLead(null)}
+                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-xl"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit / Manually Verify Instagram Modal */}
+      {editingInstagramLead && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl border border-gray-200 max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center justify-between border-b pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-gradient-to-tr from-pink-500 to-purple-600 text-white rounded-xl shadow-xs">
+                  <Instagram className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-gray-900">Manage Instagram Profile</h4>
+                  <p className="text-xs text-gray-500">{editingInstagramLead.fullName}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setEditingInstagramLead(null)}
+                className="text-gray-400 hover:text-gray-600 p-1 rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block text-gray-700 font-bold mb-1">Instagram Username / Handle</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-2.5 text-gray-400 font-bold">@</span>
+                  <input
+                    type="text"
+                    value={instagramFormUsername}
+                    onChange={(e) => setInstagramFormUsername(e.target.value.replace(/^@/, ''))}
+                    placeholder="username or business_handle"
+                    className="w-full pl-7 pr-3 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500/20 focus:border-pink-500 text-xs"
+                  />
+                </div>
+                <p className="text-[10px] text-gray-400 mt-0.5">Clickable link: https://www.instagram.com/{instagramFormUsername || 'username'}/</p>
+              </div>
+
+              <div>
+                <label className="block text-gray-700 font-bold mb-1">Verification Status</label>
+                <select
+                  value={instagramFormStatus}
+                  onChange={(e) => setInstagramFormStatus(e.target.value as InstagramVerificationStatus)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500/20 focus:border-pink-500 text-xs font-semibold bg-white cursor-pointer"
+                >
+                  <option value="Verified">Verified (Confirmed Official Profile)</option>
+                  <option value="Needs Review">Needs Review (Candidate / Suggestion)</option>
+                  <option value="Unverified">Unverified (Unconfirmed source)</option>
+                  <option value="Not Found">Not Found (No public profile)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-gray-700 font-bold mb-1">Verification Evidence & Notes</label>
+                <textarea
+                  rows={3}
+                  value={instagramFormEvidence}
+                  onChange={(e) => setInstagramFormEvidence(e.target.value)}
+                  placeholder="e.g. Discovered on official website footer, bio matches executive title..."
+                  className="w-full p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500/20 focus:border-pink-500 text-xs"
+                />
+              </div>
+
+              {editingInstagramLead.businessWebsite && (
+                <div className="p-2.5 bg-blue-50/70 border border-blue-200 rounded-xl flex items-center justify-between text-[11px]">
+                  <span className="text-blue-800 truncate mr-2">Official Website: {editingInstagramLead.businessWebsite}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleDiscoverInstagram(editingInstagramLead);
+                      setEditingInstagramLead(null);
+                    }}
+                    className="text-blue-700 hover:text-blue-900 font-bold hover:underline shrink-0 cursor-pointer"
+                  >
+                    Run Auto-Scan
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t">
+              <button
+                type="button"
+                onClick={() => setEditingInstagramLead(null)}
+                className="px-3 py-1.5 text-xs text-gray-600 hover:text-gray-800 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveInstagramModal}
+                className="px-4 py-2 bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-700 hover:to-purple-700 text-white text-xs font-bold rounded-xl shadow-xs cursor-pointer"
+              >
+                Save & Verify Profile
               </button>
             </div>
           </div>

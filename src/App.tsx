@@ -299,6 +299,16 @@ export default function App() {
       businessCountry: raw.businessCountry,
       latitude: raw.latitude,
       longitude: raw.longitude,
+      businessEmail: raw.businessEmail,
+      linkedInProfileUrl: raw.linkedInProfileUrl,
+      contactSource: raw.contactSource,
+      contactVerificationStatus: raw.contactVerificationStatus,
+      instagramUsername: raw.instagramUsername,
+      instagramProfileUrl: raw.instagramProfileUrl,
+      instagramVerificationStatus: raw.instagramVerificationStatus,
+      instagramVerificationEvidence: raw.instagramVerificationEvidence,
+      instagramDiscoverySource: raw.instagramDiscoverySource,
+      instagramLastCheckedAt: raw.instagramLastCheckedAt,
       relevanceScore: raw.relevanceScore,
       relevanceExplanation: raw.relevanceExplanation,
       relevanceBreakdown: raw.relevanceBreakdown,
@@ -351,6 +361,21 @@ export default function App() {
 
   const handleUpdateLeadNotes = async (leadId: string, notes: string) => {
     await SupabaseDataService.updateLeadNotes(activeWorkspace.id, leadId, notes);
+    await refreshWorkspaceData(activeWorkspace.id);
+  };
+
+  const handleUpdateLeadInstagram = async (
+    leadId: string,
+    instagramData: {
+      instagramUsername?: string;
+      instagramProfileUrl?: string;
+      instagramVerificationStatus?: 'Verified' | 'Needs Review' | 'Unverified' | 'Not Found';
+      instagramVerificationEvidence?: string;
+      instagramDiscoverySource?: string;
+      instagramLastCheckedAt?: string;
+    }
+  ) => {
+    await SupabaseDataService.updateLeadInstagram(activeWorkspace.id, leadId, instagramData);
     await refreshWorkspaceData(activeWorkspace.id);
   };
 
@@ -527,6 +552,7 @@ export default function App() {
               }
               onUpdateLeadStatus={handleUpdateLeadStatus}
               onUpdateLeadNotes={handleUpdateLeadNotes}
+              onUpdateLeadInstagram={handleUpdateLeadInstagram}
               onDeleteLeads={handleDeleteLeads}
               onExportToSheets={(selected, cName) => handleOpenExportModal(selected, cName)}
               isGoogleConnected={isGoogleConnected}

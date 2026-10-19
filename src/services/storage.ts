@@ -372,6 +372,31 @@ class StorageService {
     }
   }
 
+  updateLeadInstagram(
+    workspaceId: string,
+    leadId: string,
+    instagramData: {
+      instagramUsername?: string;
+      instagramProfileUrl?: string;
+      instagramVerificationStatus?: 'Verified' | 'Needs Review' | 'Unverified' | 'Not Found';
+      instagramVerificationEvidence?: string;
+      instagramDiscoverySource?: string;
+      instagramLastCheckedAt?: string;
+    }
+  ): LeadRecord | undefined {
+    const allLeads = this.getItem<LeadRecord[]>(STORAGE_KEYS.LEADS, SEED_LEADS);
+    const index = allLeads.findIndex((l) => l.id === leadId && l.workspaceId === workspaceId);
+    if (index !== -1) {
+      allLeads[index] = {
+        ...allLeads[index],
+        ...instagramData
+      };
+      this.setItem(STORAGE_KEYS.LEADS, allLeads);
+      return allLeads[index];
+    }
+    return undefined;
+  }
+
   deleteLeadsForClient(workspaceId: string, clientId: string): void {
     const allLeads = this.getItem<LeadRecord[]>(STORAGE_KEYS.LEADS, SEED_LEADS);
     const filtered = allLeads.filter((l) => !(l.clientId === clientId && l.workspaceId === workspaceId));

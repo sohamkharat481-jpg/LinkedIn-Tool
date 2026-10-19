@@ -15,6 +15,17 @@ interface ClientManagementViewProps {
   getSearchesForClient: (clientId: string) => SearchHistoryRecord[];
   onUpdateLeadStatus: (leadId: string, status: any) => void;
   onUpdateLeadNotes: (leadId: string, notes: string) => void;
+  onUpdateLeadInstagram?: (
+    leadId: string,
+    instagramData: {
+      instagramUsername?: string;
+      instagramProfileUrl?: string;
+      instagramVerificationStatus?: 'Verified' | 'Needs Review' | 'Unverified' | 'Not Found';
+      instagramVerificationEvidence?: string;
+      instagramDiscoverySource?: string;
+      instagramLastCheckedAt?: string;
+    }
+  ) => void;
   onDeleteLeads: (leadIds: string[]) => void;
   onExportToSheets: (leadsToExport: LeadRecord[], clientName: string) => void;
   isGoogleConnected: boolean;
@@ -32,6 +43,7 @@ export const ClientManagementView: React.FC<ClientManagementViewProps> = ({
   getSearchesForClient,
   onUpdateLeadStatus,
   onUpdateLeadNotes,
+  onUpdateLeadInstagram,
   onDeleteLeads,
   onExportToSheets,
   isGoogleConnected
@@ -238,6 +250,7 @@ export const ClientManagementView: React.FC<ClientManagementViewProps> = ({
                 clientName={selectedDetailClient.name}
                 onUpdateStatus={onUpdateLeadStatus}
                 onUpdateNotes={onUpdateLeadNotes}
+                onUpdateInstagram={onUpdateLeadInstagram}
                 onDeleteLeads={onDeleteLeads}
                 onExportToSheets={(selected) => onExportToSheets(selected, selectedDetailClient.name)}
                 isGoogleConnected={isGoogleConnected}

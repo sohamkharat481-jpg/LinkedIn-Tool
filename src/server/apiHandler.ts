@@ -217,3 +217,72 @@ apiRouter.post('/analyze-profile', async (req: Request, res: Response) => {
     res.status(500).json({ error: error.message || 'Failed to analyze LinkedIn profile.' });
   }
 });
+
+// Single Lead Instagram Profile Discovery & Verification
+apiRouter.post('/discover-instagram', async (req: Request, res: Response) => {
+  try {
+    const lead = req.body.lead || req.body;
+    if (!lead || !lead.fullName) {
+      res.status(400).json({ error: 'Lead data with fullName is required for Instagram discovery.' });
+      return;
+    }
+
+    const { InstagramDiscoveryService } = await import('./instagramDiscoveryService');
+    const result = await InstagramDiscoveryService.discoverForLead({
+      leadId: lead.id,
+      fullName: lead.fullName,
+      companyName: lead.companyName,
+      businessWebsite: lead.businessWebsite,
+      profileUrl: lead.profileUrl,
+      location: lead.location,
+      city: lead.businessCity,
+      country: lead.businessCountry,
+      businessCategory: lead.businessCategory,
+      currentUsername: req.body.currentUsername
+    });
+
+    res.json({
+      success: true,
+      result
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      error: error.message || 'Failed to discover Instagram business profile.'
+    });
+  }
+});
+
+// Batch Leads Instagram Discovery
+apiRouter.post('/batch-discover-instagram', async (req: Request, res: Response) => {
+  try {
+    const leads = req.body.leads;
+    if (!Array.isArray(leads) || leads.length === 0) {
+      res.status(400).json({ error: 'Array of leads is required for batch discovery.' });
+      return;
+    }
+
+    const { InstagramDiscoveryService } = await import('./instagramDiscoveryService');
+    const targets = leads.map((l: any) => ({
+      leadId: l.id,
+      fullName: l.fullName,
+      companyName: l.companyName,
+      businessWebsite: l.businessWebsite,
+      profileUrl: l.profileUrl,
+      location: l.location,
+      city: l.businessCity,
+      country: l.businessCountry,
+      businessCategory: l.businessCategory
+    }));
+
+    const results = await InstagramDiscoveryService.discoverBatch(targets);
+
+    res.json({
+      success: true,
+      results
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      error: error.message || 'Failed to execute batch Instagram discovery.'
+    });
+  }
+});

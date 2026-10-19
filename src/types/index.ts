@@ -57,6 +57,13 @@ export interface RawLead {
   linkedInProfileUrl?: string;
   contactSource?: string;
   contactVerificationStatus?: 'Available' | 'Not listed' | 'Not checked' | 'Verification failed';
+  // Business Instagram Discovery
+  instagramUsername?: string;
+  instagramProfileUrl?: string;
+  instagramVerificationStatus?: InstagramVerificationStatus;
+  instagramVerificationEvidence?: string;
+  instagramDiscoverySource?: string;
+  instagramLastCheckedAt?: string;
   // B2B Lead Relevance & Historical Intelligence
   relevanceScore?: number;
   relevanceExplanation?: string;
@@ -68,6 +75,8 @@ export interface RawLead {
   entityPeriod?: EntityPeriod;
   activeEvidence?: string;
 }
+
+export type InstagramVerificationStatus = 'Verified' | 'Needs Review' | 'Unverified' | 'Not Found';
 
 export interface LeadRecord {
   id: string;
@@ -99,6 +108,13 @@ export interface LeadRecord {
   linkedInProfileUrl?: string;
   contactSource?: string;
   contactVerificationStatus?: 'Available' | 'Not listed' | 'Not checked' | 'Verification failed';
+  // Business Instagram Discovery
+  instagramUsername?: string;
+  instagramProfileUrl?: string;
+  instagramVerificationStatus?: InstagramVerificationStatus;
+  instagramVerificationEvidence?: string;
+  instagramDiscoverySource?: string;
+  instagramLastCheckedAt?: string;
   // B2B Lead Relevance & Historical Intelligence
   relevanceScore?: number;
   relevanceExplanation?: string;
