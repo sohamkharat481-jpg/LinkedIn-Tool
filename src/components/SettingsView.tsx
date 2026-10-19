@@ -101,7 +101,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           providerType,
-          workspaceId: activeWorkspace.id,
+          workspaceId: activeWorkspace?.id || '',
           clientId: activeClient?.id || ''
         })
       });
