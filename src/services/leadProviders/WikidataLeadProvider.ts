@@ -101,6 +101,7 @@ export class WikidataLeadProvider implements LeadProvider {
         }
       }
 
+      console.log(`[Diagnostic] Wikidata Search: Found ${data.results.bindings.length} raw results, processed ${leads.length} unique leads.`);
       return leads;
     } catch (e: any) {
       clearTimeout(timeoutId);
@@ -180,10 +181,11 @@ export class WikidataLeadProvider implements LeadProvider {
     return `
       SELECT DISTINCT ?item ?itemLabel ?itemDescription ?website ?countryLabel ?dateOfDeath ?dateOfBirth ?email ?phone ?linkedin ?instagram WHERE {
         ?item wdt:P31 wd:Q5 ;
-              wdt:P106 ?occ .
+              wdt:P106 ?occ ;
+              wdt:P856 ?website .
+        FILTER NOT EXISTS { ?item wdt:P570 ?deathDate . }
         VALUES ?occ { ${occValues} }
         ${countryClause}
-        OPTIONAL { ?item wdt:P856 ?website . }
         OPTIONAL { ?item wdt:P27 ?country . }
         OPTIONAL { ?item wdt:P570 ?dateOfDeath . }
         OPTIONAL { ?item wdt:P569 ?dateOfBirth . }

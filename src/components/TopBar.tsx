@@ -39,7 +39,7 @@ export const TopBar: React.FC<TopBarProps> = ({
     setAuthError(null);
     try {
       const res = await googleSignIn();
-      if (res) {
+      if (res && res.user) {
         onGoogleAuthSuccess(res.user, res.accessToken);
       }
     } catch (err: any) {
@@ -67,7 +67,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           <div className="flex items-center gap-2 bg-gray-100 hover:bg-gray-200/80 transition-colors px-3 py-1.5 rounded-lg border border-gray-200">
             <Building2 className="w-4 h-4 text-blue-600" />
             <select
-              value={activeWorkspace.id}
+              value={activeWorkspace?.id || ''}
               onChange={(e) => onSelectWorkspace(e.target.value)}
               className="bg-transparent text-xs font-semibold text-gray-800 focus:outline-none cursor-pointer pr-1"
             >
@@ -83,7 +83,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 px-3 py-1.5 rounded-lg">
             <span className="text-xs font-medium text-blue-700">Active Client:</span>
             <select
-              value={activeClient ? activeClient.id : ''}
+              value={activeClient?.id || ''}
               onChange={(e) => onSelectClient(e.target.value)}
               className="bg-transparent text-xs font-semibold text-blue-900 focus:outline-none cursor-pointer"
             >

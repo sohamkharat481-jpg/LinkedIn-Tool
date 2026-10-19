@@ -56,7 +56,7 @@ export interface RawLead {
   businessEmail?: string;
   linkedInProfileUrl?: string;
   contactSource?: string;
-  contactVerificationStatus?: 'Available' | 'Not listed' | 'Not checked' | 'Verification failed';
+  contactVerificationStatus?: 'Available' | 'Not found' | 'Not listed' | 'Not checked' | 'Verification failed';
   // Business Instagram Discovery
   instagramUsername?: string;
   instagramProfileUrl?: string;
@@ -76,7 +76,7 @@ export interface RawLead {
   activeEvidence?: string;
 }
 
-export type InstagramVerificationStatus = 'Verified' | 'Needs Review' | 'Unverified' | 'Not Found';
+export type InstagramVerificationStatus = 'Verified' | 'Needs Review' | 'Unverified' | 'Not Found' | 'Lookup Failed' | 'Not Checked';
 
 export interface LeadRecord {
   id: string;
@@ -107,7 +107,7 @@ export interface LeadRecord {
   businessEmail?: string;
   linkedInProfileUrl?: string;
   contactSource?: string;
-  contactVerificationStatus?: 'Available' | 'Not listed' | 'Not checked' | 'Verification failed';
+  contactVerificationStatus?: 'Available' | 'Not found' | 'Not listed' | 'Not checked' | 'Verification failed';
   // Business Instagram Discovery
   instagramUsername?: string;
   instagramProfileUrl?: string;

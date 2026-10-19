@@ -6,7 +6,8 @@ import {
   Workspace,
   GoogleIntegration,
   ExportHistoryRecord,
-  LeadFilter
+  LeadFilter,
+  InstagramVerificationStatus
 } from '../types';
 
 const STORAGE_KEYS = {
@@ -23,9 +24,9 @@ const STORAGE_KEYS = {
 const DEFAULT_WORKSPACE_UUID = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
 
 const DEFAULT_WORKSPACE: Workspace = {
-  id: DEFAULT_WORKSPACE_UUID,
-  name: 'Acme Growth Agency',
-  description: 'Primary agency workspace'
+  id: '',
+  name: '',
+  description: ''
 };
 
 const SEED_CLIENTS: Client[] = [];
@@ -150,13 +151,29 @@ class StorageService {
     }
   }
 
+  // Cleanup
+  cleanUpDemoData(): void {
+    const ACME_ID = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
+    
+    // Remove Acme workspace
+    const workspaces = this.getItem<Workspace[]>(STORAGE_KEYS.WORKSPACES, []);
+    const filteredWorkspaces = workspaces.filter((w) => w.id !== ACME_ID);
+    this.setItem(STORAGE_KEYS.WORKSPACES, filteredWorkspaces);
+    
+    // Remove Acme clients, leads, searches
+    const clients = this.getItem<Client[]>(STORAGE_KEYS.CLIENTS, []);
+    this.setItem(STORAGE_KEYS.CLIENTS, clients.filter(c => c.workspaceId !== ACME_ID));
+    
+    const leads = this.getItem<LeadRecord[]>(STORAGE_KEYS.LEADS, []);
+    this.setItem(STORAGE_KEYS.LEADS, leads.filter(l => l.workspaceId !== ACME_ID));
+    
+    const searches = this.getItem<SearchHistoryRecord[]>(STORAGE_KEYS.SEARCHES, []);
+    this.setItem(STORAGE_KEYS.SEARCHES, searches.filter(s => s.workspaceId !== ACME_ID));
+  }
+
   // Workspaces
   getWorkspaces(): Workspace[] {
-    const list = this.getItem<Workspace[]>(STORAGE_KEYS.WORKSPACES, [DEFAULT_WORKSPACE]);
-    if (!list.length) {
-      this.setItem(STORAGE_KEYS.WORKSPACES, [DEFAULT_WORKSPACE]);
-      return [DEFAULT_WORKSPACE];
-    }
+    const list = this.getItem<Workspace[]>(STORAGE_KEYS.WORKSPACES, []);
     return list;
   }
 
@@ -378,7 +395,7 @@ class StorageService {
     instagramData: {
       instagramUsername?: string;
       instagramProfileUrl?: string;
-      instagramVerificationStatus?: 'Verified' | 'Needs Review' | 'Unverified' | 'Not Found';
+      instagramVerificationStatus?: InstagramVerificationStatus;
       instagramVerificationEvidence?: string;
       instagramDiscoverySource?: string;
       instagramLastCheckedAt?: string;

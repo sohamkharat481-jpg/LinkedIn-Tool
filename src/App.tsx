@@ -9,7 +9,8 @@ import {
   SearchHistoryRecord,
   Workspace,
   LeadProviderConfig,
-  ProviderStatusInfo
+  ProviderStatusInfo,
+  InstagramVerificationStatus
 } from './types';
 import { dbService } from './services/storage';
 import { SupabaseDataService } from './services/supabaseDataService';
@@ -31,11 +32,7 @@ export default function App() {
   // Navigation & Workspace State
   const [activeTab, setActiveTab] = useState<NavTab>('finder');
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
-  const [activeWorkspace, setActiveWorkspace] = useState<Workspace>({
-    id: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
-    name: 'Acme Growth Agency',
-    description: 'Primary agency workspace'
-  });
+  const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
 
   // Clients & Leads State
   const [clients, setClients] = useState<Client[]>([]);
@@ -161,13 +158,16 @@ export default function App() {
 
   // Initial Data Load
   useEffect(() => {
+    dbService.cleanUpDemoData();
     const wsList = dbService.getWorkspaces();
     setWorkspaces(wsList);
     const activeWsId = dbService.getActiveWorkspaceId();
-    const currentWs = wsList.find((w) => w.id === activeWsId) || wsList[0];
+    const currentWs = wsList.find((w) => w.id === activeWsId) || wsList[0] || null;
     setActiveWorkspace(currentWs);
 
-    refreshWorkspaceData(currentWs.id);
+    if (currentWs) {
+      refreshWorkspaceData(currentWs.id);
+    }
     fetchProviderStatus();
 
     // Auth listener setup with verified session restore
@@ -369,7 +369,7 @@ export default function App() {
     instagramData: {
       instagramUsername?: string;
       instagramProfileUrl?: string;
-      instagramVerificationStatus?: 'Verified' | 'Needs Review' | 'Unverified' | 'Not Found';
+      instagramVerificationStatus?: InstagramVerificationStatus;
       instagramVerificationEvidence?: string;
       instagramDiscoverySource?: string;
       instagramLastCheckedAt?: string;

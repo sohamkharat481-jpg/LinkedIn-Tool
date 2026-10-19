@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Client, LeadRecord, SearchHistoryRecord } from '../types';
+import { Client, LeadRecord, SearchHistoryRecord, InstagramVerificationStatus } from '../types';
 import { Plus, Edit2, Trash2, FolderOpen, Users, Search, FileText, X, Check, FileSpreadsheet } from 'lucide-react';
 import { LeadsTableView } from './LeadsTableView';
 
@@ -20,7 +20,7 @@ interface ClientManagementViewProps {
     instagramData: {
       instagramUsername?: string;
       instagramProfileUrl?: string;
-      instagramVerificationStatus?: 'Verified' | 'Needs Review' | 'Unverified' | 'Not Found';
+      instagramVerificationStatus?: InstagramVerificationStatus;
       instagramVerificationEvidence?: string;
       instagramDiscoverySource?: string;
       instagramLastCheckedAt?: string;

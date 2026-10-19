@@ -1,6 +1,6 @@
 import { supabase } from './supabase';
 import { dbService } from './storage';
-import { Client, LeadRecord, LeadStatus, SearchHistoryRecord, RawLead, LeadFilter } from '../types';
+import { Client, LeadRecord, LeadStatus, SearchHistoryRecord, RawLead, LeadFilter, InstagramVerificationStatus } from '../types';
 
 function generateUuid(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -520,7 +520,7 @@ export class SupabaseDataService {
     instagramData: {
       instagramUsername?: string;
       instagramProfileUrl?: string;
-      instagramVerificationStatus?: 'Verified' | 'Needs Review' | 'Unverified' | 'Not Found';
+      instagramVerificationStatus?: InstagramVerificationStatus;
       instagramVerificationEvidence?: string;
       instagramDiscoverySource?: string;
       instagramLastCheckedAt?: string;
