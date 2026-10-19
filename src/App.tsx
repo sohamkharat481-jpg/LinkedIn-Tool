@@ -215,6 +215,7 @@ export default function App() {
   };
 
   const handleCreateClient = async (name: string, niche: string, notes: string) => {
+    if (!activeWorkspace) return;
     const newClient = await SupabaseDataService.createClient(activeWorkspace.id, name, niche, notes);
     await refreshWorkspaceData(activeWorkspace.id);
     setActiveClient(newClient);
@@ -224,11 +225,13 @@ export default function App() {
     clientId: string,
     updates: { name?: string; niche?: string; notes?: string }
   ) => {
+    if (!activeWorkspace) return;
     await SupabaseDataService.updateClient(activeWorkspace.id, clientId, updates);
     await refreshWorkspaceData(activeWorkspace.id);
   };
 
   const handleDeleteClient = async (clientId: string) => {
+    if (!activeWorkspace) return;
     await SupabaseDataService.deleteClient(activeWorkspace.id, clientId);
     await refreshWorkspaceData(activeWorkspace.id);
   };
@@ -258,7 +261,7 @@ export default function App() {
       body: JSON.stringify({
         filters,
         clientId: targetClient.id,
-        workspaceId: activeWorkspace.id,
+        workspaceId: activeWorkspace?.id || '',
         providerType: providerConfig.providerType
       })
     });
@@ -355,11 +358,13 @@ export default function App() {
 
   // Lead Inline Updates
   const handleUpdateLeadStatus = async (leadId: string, status: LeadStatus) => {
+    if (!activeWorkspace) return;
     await SupabaseDataService.updateLeadStatus(activeWorkspace.id, leadId, status);
     await refreshWorkspaceData(activeWorkspace.id);
   };
 
   const handleUpdateLeadNotes = async (leadId: string, notes: string) => {
+    if (!activeWorkspace) return;
     await SupabaseDataService.updateLeadNotes(activeWorkspace.id, leadId, notes);
     await refreshWorkspaceData(activeWorkspace.id);
   };
@@ -375,11 +380,13 @@ export default function App() {
       instagramLastCheckedAt?: string;
     }
   ) => {
+    if (!activeWorkspace) return;
     await SupabaseDataService.updateLeadInstagram(activeWorkspace.id, leadId, instagramData);
     await refreshWorkspaceData(activeWorkspace.id);
   };
 
   const handleDeleteLeads = async (leadIds: string[]) => {
+    if (!activeWorkspace) return;
     await SupabaseDataService.deleteSelectedLeads(activeWorkspace.id, leadIds);
     await refreshWorkspaceData(activeWorkspace.id);
   };
@@ -540,7 +547,7 @@ export default function App() {
           {activeTab === 'clients' && (
             <ClientManagementView
               clients={clients}
-              activeWorkspaceId={activeWorkspace.id}
+              activeWorkspaceId={activeWorkspace?.id || ''}
               activeClient={activeClient}
               onSelectClient={handleSelectClient}
               onCreateClient={handleCreateClient}
@@ -548,7 +555,7 @@ export default function App() {
               onDeleteClient={handleDeleteClient}
               getLeadsForClient={(cId) => allLeads.filter((l) => l.clientId === cId)}
               getSearchesForClient={(cId) =>
-                allSearches.filter((s) => s.clientId === cId && s.workspaceId === activeWorkspace.id)
+                allSearches.filter((s) => s.clientId === cId && s.workspaceId === (activeWorkspace?.id || ''))
               }
               onUpdateLeadStatus={handleUpdateLeadStatus}
               onUpdateLeadNotes={handleUpdateLeadNotes}
@@ -597,7 +604,7 @@ export default function App() {
         leadsToExport={exportTargetLeads}
         currentUser={currentUser}
         existingSpreadsheetId={
-          exportTargetClientId
+          exportTargetClientId && activeWorkspace
             ? dbService.getGoogleIntegration(activeWorkspace.id, exportTargetClientId)?.spreadsheetId
             : undefined
         }
@@ -608,7 +615,7 @@ export default function App() {
           setIsGoogleConnected(true);
         }}
         onExportSuccess={(sheetId, sheetUrl, addedCount, skippedCount) => {
-          if (exportTargetClientId) {
+          if (exportTargetClientId && activeWorkspace) {
             dbService.saveGoogleIntegration({
               id: `gint-${Date.now()}`,
               workspaceId: activeWorkspace.id,
