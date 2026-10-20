@@ -1,6 +1,8 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
   getAuth,
+  setPersistence,
+  browserLocalPersistence,
   signInWithPopup,
   signInWithRedirect,
   getRedirectResult,
@@ -29,6 +31,9 @@ const getResolvedFirebaseConfig = () => {
 const resolvedConfig = getResolvedFirebaseConfig();
 const app = getApps().length > 0 ? getApp() : initializeApp(resolvedConfig);
 export const auth = getAuth(app);
+setPersistence(auth, browserLocalPersistence).catch((err) => {
+  console.warn('Failed to set auth persistence:', err);
+});
 
 const provider = new GoogleAuthProvider();
 // Workspace Scopes for Google Sheets and Google Drive File Access
