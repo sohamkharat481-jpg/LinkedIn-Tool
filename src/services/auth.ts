@@ -11,8 +11,23 @@ import {
 } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 
+const getResolvedFirebaseConfig = () => {
+  const env = (import.meta as any).env || {};
+  const baseConfig = firebaseConfig || {};
+  return {
+    projectId: env.VITE_FIREBASE_PROJECT_ID || baseConfig.projectId,
+    apiKey: env.VITE_FIREBASE_API_KEY || baseConfig.apiKey,
+    authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || baseConfig.authDomain,
+    storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || baseConfig.storageBucket,
+    messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || baseConfig.messagingSenderId,
+    appId: env.VITE_FIREBASE_APP_ID || baseConfig.appId,
+    measurementId: env.VITE_FIREBASE_MEASUREMENT_ID || baseConfig.measurementId
+  };
+};
+
 // Initialize Firebase App
-const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+const resolvedConfig = getResolvedFirebaseConfig();
+const app = getApps().length > 0 ? getApp() : initializeApp(resolvedConfig);
 export const auth = getAuth(app);
 
 const provider = new GoogleAuthProvider();
@@ -170,20 +185,23 @@ export const googleSignIn = async (): Promise<{
       account: verifiedAccount
     };
   } catch (error: any) {
-    console.error('Google Sign-In Error:', error);
-    if (error.code === 'auth/popup-closed-by-user') {
+    console.error('Google Sign-In Error Code:', error?.code, 'Message:', error?.message, error);
+    if (error?.code === 'auth/popup-closed-by-user') {
       throw new Error('Sign-in cancelled: The authorization popup was closed before completion.');
     }
-    if (error.code === 'auth/unauthorized-domain') {
+    if (error?.code === 'auth/unauthorized-domain') {
       const hostname = typeof window !== 'undefined' ? window.location.hostname : 'current domain';
       throw new Error(
         `Domain (${hostname}) is not authorized in Firebase Console -> Authentication -> Settings -> Authorized Domains.`
       );
     }
-    if (error.code === 'auth/cancelled-popup-request') {
+    if (error?.code === 'auth/cancelled-popup-request') {
       throw new Error('Sign-in conflict: another popup was already open. Please retry.');
     }
-    throw error;
+    if (error?.code === 'auth/operation-not-allowed') {
+      throw new Error('Google Sign-In is not enabled in the Firebase Console under Authentication -> Sign-in method.');
+    }
+    throw new Error(error?.message || 'Google authentication failed.');
   } finally {
     isSigningIn = false;
   }
