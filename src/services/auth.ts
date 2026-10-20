@@ -240,3 +240,18 @@ export const googleSignOut = async (): Promise<void> => {
     sessionStorage.removeItem(SESSION_TOKEN_KEY);
   }
 };
+
+/**
+ * Retrieves the current Firebase user ID token for authenticating backend API requests.
+ */
+export const getFirebaseIdToken = async (forceRefresh: boolean = false): Promise<string | null> => {
+  try {
+    if (auth.currentUser) {
+      return await auth.currentUser.getIdToken(forceRefresh);
+    }
+  } catch (err) {
+    console.warn('Failed to retrieve Firebase ID token:', err);
+  }
+  return null;
+};
+

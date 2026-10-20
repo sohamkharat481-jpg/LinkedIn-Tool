@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Client, LeadRecord, SearchHistoryRecord, InstagramVerificationStatus } from '../types';
-import { Plus, Edit2, Trash2, FolderOpen, Users, Search, FileText, X, Check, FileSpreadsheet } from 'lucide-react';
+import { Plus, Edit2, Trash2, FolderOpen, Users, Search, FileText, X, Check, FileSpreadsheet, AlertCircle, Building2 } from 'lucide-react';
 import { LeadsTableView } from './LeadsTableView';
 
 interface ClientManagementViewProps {
@@ -8,9 +8,9 @@ interface ClientManagementViewProps {
   activeWorkspaceId: string;
   activeClient: Client | null;
   onSelectClient: (clientId: string) => void;
-  onCreateClient: (name: string, niche: string, notes: string) => void;
-  onUpdateClient: (clientId: string, updates: { name?: string; niche?: string; notes?: string }) => void;
-  onDeleteClient: (clientId: string) => void;
+  onCreateClient: (name: string, niche: string, notes: string) => Promise<void> | void;
+  onUpdateClient: (clientId: string, updates: { name?: string; niche?: string; notes?: string }) => Promise<void> | void;
+  onDeleteClient: (clientId: string) => Promise<void> | void;
   getLeadsForClient: (clientId: string) => LeadRecord[];
   getSearchesForClient: (clientId: string) => SearchHistoryRecord[];
   onUpdateLeadStatus: (leadId: string, status: any) => void;
@@ -29,6 +29,9 @@ interface ClientManagementViewProps {
   onDeleteLeads: (leadIds: string[]) => void;
   onExportToSheets: (leadsToExport: LeadRecord[], clientName: string) => void;
   isGoogleConnected: boolean;
+  supabaseError?: string | null;
+  isLoading?: boolean;
+  onRetry?: () => void;
 }
 
 export const ClientManagementView: React.FC<ClientManagementViewProps> = ({
@@ -46,7 +49,10 @@ export const ClientManagementView: React.FC<ClientManagementViewProps> = ({
   onUpdateLeadInstagram,
   onDeleteLeads,
   onExportToSheets,
-  isGoogleConnected
+  isGoogleConnected,
+  supabaseError,
+  isLoading,
+  onRetry
 }) => {
   const [selectedDetailClient, setSelectedDetailClient] = useState<Client | null>(activeClient);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -58,6 +64,7 @@ export const ClientManagementView: React.FC<ClientManagementViewProps> = ({
   const [nicheInput, setNicheInput] = useState('');
   const [notesInput, setNotesInput] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleOpenCreateModal = () => {
     setNameInput('');
@@ -76,8 +83,10 @@ export const ClientManagementView: React.FC<ClientManagementViewProps> = ({
     setFormError(null);
   };
 
-  const handleSaveClient = (e: React.FormEvent) => {
+  const handleSaveClient = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
+
     if (!nameInput.trim()) {
       setFormError('Client name is required.');
       return;
@@ -86,27 +95,49 @@ export const ClientManagementView: React.FC<ClientManagementViewProps> = ({
       setFormError('Business / Niche is required.');
       return;
     }
+    if (!activeWorkspaceId) {
+      setFormError('No active workspace selected. Please select or create a workspace first.');
+      return;
+    }
 
-    if (editingClient) {
-      onUpdateClient(editingClient.id, {
-        name: nameInput.trim(),
-        niche: nicheInput.trim(),
-        notes: notesInput.trim()
-      });
-      setEditingClient(null);
-    } else {
-      onCreateClient(nameInput.trim(), nicheInput.trim(), notesInput.trim());
-      setIsCreateModalOpen(false);
+    setIsSubmitting(true);
+    setFormError(null);
+
+    try {
+      if (editingClient) {
+        await onUpdateClient(editingClient.id, {
+          name: nameInput.trim(),
+          niche: nicheInput.trim(),
+          notes: notesInput.trim()
+        });
+        setEditingClient(null);
+      } else {
+        await onCreateClient(nameInput.trim(), nicheInput.trim(), notesInput.trim());
+        setIsCreateModalOpen(false);
+        setNameInput('');
+        setNicheInput('');
+        setNotesInput('');
+      }
+    } catch (err: any) {
+      console.error('Failed to save client:', err);
+      setFormError(err.message || 'Failed to save client. Please check your database connection.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (deletingClientId) {
-      onDeleteClient(deletingClientId);
-      if (selectedDetailClient?.id === deletingClientId) {
-        setSelectedDetailClient(null);
+      try {
+        await onDeleteClient(deletingClientId);
+        if (selectedDetailClient?.id === deletingClientId) {
+          setSelectedDetailClient(null);
+        }
+      } catch (err: any) {
+        console.error('Failed to delete client:', err);
+      } finally {
+        setDeletingClientId(null);
       }
-      setDeletingClientId(null);
     }
   };
 
@@ -125,14 +156,70 @@ export const ClientManagementView: React.FC<ClientManagementViewProps> = ({
         </div>
         <button
           onClick={handleOpenCreateModal}
-          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition-all shadow-xs"
+          disabled={!activeWorkspaceId}
+          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition-all shadow-xs"
         >
           <Plus className="w-4 h-4" /> Create New Client
         </button>
       </div>
 
-      {/* Client Selection Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {/* Workspace warning if no active workspace */}
+      {!activeWorkspaceId && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center gap-3 text-amber-800 text-xs">
+          <Building2 className="w-5 h-5 text-amber-600 shrink-0" />
+          <div>
+            <span className="font-semibold">No active workspace selected.</span> Please select an existing workspace from the top bar or create a new workspace in Settings before creating clients.
+          </div>
+        </div>
+      )}
+
+      {/* Supabase Error banner */}
+      {supabaseError && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-center justify-between gap-3 text-red-800 text-xs">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+            <span>{supabaseError}</span>
+          </div>
+          {onRetry && (
+            <button
+              onClick={onRetry}
+              className="px-3 py-1 bg-red-100 hover:bg-red-200 text-red-800 font-semibold rounded-lg shrink-0 transition-colors"
+            >
+              Retry Connection
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Loading state indicator */}
+      {isLoading && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-center gap-3 text-blue-800 text-xs">
+          <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+          <span>Synchronizing client directory with database...</span>
+        </div>
+      )}
+
+      {/* Empty State when no clients exist */}
+      {clients.length === 0 && !isLoading ? (
+        <div className="bg-white rounded-2xl border border-dashed border-gray-300 p-12 text-center">
+          <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-3">
+            <Users className="w-6 h-6" />
+          </div>
+          <h3 className="text-base font-bold text-gray-900">No Clients in this Workspace</h3>
+          <p className="text-xs text-gray-500 max-w-md mx-auto mt-1 mb-5">
+            Create your first agency client to begin discovering targeted LinkedIn leads and managing outreach with isolated campaign data.
+          </p>
+          <button
+            onClick={handleOpenCreateModal}
+            disabled={!activeWorkspaceId}
+            className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition-all shadow-xs"
+          >
+            <Plus className="w-4 h-4" /> Create First Client
+          </button>
+        </div>
+      ) : (
+        /* Client Selection Cards Grid */
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {clients.map((client) => {
           const isSelected = selectedDetailClient?.id === client.id;
           const isActive = activeClient?.id === client.id;
@@ -207,6 +294,7 @@ export const ClientManagementView: React.FC<ClientManagementViewProps> = ({
           );
         })}
       </div>
+      )}
 
       {/* Selected Client Detailed Workstation */}
       {selectedDetailClient ? (
@@ -332,19 +420,30 @@ export const ClientManagementView: React.FC<ClientManagementViewProps> = ({
               <div className="pt-3 border-t border-gray-100 flex items-center justify-end gap-3">
                 <button
                   type="button"
+                  disabled={isSubmitting}
                   onClick={() => {
                     setIsCreateModalOpen(false);
                     setEditingClient(null);
                   }}
-                  className="px-4 py-2 text-xs font-semibold text-gray-600 hover:text-gray-800"
+                  className="px-4 py-2 text-xs font-semibold text-gray-600 hover:text-gray-800 disabled:opacity-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl transition-all shadow-xs"
+                  disabled={isSubmitting}
+                  className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-xl transition-all shadow-xs flex items-center gap-2"
                 >
-                  {editingClient ? 'Save Changes' : 'Create Client'}
+                  {isSubmitting ? (
+                    <>
+                      <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Saving Client...
+                    </>
+                  ) : editingClient ? (
+                    'Save Changes'
+                  ) : (
+                    'Create Client'
+                  )}
                 </button>
               </div>
             </form>

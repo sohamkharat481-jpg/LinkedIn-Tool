@@ -261,6 +261,12 @@ class StorageService {
     return newClient;
   }
 
+  syncClientsForWorkspace(workspaceId: string, syncedClients: Client[]): void {
+    const clients = this.getItem<Client[]>(STORAGE_KEYS.CLIENTS, SEED_CLIENTS);
+    const otherClients = clients.filter((c) => c.workspaceId !== workspaceId);
+    this.setItem(STORAGE_KEYS.CLIENTS, [...syncedClients, ...otherClients]);
+  }
+
   updateClient(workspaceId: string, clientId: string, updates: { name?: string; niche?: string; notes?: string }): Client {
     const clients = this.getItem<Client[]>(STORAGE_KEYS.CLIENTS, SEED_CLIENTS);
     const index = clients.findIndex((c) => c.id === clientId && c.workspaceId === workspaceId);
@@ -305,10 +311,12 @@ class StorageService {
     validLeads: number,
     duplicatesRemoved: number,
     finalLeadCount: number,
-    createdBy: string
+    createdBy: string,
+    searchId?: string
   ): SearchHistoryRecord {
     const newSearch: SearchHistoryRecord = {
-      id: `search-${Date.now()}`,
+      id: searchId || (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `search-${Date.now()}`),
+
       workspaceId,
       clientId,
       clientName,

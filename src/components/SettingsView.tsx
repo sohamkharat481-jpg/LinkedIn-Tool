@@ -28,7 +28,7 @@ import { apiUrl } from '../services/apiClient';
 
 interface SettingsViewProps {
   workspaces: Workspace[];
-  activeWorkspace: Workspace;
+  activeWorkspace: Workspace | null;
   onCreateWorkspace: (name: string, desc: string) => void;
   providerConfig: LeadProviderConfig;
   onUpdateProviderConfig: (config: Partial<LeadProviderConfig>) => void;

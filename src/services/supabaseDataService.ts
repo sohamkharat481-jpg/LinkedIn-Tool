@@ -1,6 +1,78 @@
 import { supabase } from './supabase';
 import { dbService } from './storage';
 import { Client, LeadRecord, LeadStatus, SearchHistoryRecord, RawLead, LeadFilter, InstagramVerificationStatus } from '../types';
+import { apiUrl } from './apiClient';
+import { getFirebaseIdToken, getCachedAccessToken } from './auth';
+
+let customAuthTokenProvider: (() => Promise<string | null> | string | null) | null = null;
+
+export function setAuthTokenProvider(provider: (() => Promise<string | null> | string | null) | null): void {
+  customAuthTokenProvider = provider;
+}
+
+export async function resolveAuthToken(): Promise<string | null> {
+  if (customAuthTokenProvider) {
+    try {
+      const token = await customAuthTokenProvider();
+      if (token) return token;
+    } catch {
+      // Fall through
+    }
+  }
+  try {
+    const fbToken = await getFirebaseIdToken();
+    if (fbToken) return fbToken;
+  } catch {
+    // Fall through
+  }
+  return getCachedAccessToken();
+}
+
+async function callDataApi<T>(
+  endpoint: string,
+  options: RequestInit = {}
+): Promise<{ success: boolean; data?: T; status: number; error?: string }> {
+  try {
+    const url = apiUrl(endpoint);
+    if (typeof window === 'undefined' && !url.startsWith('http://') && !url.startsWith('https://')) {
+      return { success: false, status: 0, error: 'No active HTTP server for relative URL.' };
+    }
+
+    const token = await resolveAuthToken();
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...((options.headers as Record<string, string>) || {})
+    };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const res = await fetch(url, {
+      ...options,
+      headers
+    });
+
+    const resJson = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return {
+        success: false,
+        status: res.status,
+        error: resJson.error || `API returned status ${res.status}`
+      };
+    }
+    return {
+      success: true,
+      status: res.status,
+      data: resJson as T
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      status: 0,
+      error: err.message || 'Network request failed'
+    };
+  }
+}
 
 function generateUuid(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -14,6 +86,7 @@ function generateUuid(): string {
 }
 
 export type LeadPersistenceStatus = 'confirmed' | 'local_only' | 'partial' | 'not_needed';
+
 
 export interface LeadSaveResult {
   added: number;
@@ -113,38 +186,57 @@ export class SupabaseDataService {
 
   /**
    * Fetch all clients for the given workspace.
-   * Pulls from Supabase if connected, falls back to local storage cache.
+   * Pulls from Supabase if connected, falls back to local storage cache only when Supabase is not configured.
    */
   static async getClients(workspaceId: string): Promise<Client[]> {
+    if (!workspaceId || !workspaceId.trim()) {
+      return [];
+    }
+
+    const apiRes = await callDataApi<{ clients: Client[] }>(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/clients`
+    );
+
+    if (apiRes.status === 401 || apiRes.status === 403) {
+      throw new Error(apiRes.error || 'Access denied.');
+    }
+
+    if (apiRes.success && Array.isArray(apiRes.data?.clients)) {
+      dbService.syncClientsForWorkspace(workspaceId, apiRes.data.clients);
+      return apiRes.data.clients;
+    }
+
     if (supabase) {
-      try {
-        const { data, error } = await supabase
-          .from('clients')
-          .select('*')
-          .eq('workspace_id', workspaceId)
-          .order('created_at', { ascending: false });
+      const { data, error } = await supabase
+        .from('clients')
+        .select('*')
+        .eq('workspace_id', workspaceId)
+        .order('created_at', { ascending: false });
 
-        if (!error && Array.isArray(data) && data.length > 0) {
-          const leads = await this.getAllLeads(workspaceId);
-          const searches = await this.getSearches(workspaceId);
+      if (error) {
+        console.error('Supabase getClients error:', error.message);
+        throw new Error(`Failed to load clients from Supabase: ${error.message}`);
+      }
 
-          const mapped: Client[] = data.map((c: any) => ({
-            id: c.id,
-            workspaceId: c.workspace_id,
-            name: c.name,
-            niche: c.niche || '',
-            notes: c.notes || '',
-            createdAt: c.created_at,
-            updatedAt: c.updated_at,
-            leadsCount: leads.filter((l) => l.clientId === c.id).length,
-            searchesCount: searches.filter((s) => s.clientId === c.id).length
-          }));
+      if (Array.isArray(data)) {
+        const leads = await this.getAllLeads(workspaceId);
+        const searches = await this.getSearches(workspaceId);
 
-          // Sync into localStorage cache
-          return mapped;
-        }
-      } catch (err) {
-        console.warn('Supabase getClients error, falling back to local storage cache:', err);
+        const mapped: Client[] = data.map((c: any) => ({
+          id: c.id,
+          workspaceId: c.workspace_id,
+          name: c.name,
+          niche: c.niche || '',
+          notes: c.notes || '',
+          createdAt: c.created_at,
+          updatedAt: c.updated_at,
+          leadsCount: leads.filter((l) => l.clientId === c.id).length,
+          searchesCount: searches.filter((s) => s.clientId === c.id).length
+        }));
+
+        // Synchronize local cache with confirmed Supabase data
+        dbService.syncClientsForWorkspace(workspaceId, mapped);
+        return mapped;
       }
     }
 
@@ -160,15 +252,55 @@ export class SupabaseDataService {
     niche: string,
     notes: string
   ): Promise<Client> {
+    if (!workspaceId || !workspaceId.trim()) {
+      throw new Error('Cannot create client: Workspace ID is required.');
+    }
+    if (!name || !name.trim()) {
+      throw new Error('Cannot create client: Client name is required.');
+    }
+    if (!niche || !niche.trim()) {
+      throw new Error('Cannot create client: Business / Niche is required.');
+    }
+
+    const apiRes = await callDataApi<{ client: Client }>(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/clients`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          name: name.trim(),
+          niche: niche.trim(),
+          notes: (notes || '').trim()
+        })
+      }
+    );
+
+    if (apiRes.status === 401 || apiRes.status === 403) {
+      throw new Error(apiRes.error || 'Access denied.');
+    }
+    if (apiRes.status >= 400 && apiRes.error) {
+      throw new Error(apiRes.error);
+    }
+    if (apiRes.success && apiRes.data?.client) {
+      dbService.createClientWithId(
+        apiRes.data.client.id,
+        workspaceId,
+        apiRes.data.client.name,
+        apiRes.data.client.niche,
+        apiRes.data.client.notes,
+        apiRes.data.client.createdAt
+      );
+      return apiRes.data.client;
+    }
+
     const id = generateUuid();
     const now = new Date().toISOString();
 
     const newClient: Client = {
       id,
       workspaceId,
-      name,
-      niche,
-      notes,
+      name: name.trim(),
+      niche: niche.trim(),
+      notes: notes.trim(),
       createdAt: now,
       updatedAt: now,
       leadsCount: 0,
@@ -176,29 +308,33 @@ export class SupabaseDataService {
     };
 
     if (supabase) {
-      try {
-        const { error } = await supabase.from('clients').insert([
+      const { data, error } = await supabase
+        .from('clients')
+        .insert([
           {
             id,
             workspace_id: workspaceId,
-            name,
-            niche,
-            notes,
+            name: name.trim(),
+            niche: niche.trim(),
+            notes: notes.trim(),
             created_at: now,
             updated_at: now
           }
-        ]);
+        ])
+        .select();
 
-        if (error) {
-          console.warn('Supabase createClient insert error:', error.message);
-        }
-      } catch (err) {
-        console.warn('Supabase createClient exception:', err);
+      if (error) {
+        console.error('Supabase createClient insert error:', error.message);
+        throw new Error(`Supabase rejected client creation: ${error.message} (code: ${error.code || 'UNKNOWN'})`);
+      }
+
+      if (!data || data.length === 0) {
+        throw new Error('Supabase did not return confirmed client record after creation.');
       }
     }
 
-    // Always update local cache for responsiveness
-    dbService.createClientWithId(id, workspaceId, name, niche, notes, now);
+    // Always update local cache once persistence is confirmed
+    dbService.createClientWithId(id, workspaceId, name.trim(), niche.trim(), notes.trim(), now);
     return newClient;
   }
 
@@ -210,26 +346,39 @@ export class SupabaseDataService {
     clientId: string,
     updates: { name?: string; niche?: string; notes?: string }
   ): Promise<Client> {
+    const apiRes = await callDataApi<{ client: Client }>(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/clients/${encodeURIComponent(clientId)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(updates)
+      }
+    );
+
+    if (apiRes.status === 401 || apiRes.status === 403) {
+      throw new Error(apiRes.error || 'Access denied.');
+    }
+    if (apiRes.success && apiRes.data?.client) {
+      dbService.updateClient(workspaceId, clientId, updates);
+      return apiRes.data.client;
+    }
+
     const now = new Date().toISOString();
 
     if (supabase) {
-      try {
-        const dbUpdates: any = { updated_at: now };
-        if (updates.name !== undefined) dbUpdates.name = updates.name;
-        if (updates.niche !== undefined) dbUpdates.niche = updates.niche;
-        if (updates.notes !== undefined) dbUpdates.notes = updates.notes;
+      const dbUpdates: any = { updated_at: now };
+      if (updates.name !== undefined) dbUpdates.name = updates.name.trim();
+      if (updates.niche !== undefined) dbUpdates.niche = updates.niche.trim();
+      if (updates.notes !== undefined) dbUpdates.notes = updates.notes.trim();
 
-        const { error } = await supabase
-          .from('clients')
-          .update(dbUpdates)
-          .eq('id', clientId)
-          .eq('workspace_id', workspaceId);
+      const { error } = await supabase
+        .from('clients')
+        .update(dbUpdates)
+        .eq('id', clientId)
+        .eq('workspace_id', workspaceId);
 
-        if (error) {
-          console.warn('Supabase updateClient error:', error.message);
-        }
-      } catch (err) {
-        console.warn('Supabase updateClient exception:', err);
+      if (error) {
+        console.error('Supabase updateClient error:', error.message);
+        throw new Error(`Failed to update client in Supabase: ${error.message}`);
       }
     }
 
@@ -240,25 +389,53 @@ export class SupabaseDataService {
    * Delete client and associated records.
    */
   static async deleteClient(workspaceId: string, clientId: string): Promise<void> {
+    const apiRes = await callDataApi(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/clients/${encodeURIComponent(clientId)}`,
+      {
+        method: 'DELETE'
+      }
+    );
+
+    if (apiRes.status === 401 || apiRes.status === 403) {
+      throw new Error(apiRes.error || 'Access denied.');
+    }
+    if (apiRes.success) {
+      dbService.deleteClient(workspaceId, clientId);
+      return;
+    }
+
     if (supabase) {
-      try {
-        await supabase
-          .from('clients')
-          .delete()
-          .eq('id', clientId)
-          .eq('workspace_id', workspaceId);
-      } catch (err) {
-        console.warn('Supabase deleteClient exception:', err);
+      const { error } = await supabase
+        .from('clients')
+        .delete()
+        .eq('id', clientId)
+        .eq('workspace_id', workspaceId);
+
+      if (error) {
+        console.error('Supabase deleteClient error:', error.message);
+        throw new Error(`Failed to delete client from Supabase: ${error.message}`);
       }
     }
 
     dbService.deleteClient(workspaceId, clientId);
   }
 
+
   /**
    * Retrieve all leads for a workspace or filtered by client.
    */
   static async getAllLeads(workspaceId: string, clientId?: string): Promise<LeadRecord[]> {
+    const apiRes = await callDataApi<{ leads: LeadRecord[] }>(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/leads${clientId ? `?clientId=${encodeURIComponent(clientId)}` : ''}`
+    );
+
+    if (apiRes.status === 401 || apiRes.status === 403) {
+      throw new Error(apiRes.error || 'Access denied.');
+    }
+    if (apiRes.success && Array.isArray(apiRes.data?.leads)) {
+      return apiRes.data.leads;
+    }
+
     if (supabase) {
       try {
         let query = supabase
@@ -362,6 +539,29 @@ export class SupabaseDataService {
   ): Promise<LeadSaveResult> {
     // First deduplicate and save in local storage service for synchronous UI update
     const localResult = dbService.saveLeadsForClient(workspaceId, clientId, newLeads);
+
+    const apiRes = await callDataApi<{
+      success: boolean;
+      added: number;
+      duplicatesSkipped: number;
+      persistenceStatus: LeadPersistenceStatus;
+      persistenceMessage: string;
+    }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/leads`, {
+      method: 'POST',
+      body: JSON.stringify({ clientId, leads: newLeads, searchId })
+    });
+
+    if (apiRes.status === 401 || apiRes.status === 403) {
+      throw new Error(apiRes.error || 'Access denied.');
+    }
+    if (apiRes.success && apiRes.data) {
+      return {
+        added: apiRes.data.added ?? localResult.added,
+        duplicatesSkipped: apiRes.data.duplicatesSkipped ?? localResult.duplicatesSkipped,
+        persistenceStatus: apiRes.data.persistenceStatus,
+        persistenceMessage: apiRes.data.persistenceMessage
+      };
+    }
 
     if (supabase && newLeads.length > 0) {
       const client = supabase;
@@ -473,6 +673,22 @@ export class SupabaseDataService {
     leadId: string,
     status: LeadStatus
   ): Promise<void> {
+    const apiRes = await callDataApi(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/leads/${encodeURIComponent(leadId)}/status`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ status })
+      }
+    );
+
+    if (apiRes.status === 401 || apiRes.status === 403) {
+      throw new Error(apiRes.error || 'Access denied.');
+    }
+    if (apiRes.success) {
+      dbService.updateLeadStatus(workspaceId, leadId, status);
+      return;
+    }
+
     if (supabase) {
       try {
         await supabase
@@ -496,6 +712,22 @@ export class SupabaseDataService {
     leadId: string,
     notes: string
   ): Promise<void> {
+    const apiRes = await callDataApi(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/leads/${encodeURIComponent(leadId)}/notes`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ notes })
+      }
+    );
+
+    if (apiRes.status === 401 || apiRes.status === 403) {
+      throw new Error(apiRes.error || 'Access denied.');
+    }
+    if (apiRes.success) {
+      dbService.updateLeadNotes(workspaceId, leadId, notes);
+      return;
+    }
+
     if (supabase) {
       try {
         await supabase
@@ -526,6 +758,22 @@ export class SupabaseDataService {
       instagramLastCheckedAt?: string;
     }
   ): Promise<void> {
+    const apiRes = await callDataApi(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/leads/${encodeURIComponent(leadId)}/instagram`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ instagramData })
+      }
+    );
+
+    if (apiRes.status === 401 || apiRes.status === 403) {
+      throw new Error(apiRes.error || 'Access denied.');
+    }
+    if (apiRes.success) {
+      dbService.updateLeadInstagram(workspaceId, leadId, instagramData);
+      return;
+    }
+
     if (supabase) {
       try {
         await supabase
@@ -553,6 +801,22 @@ export class SupabaseDataService {
    * Delete selected leads from Supabase and local cache.
    */
   static async deleteSelectedLeads(workspaceId: string, leadIds: string[]): Promise<void> {
+    const apiRes = await callDataApi(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/leads/delete-selected`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ leadIds })
+      }
+    );
+
+    if (apiRes.status === 401 || apiRes.status === 403) {
+      throw new Error(apiRes.error || 'Access denied.');
+    }
+    if (apiRes.success) {
+      dbService.deleteSelectedLeads(workspaceId, leadIds);
+      return;
+    }
+
     if (supabase && leadIds.length > 0) {
       try {
         await supabase
@@ -572,6 +836,17 @@ export class SupabaseDataService {
    * Fetch searches history for the workspace.
    */
   static async getSearches(workspaceId: string): Promise<SearchHistoryRecord[]> {
+    const apiRes = await callDataApi<{ searches: SearchHistoryRecord[] }>(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/searches`
+    );
+
+    if (apiRes.status === 401 || apiRes.status === 403) {
+      throw new Error(apiRes.error || 'Access denied.');
+    }
+    if (apiRes.success && Array.isArray(apiRes.data?.searches)) {
+      return apiRes.data.searches;
+    }
+
     if (supabase) {
       try {
         const { data, error } = await supabase
@@ -617,6 +892,42 @@ export class SupabaseDataService {
     finalLeadCount: number,
     createdBy: string
   ): Promise<SearchHistoryRecord> {
+    const apiRes = await callDataApi<{ search: SearchHistoryRecord }>(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/searches`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          clientId,
+          clientName,
+          filters,
+          candidatesFound,
+          validLeads,
+          duplicatesRemoved,
+          finalLeadCount,
+          createdBy
+        })
+      }
+    );
+
+    if (apiRes.status === 401 || apiRes.status === 403) {
+      throw new Error(apiRes.error || 'Access denied.');
+    }
+    if (apiRes.success && apiRes.data?.search) {
+      dbService.saveSearchRecord(
+        workspaceId,
+        clientId,
+        clientName,
+        filters,
+        candidatesFound,
+        validLeads,
+        duplicatesRemoved,
+        finalLeadCount,
+        createdBy,
+        apiRes.data.search.id
+      );
+      return apiRes.data.search;
+    }
+
     const searchId = generateUuid();
     const now = new Date().toISOString();
 
@@ -665,9 +976,12 @@ export class SupabaseDataService {
       validLeads,
       duplicatesRemoved,
       finalLeadCount,
-      createdBy
+      createdBy,
+      searchId
     );
 
     return record;
   }
 }
+
+

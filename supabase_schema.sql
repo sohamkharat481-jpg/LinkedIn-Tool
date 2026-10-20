@@ -4,13 +4,22 @@
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
+-- 0. WORKSPACES TABLE
+CREATE TABLE IF NOT EXISTS public.workspaces (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  description TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- 1. USERS TABLE
 CREATE TABLE IF NOT EXISTS public.users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   email TEXT UNIQUE NOT NULL,
   full_name TEXT,
   avatar_url TEXT,
-  workspace_id UUID NOT NULL,
+  workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
   role TEXT DEFAULT 'member',
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -144,6 +153,7 @@ CREATE INDEX IF NOT EXISTS idx_instagram_integrations_workspace ON public.instag
 CREATE INDEX IF NOT EXISTS idx_instagram_integrations_client ON public.instagram_integrations(client_id);
 
 -- ENABLE ROW LEVEL SECURITY (RLS)
+ALTER TABLE public.workspaces ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.clients ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.lead_searches ENABLE ROW LEVEL SECURITY;
@@ -153,30 +163,118 @@ ALTER TABLE public.google_integrations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.export_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.instagram_integrations ENABLE ROW LEVEL SECURITY;
 
--- POLICIES (TENANT ISOLATION BY WORKSPACE_ID)
--- App users can only read/write records matching their assigned workspace_id
-CREATE POLICY "Workspace isolation for clients" ON public.clients
-  FOR ALL USING (workspace_id = (SELECT workspace_id FROM public.users WHERE id = auth.uid()));
+-- ============================================================================
+-- ROW LEVEL SECURITY (RLS) POLICIES — STRICT MULTI-TENANT ISOLATION
+--
+-- SECURITY NOTE:
+-- A naive policy checking only 'workspace_id IS NOT NULL' IS INSECURE and DOES NOT
+-- provide tenant isolation, because any authenticated user would be permitted to
+-- access, insert, or manipulate records belonging to any workspace.
+--
+-- True tenant isolation requires checking that the record's workspace_id matches
+-- a workspace authorized for the authenticated user (auth.uid()).
+--
+-- Both USING and WITH CHECK clauses are mandatory:
+-- - USING controls which existing rows can be read (SELECT), updated (UPDATE), or deleted (DELETE).
+-- - WITH CHECK ensures that new rows (INSERT) and modified rows (UPDATE) cannot be inserted into
+--   or moved into an unauthorized workspace.
+-- ============================================================================
 
-CREATE POLICY "Workspace isolation for searches" ON public.lead_searches
-  FOR ALL USING (workspace_id = (SELECT workspace_id FROM public.users WHERE id = auth.uid()));
+-- 0. WORKSPACES ISOLATION POLICY
+CREATE POLICY "Tenant isolation for workspaces" ON public.workspaces
+  FOR ALL
+  USING (id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()))
+  WITH CHECK (id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()));
 
-CREATE POLICY "Workspace isolation for leads" ON public.leads
-  FOR ALL USING (workspace_id = (SELECT workspace_id FROM public.users WHERE id = auth.uid()));
+-- 1. USERS ISOLATION POLICY
+CREATE POLICY "Users can read self and workspace members" ON public.users
+  FOR SELECT
+  USING (
+    id = auth.uid()
+    OR workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid())
+  );
 
-CREATE POLICY "Workspace isolation for client_leads" ON public.client_leads
-  FOR ALL USING (workspace_id = (SELECT workspace_id FROM public.users WHERE id = auth.uid()));
+CREATE POLICY "Users can only update self within authorized workspace" ON public.users
+  FOR UPDATE
+  USING (id = auth.uid())
+  WITH CHECK (
+    id = auth.uid()
+    AND workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid())
+  );
 
-CREATE POLICY "Workspace isolation for google_integrations" ON public.google_integrations
-  FOR ALL USING (workspace_id = (SELECT workspace_id FROM public.users WHERE id = auth.uid()));
+-- 2. CLIENTS ISOLATION POLICY
+-- Prevents selecting, modifying, deleting other workspaces' clients, AND prevents moving clients cross-workspace
+CREATE POLICY "Tenant isolation for clients" ON public.clients
+  FOR ALL
+  USING (workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()))
+  WITH CHECK (workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()));
 
-CREATE POLICY "Workspace isolation for export_history" ON public.export_history
-  FOR ALL USING (workspace_id = (SELECT workspace_id FROM public.users WHERE id = auth.uid()));
+-- 3. LEAD SEARCHES ISOLATION POLICY
+CREATE POLICY "Tenant isolation for lead_searches" ON public.lead_searches
+  FOR ALL
+  USING (
+    workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid())
+    AND client_id IN (SELECT id FROM public.clients WHERE workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()))
+  )
+  WITH CHECK (
+    workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid())
+    AND client_id IN (SELECT id FROM public.clients WHERE workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()))
+  );
 
-CREATE POLICY "Workspace isolation for instagram_integrations" ON public.instagram_integrations
-  FOR ALL USING (
-    workspace_id = (SELECT workspace_id FROM public.users WHERE id = auth.uid())
-    AND client_id IN (SELECT id FROM public.clients WHERE workspace_id = (SELECT workspace_id FROM public.users WHERE id = auth.uid()))
+-- 4. LEADS ISOLATION POLICY
+CREATE POLICY "Tenant isolation for leads" ON public.leads
+  FOR ALL
+  USING (workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()))
+  WITH CHECK (workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()));
+
+-- 5. CLIENT LEADS JUNCTION ISOLATION POLICY
+CREATE POLICY "Tenant isolation for client_leads" ON public.client_leads
+  FOR ALL
+  USING (
+    workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid())
+    AND client_id IN (SELECT id FROM public.clients WHERE workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()))
+    AND lead_id IN (SELECT id FROM public.leads WHERE workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()))
+  )
+  WITH CHECK (
+    workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid())
+    AND client_id IN (SELECT id FROM public.clients WHERE workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()))
+    AND lead_id IN (SELECT id FROM public.leads WHERE workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()))
+  );
+
+-- 6. GOOGLE INTEGRATIONS ISOLATION POLICY
+CREATE POLICY "Tenant isolation for google_integrations" ON public.google_integrations
+  FOR ALL
+  USING (
+    workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid())
+    AND (client_id IS NULL OR client_id IN (SELECT id FROM public.clients WHERE workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid())))
+  )
+  WITH CHECK (
+    workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid())
+    AND (client_id IS NULL OR client_id IN (SELECT id FROM public.clients WHERE workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid())))
+  );
+
+-- 7. EXPORT HISTORY ISOLATION POLICY
+CREATE POLICY "Tenant isolation for export_history" ON public.export_history
+  FOR ALL
+  USING (
+    workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid())
+    AND client_id IN (SELECT id FROM public.clients WHERE workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()))
+  )
+  WITH CHECK (
+    workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid())
+    AND client_id IN (SELECT id FROM public.clients WHERE workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()))
+  );
+
+-- 8. INSTAGRAM INTEGRATIONS ISOLATION POLICY
+CREATE POLICY "Tenant isolation for instagram_integrations" ON public.instagram_integrations
+  FOR ALL
+  USING (
+    workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid())
+    AND client_id IN (SELECT id FROM public.clients WHERE workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()))
+  )
+  WITH CHECK (
+    workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid())
+    AND client_id IN (SELECT id FROM public.clients WHERE workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()))
   );
 
 -- Revoke all access from unauthenticated anon role
@@ -189,3 +287,4 @@ GRANT SELECT (id, workspace_id, client_id, instagram_user_id, instagram_username
 
 -- Service role maintains full access for backend token encryption/decryption
 GRANT ALL ON public.instagram_integrations TO service_role;
+

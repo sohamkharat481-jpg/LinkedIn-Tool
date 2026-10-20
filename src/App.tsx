@@ -44,7 +44,7 @@ export default function App() {
 
   // Auth & Provider State
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
-  const [userEmail, setUserEmail] = useState<string>('anjanapadhi21@gmail.com');
+  const [userEmail, setUserEmail] = useState<string>('');
   const [isGoogleConnected, setIsGoogleConnected] = useState<boolean>(false);
 
   const [providerConfig, setProviderConfig] = useState<LeadProviderConfig>({
@@ -113,23 +113,18 @@ export default function App() {
   };
 
   const refreshWorkspaceData = async (wsId: string) => {
+    if (!wsId || !wsId.trim()) {
+      setClients([]);
+      setActiveClient(null);
+      setAllLeads([]);
+      setAllSearches([]);
+      return;
+    }
+
     setIsLoadingData(true);
     setSupabaseError(null);
     try {
-      let clientList = await SupabaseDataService.getClients(wsId);
-      if (clientList.length === 0) {
-        try {
-          const newDefaultClient = await SupabaseDataService.createClient(
-            wsId,
-            'Global Coaches & Consultants Outreach',
-            'Business, Executive & Life Coaches',
-            'Default client for worldwide lead discovery'
-          );
-          clientList = [newDefaultClient];
-        } catch (e) {
-          console.warn('Failed to create default client:', e);
-        }
-      }
+      const clientList = await SupabaseDataService.getClients(wsId);
       setClients(clientList);
 
       if (clientList.length > 0) {
@@ -150,7 +145,7 @@ export default function App() {
       setAllSearches(searches);
     } catch (err: any) {
       console.warn('refreshWorkspaceData error:', err);
-      setSupabaseError(err.message || 'Database synchronization in progress.');
+      setSupabaseError(err.message || 'Database synchronization error.');
     } finally {
       setIsLoadingData(false);
     }
@@ -172,7 +167,7 @@ export default function App() {
 
     // Auth listener setup with verified session restore
     const unsubscribe = initAuthListener(
-      (user, _token, accountInfo) => {
+      async (user, _token, accountInfo) => {
         setCurrentUser(user);
         if (accountInfo?.email) {
           setUserEmail(accountInfo.email);
@@ -180,6 +175,26 @@ export default function App() {
           setUserEmail(user.email);
         }
         setIsGoogleConnected(true);
+
+        try {
+          const idToken = await user.getIdToken().catch(() => null);
+          if (idToken) {
+            const res = await fetch(apiUrl('/api/workspaces'), {
+              headers: { Authorization: `Bearer ${idToken}` }
+            });
+            if (res.ok) {
+              const data = await res.json();
+              if (Array.isArray(data.workspaces) && data.workspaces.length > 0) {
+                setWorkspaces(data.workspaces);
+                const currentActive = data.workspaces[0];
+                setActiveWorkspace(currentActive);
+                refreshWorkspaceData(currentActive.id);
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('Could not load workspaces from API:', e);
+        }
       },
       () => {
         setIsGoogleConnected(false);
@@ -200,12 +215,37 @@ export default function App() {
     }
   };
 
-  const handleCreateWorkspace = (name: string, desc: string) => {
+  const handleCreateWorkspace = async (name: string, desc: string) => {
+    try {
+      const idToken = currentUser ? await currentUser.getIdToken().catch(() => null) : null;
+      if (idToken) {
+        const res = await fetch(apiUrl('/api/workspaces'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${idToken}`
+          },
+          body: JSON.stringify({ name, description: desc })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.workspace) {
+            setWorkspaces((prev) => [...prev, data.workspace]);
+            setActiveWorkspace(data.workspace);
+            refreshWorkspaceData(data.workspace.id);
+            return;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('API create workspace fallback:', e);
+    }
     const newWs = dbService.createWorkspace(name, desc);
     setWorkspaces(dbService.getWorkspaces());
     setActiveWorkspace(newWs);
     refreshWorkspaceData(newWs.id);
   };
+
 
   const handleSelectClient = (clientId: string) => {
     const found = clients.find((c) => c.id === clientId);
@@ -215,7 +255,9 @@ export default function App() {
   };
 
   const handleCreateClient = async (name: string, niche: string, notes: string) => {
-    if (!activeWorkspace) return;
+    if (!activeWorkspace || !activeWorkspace.id) {
+      throw new Error('No active workspace selected. Please select or create a workspace first.');
+    }
     const newClient = await SupabaseDataService.createClient(activeWorkspace.id, name, niche, notes);
     await refreshWorkspaceData(activeWorkspace.id);
     setActiveClient(newClient);
@@ -225,13 +267,17 @@ export default function App() {
     clientId: string,
     updates: { name?: string; niche?: string; notes?: string }
   ) => {
-    if (!activeWorkspace) return;
+    if (!activeWorkspace || !activeWorkspace.id) {
+      throw new Error('No active workspace selected. Please select or create a workspace first.');
+    }
     await SupabaseDataService.updateClient(activeWorkspace.id, clientId, updates);
     await refreshWorkspaceData(activeWorkspace.id);
   };
 
   const handleDeleteClient = async (clientId: string) => {
-    if (!activeWorkspace) return;
+    if (!activeWorkspace || !activeWorkspace.id) {
+      throw new Error('No active workspace selected. Please select or create a workspace first.');
+    }
     await SupabaseDataService.deleteClient(activeWorkspace.id, clientId);
     await refreshWorkspaceData(activeWorkspace.id);
   };
@@ -248,6 +294,10 @@ export default function App() {
     persistenceStatus: LeadPersistenceStatus;
     persistenceMessage: string;
   }> => {
+    if (!activeWorkspace || !activeWorkspace.id) {
+      throw new Error('No active workspace selected. Please select or create a workspace first.');
+    }
+
     // Call server endpoint
     const idToken = currentUser ? await currentUser.getIdToken().catch(() => null) : null;
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -491,7 +541,7 @@ export default function App() {
           isGoogleConnected={isGoogleConnected}
           onGoogleAuthSuccess={(user, token) => {
             setCurrentUser(user);
-            setUserEmail(user.email || 'anjanapadhi21@gmail.com');
+            setUserEmail(user.email || '');
             setCachedAccessToken(token);
             setIsGoogleConnected(true);
           }}
@@ -525,7 +575,7 @@ export default function App() {
                 onSignOut={handleSignOut}
                 isLoadingData={isLoadingData}
                 supabaseError={supabaseError}
-                onRetryData={() => refreshWorkspaceData(activeWorkspace.id)}
+                onRetryData={() => activeWorkspace && refreshWorkspaceData(activeWorkspace.id)}
                 onRefreshProviderStatus={() => fetchProviderStatus()}
               />
 
@@ -563,6 +613,9 @@ export default function App() {
               onDeleteLeads={handleDeleteLeads}
               onExportToSheets={(selected, cName) => handleOpenExportModal(selected, cName)}
               isGoogleConnected={isGoogleConnected}
+              supabaseError={supabaseError}
+              isLoading={isLoadingData}
+              onRetry={() => activeWorkspace && refreshWorkspaceData(activeWorkspace.id)}
             />
           )}
 
@@ -582,7 +635,7 @@ export default function App() {
               isGoogleConnected={isGoogleConnected}
               onGoogleAuthSuccess={(user, token) => {
                 setCurrentUser(user);
-                setUserEmail(user.email || 'anjanapadhi21@gmail.com');
+                setUserEmail(user.email || '');
                 setCachedAccessToken(token);
                 setIsGoogleConnected(true);
               }}

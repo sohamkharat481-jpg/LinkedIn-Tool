@@ -4,10 +4,12 @@ import { filterAndDeduplicateLeads } from '../services/deduplication';
 import { ServerLeadProviderService } from './leadProviderService';
 import { testSupabaseHealth } from '../services/supabase';
 import { verifyServerAuthToken } from './serverAuthService';
+import { dataRouter } from './dataRoutes';
 
 export const apiRouter = express.Router();
 
 apiRouter.use(express.json());
+apiRouter.use(dataRouter);
 
 apiRouter.use((req: any, res: any, next) => {
   if (typeof res.status !== 'function') {

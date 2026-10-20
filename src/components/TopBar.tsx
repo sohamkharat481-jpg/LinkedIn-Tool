@@ -6,7 +6,7 @@ import { Building2, User, LogOut, CheckCircle, AlertCircle, RefreshCw, Database,
 
 interface TopBarProps {
   workspaces: Workspace[];
-  activeWorkspace: Workspace;
+  activeWorkspace: Workspace | null;
   onSelectWorkspace: (wsId: string) => void;
   clients: Client[];
   activeClient: Client | null;
@@ -71,11 +71,15 @@ export const TopBar: React.FC<TopBarProps> = ({
               onChange={(e) => onSelectWorkspace(e.target.value)}
               className="bg-transparent text-xs font-semibold text-gray-800 focus:outline-none cursor-pointer pr-1"
             >
-              {workspaces.map((ws) => (
-                <option key={ws.id} value={ws.id}>
-                  {ws.name}
-                </option>
-              ))}
+              {workspaces.length === 0 ? (
+                <option value="">No Workspace</option>
+              ) : (
+                workspaces.map((ws) => (
+                  <option key={ws.id} value={ws.id}>
+                    {ws.name}
+                  </option>
+                ))
+              )}
             </select>
           </div>
 

@@ -329,3 +329,105 @@ export async function verifyServerAuthToken(
     error: 'Unsupported or unverified authentication token algorithm.'
   };
 }
+
+// Authorized workspace store for server-side verification and testing
+const authorizedWorkspaceMap = new Map<string, Set<string>>();
+
+export function registerWorkspaceAuthorization(userId: string, workspaceId: string): void {
+  if (!userId || !workspaceId) return;
+  const existing = authorizedWorkspaceMap.get(userId) || new Set<string>();
+  existing.add(workspaceId);
+  authorizedWorkspaceMap.set(userId, existing);
+}
+
+export function clearWorkspaceAuthorizations(): void {
+  authorizedWorkspaceMap.clear();
+}
+
+/**
+ * Checks whether an authenticated user is authorized to access a given workspace.
+ * Never trusts workspace IDs supplied by the frontend without validation.
+ */
+export async function isUserAuthorizedForWorkspace(
+  userId: string,
+  workspaceId: string,
+  userEmail?: string
+): Promise<boolean> {
+  if (!userId || !workspaceId || !workspaceId.trim()) return false;
+
+  // 1. Check in-memory registered authorizations (test / session runtime)
+  const userWorkspaces = authorizedWorkspaceMap.get(userId);
+  if (userWorkspaces && userWorkspaces.has(workspaceId)) {
+    return true;
+  }
+
+  // 2. Query Supabase database with user context if configured
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .select('workspace_id')
+        .or(`id.eq.${userId},email.eq.${userEmail || ''}`);
+
+      if (!error && Array.isArray(data) && data.length > 0) {
+        return data.some((row: any) => row.workspace_id === workspaceId);
+      }
+    } catch {
+      // Database query failed
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Verifies both user authentication token and workspace tenancy authorization.
+ * Returns 401 if unauthenticated, 403 if unauthorized for the workspace.
+ */
+export async function verifyWorkspaceAccess(
+  req: any,
+  workspaceId: string
+): Promise<{
+  authorized: boolean;
+  status: number;
+  user?: VerifiedUser;
+  error?: string;
+}> {
+  if (!workspaceId || !workspaceId.trim()) {
+    return {
+      authorized: false,
+      status: 400,
+      error: 'Workspace ID is required for tenant isolation.'
+    };
+  }
+
+  const authResult = await verifyServerAuthToken(req);
+  if (authResult.status !== 200 || !authResult.user) {
+    return {
+      authorized: false,
+      status: authResult.status,
+      error: authResult.error || 'Authentication required.'
+    };
+  }
+
+  const isAuthorized = await isUserAuthorizedForWorkspace(
+    authResult.user.userId,
+    workspaceId,
+    authResult.user.email
+  );
+
+  if (!isAuthorized) {
+    return {
+      authorized: false,
+      status: 403,
+      user: authResult.user,
+      error: `Access denied: User ${authResult.user.userId} is not authorized to access workspace ${workspaceId}.`
+    };
+  }
+
+  return {
+    authorized: true,
+    status: 200,
+    user: authResult.user
+  };
+}
