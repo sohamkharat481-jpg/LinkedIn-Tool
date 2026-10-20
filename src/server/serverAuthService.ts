@@ -20,6 +20,19 @@ let cachedFirebaseConfig: { projectId?: string; apiKey?: string } | null = null;
 
 function getFirebaseConfig(): { projectId?: string; apiKey?: string } {
   if (cachedFirebaseConfig) return cachedFirebaseConfig;
+  
+  // Primary: Environment Variables
+  const envConfig = {
+    projectId: process.env.VITE_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID,
+    apiKey: process.env.VITE_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY
+  };
+
+  if (envConfig.projectId) {
+    cachedFirebaseConfig = envConfig;
+    return cachedFirebaseConfig;
+  }
+
+  // Fallback: Config File
   try {
     const configPath = path.resolve(process.cwd(), 'firebase-applet-config.json');
     if (fs.existsSync(configPath)) {
@@ -233,6 +246,11 @@ export async function verifyServerAuthToken(
   if (header.alg === 'RS256') {
     const fbConfig = getFirebaseConfig();
     const expectedProjectId = fbConfig.projectId || 'studio-5479557589-52d77';
+    
+    // LOGGING FOR DIAGNOSIS
+    if (fbConfig.projectId !== 'project-8f9ec042-024f-49a1-9f1') {
+        console.warn(`[AUTH DIAGNOSTIC] Loaded projectId: ${fbConfig.projectId}, Expected: project-8f9ec042-024f-49a1-9f1`);
+    }
 
     // Verify audience and issuer
     const isFirebaseIssuer =
@@ -241,6 +259,7 @@ export async function verifyServerAuthToken(
     const isMatchingAudience = payload.aud === expectedProjectId;
 
     if (!isFirebaseIssuer || !isMatchingAudience) {
+      console.warn(`[AUTH ERROR] Issuer mismatch. Payload iss: ${payload.iss}, aud: ${payload.aud}, Expected ID: ${expectedProjectId}`);
       return {
         status: 401,
         error: 'Authentication token audience or issuer does not match configured Firebase project.'
