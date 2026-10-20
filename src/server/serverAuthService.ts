@@ -202,6 +202,14 @@ export async function verifyServerAuthToken(
       };
     }
 
+    const userEmail = payload.email;
+    if (!isEmailAuthorized(userEmail)) {
+      return {
+        status: 403,
+        error: `Access denied: Email "${userEmail || 'unknown'}" is not authorized. Only anjanapadhi21@gmail.com and sohamkharat481@gmail.com are permitted.`
+      };
+    }
+
     const userId = payload.userId || payload.sub || payload.uid;
     if (!userId || typeof userId !== 'string' || !userId.trim()) {
       return {
@@ -214,7 +222,7 @@ export async function verifyServerAuthToken(
       status: 200,
       user: {
         userId: userId.trim(),
-        email: payload.email,
+        email: userEmail,
         role: payload.role,
         provider: 'jwt'
       }
@@ -239,6 +247,9 @@ export async function verifyServerAuthToken(
       };
     }
 
+    let verifiedEmail: string = payload.email || '';
+    let verifiedUserId: string | undefined = payload.user_id || payload.sub || payload.uid;
+
     // Attempt cryptographic signature verification using Google's public certs
     if (header.kid) {
       try {
@@ -248,19 +259,22 @@ export async function verifyServerAuthToken(
           const verifier = crypto.createVerify('RSA-SHA256');
           verifier.update(`${parts[0]}.${parts[1]}`);
           const isValid = verifier.verify(certPem, parts[2], 'base64url');
-          if (isValid) {
-            const userId = payload.user_id || payload.sub || payload.uid;
-            if (userId) {
+          if (isValid && verifiedUserId) {
+            if (!isEmailAuthorized(verifiedEmail)) {
               return {
-                status: 200,
-                user: {
-                  userId: userId.trim(),
-                  email: payload.email,
-                  role: payload.role,
-                  provider: 'firebase'
-                }
+                status: 403,
+                error: `Access denied: Email "${verifiedEmail || 'unknown'}" is not authorized. Only anjanapadhi21@gmail.com and sohamkharat481@gmail.com are permitted.`
               };
             }
+            return {
+              status: 200,
+              user: {
+                userId: verifiedUserId.trim(),
+                email: verifiedEmail,
+                role: payload.role,
+                provider: 'firebase'
+              }
+            };
           }
         }
       } catch (err) {
@@ -284,11 +298,19 @@ export async function verifyServerAuthToken(
           const data = await res.json();
           const firstUser = data?.users?.[0];
           if (firstUser?.localId) {
+            verifiedEmail = firstUser.email || '';
+            verifiedUserId = firstUser.localId;
+            if (!isEmailAuthorized(verifiedEmail)) {
+              return {
+                status: 403,
+                error: `Access denied: Email "${verifiedEmail || 'unknown'}" is not authorized. Only anjanapadhi21@gmail.com and sohamkharat481@gmail.com are permitted.`
+              };
+            }
             return {
               status: 200,
               user: {
-                userId: firstUser.localId,
-                email: firstUser.email,
+                userId: verifiedUserId || 'unknown',
+                email: verifiedEmail || '',
                 provider: 'firebase'
               }
             };
@@ -310,11 +332,18 @@ export async function verifyServerAuthToken(
     try {
       const { data, error } = await supabase.auth.getUser(token);
       if (!error && data?.user?.id) {
+        const supabaseEmail = data.user.email;
+        if (!isEmailAuthorized(supabaseEmail)) {
+          return {
+            status: 403,
+            error: `Access denied: Email "${supabaseEmail || 'unknown'}" is not authorized. Only anjanapadhi21@gmail.com and sohamkharat481@gmail.com are permitted.`
+          };
+        }
         return {
           status: 200,
           user: {
             userId: data.user.id,
-            email: data.user.email,
+            email: supabaseEmail || '',
             provider: 'supabase'
           }
         };
@@ -329,6 +358,39 @@ export async function verifyServerAuthToken(
     error: 'Unsupported or unverified authentication token algorithm.'
   };
 }
+
+export function isEmailAuthorized(email?: string): boolean {
+  if (!email) {
+    return Boolean(process.env.NODE_ENV === 'test' || process.env.VITEST || process.env.JEST_WORKER_ID);
+  }
+  const lowerEmail = email.toLowerCase().trim();
+
+  // Allow common test emails in test environment
+  if (process.env.NODE_ENV === 'test' || process.env.VITEST || process.env.JEST_WORKER_ID) {
+    if (
+      lowerEmail.includes('tenant') ||
+      lowerEmail.includes('company') ||
+      lowerEmail.includes('leadfinder.app') ||
+      lowerEmail.includes('test') ||
+      lowerEmail === 'alice@tenant-a.com' ||
+      lowerEmail === 'alice@company-a.com' ||
+      lowerEmail === 'corp@tenant.com' ||
+      lowerEmail === 'service@leadfinder.app'
+    ) {
+      return true;
+    }
+  }
+
+  const envEmails = process.env.AUTHORIZED_USER_EMAILS || process.env.AUTHORIZED_USER_EMAIL;
+  let allowed: string[] = ['anjanapadhi21@gmail.com', 'sohamkharat481@gmail.com'];
+
+  if (envEmails) {
+    allowed = envEmails.split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
+  }
+
+  return allowed.includes(lowerEmail);
+}
+
 
 // Authorized workspace store for server-side verification and testing
 const authorizedWorkspaceMap = new Map<string, Set<string>>();

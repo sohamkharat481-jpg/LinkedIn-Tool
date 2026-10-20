@@ -1,0 +1,55 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  createSignedTestToken,
+  verifyServerAuthToken,
+  isEmailAuthorized
+} from '../src/server/serverAuthService';
+
+test('1. Two authorized accounts (anjanapadhi21@gmail.com and sohamkharat481@gmail.com) are accepted', async () => {
+  assert.equal(isEmailAuthorized('anjanapadhi21@gmail.com'), true);
+  assert.equal(isEmailAuthorized('sohamkharat481@gmail.com'), true);
+  assert.equal(isEmailAuthorized('ANJANAPADHI21@GMAIL.COM'), true);
+  assert.equal(isEmailAuthorized('SohamKharat481@gmail.com'), true);
+
+  const tokenAnjana = createSignedTestToken({
+    userId: 'user-anjana',
+    email: 'anjanapadhi21@gmail.com'
+  });
+  const resAnjana = await verifyServerAuthToken({
+    headers: { authorization: `Bearer ${tokenAnjana}` }
+  });
+  assert.equal(resAnjana.status, 200);
+  assert.equal(resAnjana.user?.email, 'anjanapadhi21@gmail.com');
+
+  const tokenSoham = createSignedTestToken({
+    userId: 'user-soham',
+    email: 'sohamkharat481@gmail.com'
+  });
+  const resSoham = await verifyServerAuthToken({
+    headers: { authorization: `Bearer ${tokenSoham}` }
+  });
+  assert.equal(resSoham.status, 200);
+  assert.equal(resSoham.user?.email, 'sohamkharat481@gmail.com');
+});
+
+test('2. Unauthorized third-party account is rejected with 403 Forbidden', async () => {
+  assert.equal(isEmailAuthorized('intruder@gmail.com'), false);
+  assert.equal(isEmailAuthorized('random.user@yahoo.com'), false);
+
+  const tokenIntruder = createSignedTestToken({
+    userId: 'user-intruder',
+    email: 'intruder@gmail.com'
+  });
+  const resIntruder = await verifyServerAuthToken({
+    headers: { authorization: `Bearer ${tokenIntruder}` }
+  });
+  assert.equal(resIntruder.status, 403);
+  assert.match(resIntruder.error || '', /not authorized/i);
+});
+
+test('3. Unauthenticated requests are rejected with 401', async () => {
+  const resMissing = await verifyServerAuthToken({});
+  assert.equal(resMissing.status, 401);
+  assert.match(resMissing.error || '', /Authentication required/i);
+});
