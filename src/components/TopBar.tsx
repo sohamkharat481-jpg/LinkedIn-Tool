@@ -16,6 +16,7 @@ interface TopBarProps {
   isGoogleConnected: boolean;
   onGoogleAuthSuccess: (user: FirebaseUser, token: string) => void;
   providerStatus: ProviderStatusInfo;
+  onOpenCreateWorkspace?: () => void;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -29,7 +30,8 @@ export const TopBar: React.FC<TopBarProps> = ({
   userEmail,
   isGoogleConnected,
   onGoogleAuthSuccess,
-  providerStatus
+  providerStatus,
+  onOpenCreateWorkspace
 }) => {
   const [isSigningIn, setIsSigningIn] = React.useState(false);
   const [authError, setAuthError] = React.useState<string | null>(null);
@@ -68,7 +70,13 @@ export const TopBar: React.FC<TopBarProps> = ({
             <Building2 className="w-4 h-4 text-blue-600" />
             <select
               value={activeWorkspace?.id || ''}
-              onChange={(e) => onSelectWorkspace(e.target.value)}
+              onChange={(e) => {
+                if (e.target.value === '__create_new__') {
+                  if (onOpenCreateWorkspace) onOpenCreateWorkspace();
+                } else {
+                  onSelectWorkspace(e.target.value);
+                }
+              }}
               className="bg-transparent text-xs font-semibold text-gray-800 focus:outline-none cursor-pointer pr-1"
             >
               {workspaces.length === 0 ? (
@@ -80,6 +88,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                   </option>
                 ))
               )}
+              <option value="__create_new__">+ Create New Workspace...</option>
             </select>
           </div>
 

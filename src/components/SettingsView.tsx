@@ -29,7 +29,7 @@ import { apiUrl } from '../services/apiClient';
 interface SettingsViewProps {
   workspaces: Workspace[];
   activeWorkspace: Workspace | null;
-  onCreateWorkspace: (name: string, desc: string) => void;
+  onCreateWorkspace: (name: string, desc: string) => Promise<any>;
   providerConfig: LeadProviderConfig;
   onUpdateProviderConfig: (config: Partial<LeadProviderConfig>) => void;
   currentUser: FirebaseUser | null;
@@ -68,6 +68,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [isNewWsModalOpen, setIsNewWsModalOpen] = useState(false);
   const [wsNameInput, setWsNameInput] = useState('');
   const [wsDescInput, setWsDescInput] = useState('');
+  const [wsModalError, setWsModalError] = useState<string | null>(null);
+  const [isCreatingWs, setIsCreatingWs] = useState(false);
 
   // Supabase Config & Diagnostics state
   const [supabaseDiag, setSupabaseDiag] = useState<SupabaseDiagnosticStatus | null>(null);
@@ -152,6 +154,53 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <p className="text-xs text-gray-500 mt-1">
           Configure lead provider credentials, health status, Google Workspace authentication, and tenant database policies.
         </p>
+      </div>
+
+      {/* Workspace Management Card */}
+      <div className="bg-white rounded-2xl border border-gray-200/90 shadow-xs p-6 space-y-4">
+        <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+          <div className="flex items-center gap-2.5">
+            <Building2 className="w-5 h-5 text-blue-600" />
+            <div>
+              <h2 className="text-base font-bold text-gray-900">Workspaces</h2>
+              <p className="text-xs text-gray-500">
+                Manage your isolated workspaces and tenant environments.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              const email = (currentUser?.email || userEmail || '').toLowerCase();
+              setWsNameInput(email === 'anjanapadhi21@gmail.com' ? 'Anjana Workspace' : '');
+              setWsDescInput('');
+              setWsModalError(null);
+              setIsNewWsModalOpen(true);
+            }}
+            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all shadow-xs"
+          >
+            <Plus className="w-4 h-4" /> Create Workspace
+          </button>
+        </div>
+
+        <div className="space-y-2">
+          {workspaces.length === 0 ? (
+            <p className="text-xs text-gray-500 italic py-2">No workspaces found. Click "Create Workspace" to create your first workspace.</p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {workspaces.map((ws) => (
+                <div key={ws.id} className={`p-3 rounded-xl border ${activeWorkspace?.id === ws.id ? 'bg-blue-50/70 border-blue-300' : 'bg-gray-50 border-gray-200'} flex items-center justify-between`}>
+                  <div>
+                    <h3 className="text-xs font-bold text-gray-900">{ws.name}</h3>
+                    {ws.description && <p className="text-[11px] text-gray-500 mt-0.5">{ws.description}</p>}
+                  </div>
+                  {activeWorkspace?.id === ws.id && (
+                    <span className="text-[10px] font-bold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full">Active</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Provider Diagnostics Card */}
@@ -425,6 +474,77 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <span className="font-bold">Row Level Security (RLS):</span> Multi-tenant client isolation is active across all database operations. All clients and search records are partitioned by <code className="bg-blue-100 px-1 py-0.5 rounded font-mono">workspace_id</code>.
         </div>
       </div>
+
+      {/* Create Workspace Modal */}
+      {isNewWsModalOpen && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl">
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <h3 className="text-base font-bold text-gray-900">Create New Workspace</h3>
+              <button onClick={() => setIsNewWsModalOpen(false)} className="text-gray-400 hover:text-gray-600 font-bold">×</button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">Workspace Name</label>
+                <input
+                  type="text"
+                  value={wsNameInput}
+                  onChange={(e) => setWsNameInput(e.target.value)}
+                  placeholder="e.g. Anjana Workspace"
+                  className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">Description (Optional)</label>
+                <input
+                  type="text"
+                  value={wsDescInput}
+                  onChange={(e) => setWsDescInput(e.target.value)}
+                  placeholder="e.g. Lead discovery and client management workspace"
+                  className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              {wsModalError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700">
+                  {wsModalError}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsNewWsModalOpen(false)}
+                className="px-4 py-2 border border-gray-300 rounded-xl text-xs font-bold text-gray-700 hover:bg-gray-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isCreatingWs || !wsNameInput.trim()}
+                onClick={async () => {
+                  setIsCreatingWs(true);
+                  setWsModalError(null);
+                  try {
+                    await onCreateWorkspace(wsNameInput.trim(), wsDescInput.trim());
+                    setIsNewWsModalOpen(false);
+                  } catch (err: any) {
+                    setWsModalError(err.message || 'Failed to create workspace.');
+                  } finally {
+                    setIsCreatingWs(false);
+                  }
+                }}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow-xs flex items-center gap-2"
+              >
+                {isCreatingWs ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null} Create Workspace
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

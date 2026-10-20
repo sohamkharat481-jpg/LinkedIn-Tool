@@ -17,6 +17,7 @@ import { SupabaseDataService } from './services/supabaseDataService';
 import type { LeadPersistenceStatus } from './services/supabaseDataService';
 import { initAuthListener, setCachedAccessToken, googleSignIn, googleSignOut } from './services/auth';
 import { apiUrl } from './services/apiClient';
+import { RefreshCw } from 'lucide-react';
 
 import { TopBar } from './components/TopBar';
 import { Sidebar, NavTab } from './components/Sidebar';
@@ -46,6 +47,14 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const [userEmail, setUserEmail] = useState<string>('');
   const [isGoogleConnected, setIsGoogleConnected] = useState<boolean>(false);
+  const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
+
+  // Top Bar Workspace Creation Modal state
+  const [isTopBarCreateModalOpen, setIsTopBarCreateModalOpen] = useState(false);
+  const [topBarWsName, setTopBarWsName] = useState('');
+  const [topBarWsDesc, setTopBarWsDesc] = useState('');
+  const [topBarWsError, setTopBarWsError] = useState<string | null>(null);
+  const [isTopBarCreating, setIsTopBarCreating] = useState(false);
 
   const [providerConfig, setProviderConfig] = useState<LeadProviderConfig>({
     providerType: 'wikidata'
@@ -167,14 +176,17 @@ export default function App() {
 
     // Auth listener setup with verified session restore
     const unsubscribe = initAuthListener(
-      async (user, _token, accountInfo) => {
+      async (user, token, accountInfo) => {
         setCurrentUser(user);
         if (accountInfo?.email) {
           setUserEmail(accountInfo.email);
         } else if (user.email) {
           setUserEmail(user.email);
         }
-        setIsGoogleConnected(true);
+        if (token && token.length > 10) {
+          setIsGoogleConnected(true);
+        }
+        setIsAuthLoading(false);
 
         try {
           const idToken = await user.getIdToken().catch(() => null);
@@ -197,7 +209,10 @@ export default function App() {
         }
       },
       () => {
+        setCurrentUser(null);
+        setUserEmail('');
         setIsGoogleConnected(false);
+        setIsAuthLoading(false);
       }
     );
 
@@ -215,35 +230,40 @@ export default function App() {
     }
   };
 
-  const handleCreateWorkspace = async (name: string, desc: string) => {
-    try {
-      const idToken = currentUser ? await currentUser.getIdToken().catch(() => null) : null;
-      if (idToken) {
-        const res = await fetch(apiUrl('/api/workspaces'), {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${idToken}`
-          },
-          body: JSON.stringify({ name, description: desc })
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.workspace) {
-            setWorkspaces((prev) => [...prev, data.workspace]);
-            setActiveWorkspace(data.workspace);
-            refreshWorkspaceData(data.workspace.id);
-            return;
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('API create workspace fallback:', e);
+  const handleCreateWorkspace = async (name: string, desc: string): Promise<Workspace> => {
+    const currentEmail = (currentUser?.email || userEmail || '').toLowerCase().trim();
+    if (name.toLowerCase().includes('anjana') && currentEmail && currentEmail !== 'anjanapadhi21@gmail.com') {
+      throw new Error(`You are signed in as ${currentEmail}. Please sign in as Anjana (anjanapadhi21@gmail.com) to create Anjana Workspace.`);
     }
-    const newWs = dbService.createWorkspace(name, desc);
-    setWorkspaces(dbService.getWorkspaces());
-    setActiveWorkspace(newWs);
-    refreshWorkspaceData(newWs.id);
+
+    const idToken = currentUser ? await currentUser.getIdToken().catch(() => null) : null;
+    if (!idToken) {
+      throw new Error('Authentication required. Please sign in with Google to persist workspace creation in the database.');
+    }
+
+    const res = await fetch(apiUrl('/api/workspaces'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`
+      },
+      body: JSON.stringify({ name, description: desc })
+    });
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || `Failed to create workspace (HTTP ${res.status}).`);
+    }
+
+    const data = await res.json();
+    if (!data.workspace) {
+      throw new Error('Server returned invalid workspace response.');
+    }
+
+    setWorkspaces((prev) => [...prev, data.workspace]);
+    setActiveWorkspace(data.workspace);
+    await refreshWorkspaceData(data.workspace.id);
+    return data.workspace;
   };
 
 
@@ -516,6 +536,17 @@ export default function App() {
     }, 100);
   };
 
+  if (isAuthLoading) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-slate-50">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+          <span className="text-sm font-semibold text-slate-700">Restoring authentication session...</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden font-sans text-slate-900">
       {/* Sidebar */}
@@ -546,6 +577,14 @@ export default function App() {
             setIsGoogleConnected(true);
           }}
           providerStatus={providerStatus}
+          onOpenCreateWorkspace={() => {
+            const email = (currentUser?.email || userEmail || '').toLowerCase();
+            setTopBarWsName(email === 'anjanapadhi21@gmail.com' ? 'Anjana Workspace' : '');
+            setTopBarWsDesc('');
+            setTopBarWsError(null);
+            setIsTopBarCreating(false);
+            setIsTopBarCreateModalOpen(true);
+          }}
         />
 
         {/* Dynamic Main Workspace Content */}
@@ -692,6 +731,77 @@ export default function App() {
           }
         }}
       />
+
+      {/* TopBar Create Workspace Modal */}
+      {isTopBarCreateModalOpen && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl">
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <h3 className="text-base font-bold text-gray-900">Create New Workspace</h3>
+              <button onClick={() => setIsTopBarCreateModalOpen(false)} className="text-gray-400 hover:text-gray-600 font-bold">×</button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">Workspace Name</label>
+                <input
+                  type="text"
+                  value={topBarWsName}
+                  onChange={(e) => setTopBarWsName(e.target.value)}
+                  placeholder="e.g. Anjana Workspace"
+                  className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">Description (Optional)</label>
+                <input
+                  type="text"
+                  value={topBarWsDesc}
+                  onChange={(e) => setTopBarWsDesc(e.target.value)}
+                  placeholder="e.g. Lead discovery and client management workspace"
+                  className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              {topBarWsError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700">
+                  {topBarWsError}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsTopBarCreateModalOpen(false)}
+                className="px-4 py-2 border border-gray-300 rounded-xl text-xs font-bold text-gray-700 hover:bg-gray-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isTopBarCreating || !topBarWsName.trim()}
+                onClick={async () => {
+                  setIsTopBarCreating(true);
+                  setTopBarWsError(null);
+                  try {
+                    await handleCreateWorkspace(topBarWsName.trim(), topBarWsDesc.trim());
+                    setIsTopBarCreateModalOpen(false);
+                  } catch (err: any) {
+                    setTopBarWsError(err.message || 'Failed to create workspace.');
+                  } finally {
+                    setIsTopBarCreating(false);
+                  }
+                }}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow-xs flex items-center gap-2"
+              >
+                {isTopBarCreating ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null} Create Workspace
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
