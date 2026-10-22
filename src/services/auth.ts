@@ -13,26 +13,60 @@ import {
 } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 
-const getResolvedFirebaseConfig = () => {
+export const getResolvedFirebaseConfig = () => {
+  const env = (import.meta as any).env || {};
   const baseConfig = firebaseConfig || {};
+  const resolvedProjectId = baseConfig.projectId || env.VITE_FIREBASE_PROJECT_ID || 'linkedin-tool-510912';
   return {
-    projectId: 'linkedin-tool-510912',
-    apiKey: baseConfig.apiKey || (import.meta as any).env?.VITE_FIREBASE_API_KEY || 'AIzaSyAIOhDtP8yjvPTFdepJ9n9Wh0pbN3Os8rQ',
-    authDomain: 'linkedin-tool-510912.firebaseapp.com',
-    storageBucket: 'linkedin-tool-510912.firebasestorage.app',
-    messagingSenderId: baseConfig.messagingSenderId || '868647160060',
-    appId: baseConfig.appId || '1:868647160060:web:80a9e5c5a101bc7341ef79',
-    measurementId: baseConfig.measurementId || ''
+    projectId: resolvedProjectId,
+    apiKey: baseConfig.apiKey || env.VITE_FIREBASE_API_KEY || '',
+    authDomain: baseConfig.authDomain || env.VITE_FIREBASE_AUTH_DOMAIN || `${resolvedProjectId}.firebaseapp.com`,
+    storageBucket: baseConfig.storageBucket || env.VITE_FIREBASE_STORAGE_BUCKET || `${resolvedProjectId}.firebasestorage.app`,
+    messagingSenderId: baseConfig.messagingSenderId || env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
+    appId: baseConfig.appId || env.VITE_FIREBASE_APP_ID || '',
+    measurementId: baseConfig.measurementId || env.VITE_FIREBASE_MEASUREMENT_ID || ''
   };
 };
 
 // Initialize Firebase App
 const resolvedConfig = getResolvedFirebaseConfig();
-const app = getApps().length > 0 ? getApp() : initializeApp(resolvedConfig);
+let appInstance;
+const existingApps = getApps();
+if (existingApps.length > 0) {
+  const defaultApp = getApp();
+  if (
+    defaultApp.options.projectId !== resolvedConfig.projectId ||
+    defaultApp.options.apiKey !== resolvedConfig.apiKey
+  ) {
+    console.warn('Re-initializing Firebase App instance due to project configuration mismatch.');
+    appInstance = initializeApp(resolvedConfig, `app-${Date.now()}`);
+  } else {
+    appInstance = defaultApp;
+  }
+} else {
+  appInstance = initializeApp(resolvedConfig);
+}
+export const app = appInstance;
 export const auth = getAuth(app);
 setPersistence(auth, browserLocalPersistence).catch((err) => {
   console.warn('Failed to set auth persistence:', err);
 });
+
+// Startup diagnostic log for environment and runtime configuration
+if (typeof window !== 'undefined') {
+  const runtimeOptions = app.options;
+  const rawKey = resolvedConfig.apiKey || runtimeOptions.apiKey || '';
+  const keyPrefix = rawKey.length > 8 ? `${rawKey.substring(0, 8)}...` : (rawKey || 'none');
+  console.info('Firebase Auth Initialized:', {
+    configProjectId: resolvedConfig.projectId,
+    configAuthDomain: resolvedConfig.authDomain,
+    runtimeProjectId: runtimeOptions.projectId,
+    runtimeAuthDomain: runtimeOptions.authDomain,
+    apiKeyPrefix: keyPrefix,
+    runtimeAppId: runtimeOptions.appId || resolvedConfig.appId || 'none',
+    hostname: window.location.hostname
+  });
+}
 
 const provider = new GoogleAuthProvider();
 // Workspace Scopes for Google Sheets and Google Drive File Access
@@ -56,7 +90,21 @@ if (typeof window !== 'undefined') {
       }
     })
     .catch((err) => {
-      console.warn('Redirect result handling warning:', err);
+      const activeCfg = getResolvedFirebaseConfig();
+      const runtimeOptions = auth.app.options;
+      const rawKey = activeCfg.apiKey || runtimeOptions.apiKey || '';
+      const keyPrefix = rawKey.length > 8 ? `${rawKey.substring(0, 8)}...` : (rawKey || 'none');
+      console.error('Google Redirect Diagnostic Failure:', {
+        errorCode: err?.code || 'unknown',
+        errorMessage: err?.message || 'unknown',
+        configProjectId: activeCfg.projectId,
+        configAuthDomain: activeCfg.authDomain,
+        runtimeProjectId: runtimeOptions.projectId,
+        runtimeAuthDomain: runtimeOptions.authDomain,
+        hostname: window.location.hostname,
+        apiKeyPrefix: keyPrefix,
+        runtimeAppId: runtimeOptions.appId || activeCfg.appId || 'none'
+      });
     });
 }
 
@@ -159,6 +207,16 @@ export const googleSignIn = async (): Promise<{
 } | null> => {
   try {
     isSigningIn = true;
+    const activeCfg = getResolvedFirebaseConfig();
+    if (
+      activeCfg.projectId === 'linkedin-tool-510912' &&
+      (activeCfg.appId.includes('868647160060') || activeCfg.apiKey === 'AIzaSyAIOhDtP8yjvPTFdepJ9n9Wh0pbN3Os8rQ')
+    ) {
+      console.warn(
+        '[Firebase Configuration Mismatch] Project ID is "linkedin-tool-510912", but API key or App ID belongs to project 868647160060 (project-8f9ec042-024f-49a1-9f1). This causes auth/unauthorized-domain until genuine Web App credentials for linkedin-tool-510912 are provided.'
+      );
+    }
+
     let result;
     try {
       result = await signInWithPopup(auth, provider);
@@ -195,14 +253,19 @@ export const googleSignIn = async (): Promise<{
   } catch (error: any) {
     const activeCfg = getResolvedFirebaseConfig();
     const runtimeOptions = auth.app.options;
+    const rawKey = activeCfg.apiKey || runtimeOptions.apiKey || '';
+    const keyPrefix = rawKey.length > 8 ? `${rawKey.substring(0, 8)}...` : (rawKey || 'none');
+
     console.error('Google Sign-In Diagnostic Failure:', {
-      code: error?.code,
-      message: error?.message,
+      errorCode: error?.code || 'unknown',
+      errorMessage: error?.message || 'unknown',
       configProjectId: activeCfg.projectId,
       configAuthDomain: activeCfg.authDomain,
       runtimeProjectId: runtimeOptions.projectId,
       runtimeAuthDomain: runtimeOptions.authDomain,
-      hostname: typeof window !== 'undefined' ? window.location.hostname : 'unknown'
+      hostname: typeof window !== 'undefined' ? window.location.hostname : 'unknown',
+      apiKeyPrefix: keyPrefix,
+      runtimeAppId: runtimeOptions.appId || activeCfg.appId || 'none'
     });
     if (error?.code === 'auth/popup-closed-by-user') {
       throw new Error('Sign-in cancelled: The authorization popup was closed before completion.');
@@ -210,7 +273,7 @@ export const googleSignIn = async (): Promise<{
     if (error?.code === 'auth/unauthorized-domain') {
       const hostname = typeof window !== 'undefined' ? window.location.hostname : 'current domain';
       throw new Error(
-        `Domain (${hostname}) is not authorized in Firebase Console -> Authentication -> Settings -> Authorized Domains (Project: ${runtimeOptions.projectId || activeCfg.projectId}).`
+        `Domain (${hostname}) is not authorized in Firebase Console -> Authentication -> Settings -> Authorized Domains (Project: ${runtimeOptions.projectId || activeCfg.projectId}). Please ensure the apiKey and appId in firebase-applet-config.json match the Web App settings in your Firebase Console project where this domain is authorized.`
       );
     }
     if (error?.code === 'auth/cancelled-popup-request') {

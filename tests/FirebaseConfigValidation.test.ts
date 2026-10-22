@@ -14,4 +14,14 @@ test('Firebase configuration consistency check for linkedin-tool-510912', () => 
   assert.equal(config.authDomain, 'linkedin-tool-510912.firebaseapp.com', 'Auth domain must match project');
   assert.ok(config.apiKey, 'API key must be present');
   assert.ok(config.appId, 'App ID must be present');
+  assert.ok(config.authDomain.startsWith(config.projectId), 'authDomain must match projectId');
+});
+
+test('Firebase authDomain conforms to canonical Firebase format without path or protocol', () => {
+  const configPath = path.resolve(process.cwd(), 'firebase-applet-config.json');
+  const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+
+  assert.equal(config.authDomain.includes('https://'), false, 'authDomain should not include protocol');
+  assert.equal(config.authDomain.includes('/'), false, 'authDomain should not include path or trailing slash');
+  assert.match(config.authDomain, /^[a-z0-9\-]+\.firebaseapp\.com$/, 'authDomain must be a valid firebaseapp.com domain');
 });
