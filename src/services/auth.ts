@@ -193,14 +193,24 @@ export const googleSignIn = async (): Promise<{
       account: verifiedAccount
     };
   } catch (error: any) {
-    console.error('Google Sign-In Error Code:', error?.code, 'Message:', error?.message, error);
+    const activeCfg = getResolvedFirebaseConfig();
+    const runtimeOptions = auth.app.options;
+    console.error('Google Sign-In Diagnostic Failure:', {
+      code: error?.code,
+      message: error?.message,
+      configProjectId: activeCfg.projectId,
+      configAuthDomain: activeCfg.authDomain,
+      runtimeProjectId: runtimeOptions.projectId,
+      runtimeAuthDomain: runtimeOptions.authDomain,
+      hostname: typeof window !== 'undefined' ? window.location.hostname : 'unknown'
+    });
     if (error?.code === 'auth/popup-closed-by-user') {
       throw new Error('Sign-in cancelled: The authorization popup was closed before completion.');
     }
     if (error?.code === 'auth/unauthorized-domain') {
       const hostname = typeof window !== 'undefined' ? window.location.hostname : 'current domain';
       throw new Error(
-        `Domain (${hostname}) is not authorized in Firebase Console -> Authentication -> Settings -> Authorized Domains.`
+        `Domain (${hostname}) is not authorized in Firebase Console -> Authentication -> Settings -> Authorized Domains (Project: ${runtimeOptions.projectId || activeCfg.projectId}).`
       );
     }
     if (error?.code === 'auth/cancelled-popup-request') {
