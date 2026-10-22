@@ -17,13 +17,13 @@ const getResolvedFirebaseConfig = () => {
   const env = (import.meta as any).env || {};
   const baseConfig = firebaseConfig || {};
   return {
-    projectId: env.VITE_FIREBASE_PROJECT_ID || baseConfig.projectId,
-    apiKey: env.VITE_FIREBASE_API_KEY || baseConfig.apiKey,
-    authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || baseConfig.authDomain,
-    storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || baseConfig.storageBucket,
-    messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || baseConfig.messagingSenderId,
-    appId: env.VITE_FIREBASE_APP_ID || baseConfig.appId,
-    measurementId: env.VITE_FIREBASE_MEASUREMENT_ID || baseConfig.measurementId
+    projectId: baseConfig.projectId || env.VITE_FIREBASE_PROJECT_ID || 'linkedin-tool-510912',
+    apiKey: baseConfig.apiKey || env.VITE_FIREBASE_API_KEY,
+    authDomain: baseConfig.authDomain || env.VITE_FIREBASE_AUTH_DOMAIN || 'linkedin-tool-510912.firebaseapp.com',
+    storageBucket: baseConfig.storageBucket || env.VITE_FIREBASE_STORAGE_BUCKET || 'linkedin-tool-510912.firebasestorage.app',
+    messagingSenderId: baseConfig.messagingSenderId || env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+    appId: baseConfig.appId || env.VITE_FIREBASE_APP_ID,
+    measurementId: baseConfig.measurementId || env.VITE_FIREBASE_MEASUREMENT_ID
   };
 };
 
