@@ -43,12 +43,6 @@ export default function App() {
   const [isLoadingData, setIsLoadingData] = useState<boolean>(false);
   const [supabaseError, setSupabaseError] = useState<string | null>(null);
 
-  // Auth & Provider State
-  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
-  const [userEmail, setUserEmail] = useState<string>('');
-  const [isGoogleConnected, setIsGoogleConnected] = useState<boolean>(false);
-  const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
-
   // Top Bar Workspace Creation Modal state
   const [isTopBarCreateModalOpen, setIsTopBarCreateModalOpen] = useState(false);
   const [topBarWsName, setTopBarWsName] = useState('');
@@ -56,6 +50,7 @@ export default function App() {
   const [topBarWsError, setTopBarWsError] = useState<string | null>(null);
   const [isTopBarCreating, setIsTopBarCreating] = useState(false);
 
+  // Provider State
   const [providerConfig, setProviderConfig] = useState<LeadProviderConfig>({
     providerType: 'wikidata'
   });
@@ -174,51 +169,7 @@ export default function App() {
     }
     fetchProviderStatus();
 
-    // Auth listener setup with verified session restore
-    const unsubscribe = initAuthListener(
-      async (user, token, accountInfo) => {
-        setCurrentUser(user);
-        if (accountInfo?.email) {
-          setUserEmail(accountInfo.email);
-        } else if (user.email) {
-          setUserEmail(user.email);
-        }
-        if (token && token.length > 10) {
-          setIsGoogleConnected(true);
-        }
-        setIsAuthLoading(false);
-
-        try {
-          const idToken = await user.getIdToken().catch(() => null);
-          if (idToken) {
-            const res = await fetch(apiUrl('/api/workspaces'), {
-              headers: { Authorization: `Bearer ${idToken}` }
-            });
-            if (res.ok) {
-              const data = await res.json();
-              if (Array.isArray(data.workspaces) && data.workspaces.length > 0) {
-                setWorkspaces(data.workspaces);
-                const currentActive = data.workspaces[0];
-                setActiveWorkspace(currentActive);
-                refreshWorkspaceData(currentActive.id);
-              }
-            }
-          }
-        } catch (e) {
-          console.warn('Could not load workspaces from API:', e);
-        }
-      },
-      () => {
-        setCurrentUser(null);
-        setUserEmail('');
-        setIsGoogleConnected(false);
-        setIsAuthLoading(false);
-      }
-    );
-
-    return () => {
-      if (typeof unsubscribe === 'function') unsubscribe();
-    };
+    // Initial Data Load
   }, []);
 
   const handleSelectWorkspace = (wsId: string) => {
@@ -536,16 +487,7 @@ export default function App() {
     }, 100);
   };
 
-  if (isAuthLoading) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-slate-50">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-          <span className="text-sm font-semibold text-slate-700">Restoring authentication session...</span>
-        </div>
-      </div>
-    );
-  }
+
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden font-sans text-slate-900">
@@ -560,26 +502,16 @@ export default function App() {
       {/* Main Container */}
       <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
         {/* TopBar */}
-        <TopBar
+         <TopBar
           workspaces={workspaces}
           activeWorkspace={activeWorkspace}
           onSelectWorkspace={handleSelectWorkspace}
           clients={clients}
           activeClient={activeClient}
           onSelectClient={handleSelectClient}
-          currentUser={currentUser}
-          userEmail={userEmail}
-          isGoogleConnected={isGoogleConnected}
-          onGoogleAuthSuccess={(user, token) => {
-            setCurrentUser(user);
-            setUserEmail(user.email || '');
-            setCachedAccessToken(token);
-            setIsGoogleConnected(true);
-          }}
           providerStatus={providerStatus}
           onOpenCreateWorkspace={() => {
-            const email = (currentUser?.email || userEmail || '').toLowerCase();
-            setTopBarWsName(email === 'anjanapadhi21@gmail.com' ? 'Anjana Workspace' : '');
+            setTopBarWsName('');
             setTopBarWsDesc('');
             setTopBarWsError(null);
             setIsTopBarCreating(false);
@@ -669,15 +601,6 @@ export default function App() {
               onCreateWorkspace={handleCreateWorkspace}
               providerConfig={providerConfig}
               onUpdateProviderConfig={handleUpdateProviderConfig}
-              currentUser={currentUser}
-              userEmail={userEmail}
-              isGoogleConnected={isGoogleConnected}
-              onGoogleAuthSuccess={(user, token) => {
-                setCurrentUser(user);
-                setUserEmail(user.email || '');
-                setCachedAccessToken(token);
-                setIsGoogleConnected(true);
-              }}
               providerStatus={providerStatus}
               onRefreshProviderStatus={() => fetchProviderStatus()}
               clients={clients}
