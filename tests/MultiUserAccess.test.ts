@@ -53,3 +53,23 @@ test('3. Unauthenticated requests are rejected with 401', async () => {
   assert.equal(resMissing.status, 401);
   assert.match(resMissing.error || '', /Authentication required/i);
 });
+
+test('4. RS256 Firebase token verification rejects mismatched audience or issuer', async () => {
+  const headerB64 = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT', kid: 'test-kid' })).toString('base64url');
+  const payloadB64 = Buffer.from(JSON.stringify({
+    iss: 'https://securetoken.google.com/wrong-project',
+    aud: 'wrong-project',
+    sub: 'user-123',
+    email: 'anjanapadhi21@gmail.com',
+    exp: Math.floor(Date.now() / 1000) + 3600,
+    iat: Math.floor(Date.now() / 1000)
+  })).toString('base64url');
+  const fakeToken = `${headerB64}.${payloadB64}.fakesignature`;
+
+  const res = await verifyServerAuthToken({
+    headers: { authorization: `Bearer ${fakeToken}` }
+  });
+  assert.equal(res.status, 401);
+  assert.match(res.error || '', /audience or issuer does not match/i);
+});
+

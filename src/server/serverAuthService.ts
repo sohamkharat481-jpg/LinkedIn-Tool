@@ -245,11 +245,11 @@ export async function verifyServerAuthToken(
   // Branch 2: RS256 Firebase ID Tokens
   if (header.alg === 'RS256') {
     const fbConfig = getFirebaseConfig();
-    const expectedProjectId = fbConfig.projectId || 'studio-5479557589-52d77';
+    const expectedProjectId = fbConfig.projectId || 'linkedin-tool-510912';
     
     // LOGGING FOR DIAGNOSIS
-    if (fbConfig.projectId !== 'project-8f9ec042-024f-49a1-9f1') {
-        console.warn(`[AUTH DIAGNOSTIC] Loaded projectId: ${fbConfig.projectId}, Expected: project-8f9ec042-024f-49a1-9f1`);
+    if (fbConfig.projectId !== 'linkedin-tool-510912') {
+        console.warn(`[AUTH DIAGNOSTIC] Loaded projectId: ${fbConfig.projectId}, Expected: linkedin-tool-510912`);
     }
 
     // Verify audience and issuer
