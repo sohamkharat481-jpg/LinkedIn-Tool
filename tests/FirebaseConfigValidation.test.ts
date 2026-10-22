@@ -12,8 +12,9 @@ test('Firebase configuration consistency check for linkedin-tool-510912', () => 
 
   assert.equal(config.projectId, 'linkedin-tool-510912', 'Project ID must be linkedin-tool-510912');
   assert.equal(config.authDomain, 'linkedin-tool-510912.firebaseapp.com', 'Auth domain must match project');
-  assert.ok(config.apiKey, 'API key must be present');
-  assert.ok(config.appId, 'App ID must be present');
+  assert.equal(config.messagingSenderId, '686590748568', 'messagingSenderId must be 686590748568');
+  assert.equal(config.appId, '1:686590748568:web:586515f694e144b3476ded', 'App ID must match genuine project 686590748568 Web App');
+  assert.equal(config.apiKey, 'AIzaSyC56Ke1o0tGoeRfZvysQ_DrLuI3JcUBj94', 'API key must match the provided one');
   assert.ok(config.authDomain.startsWith(config.projectId), 'authDomain must match projectId');
 });
 

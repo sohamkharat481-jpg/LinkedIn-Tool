@@ -1,7 +1,7 @@
 From 7eb3185bd9b8e7ae61766a061a131b84160e8d51 Mon Sep 17 00:00:00 2001
 From: Soham Kharat <sohamkharat481@gmail.com>
 Date: Thu, 22 Oct 2026 18:16:54 +0000
-Subject: [PATCH 3/3] fix(auth): eliminate old project 868647160060 fallbacks
+Subject: [PATCH 3/4] fix(auth): eliminate old project 868647160060 fallbacks
  and add configuration mismatch detection
 
 ---

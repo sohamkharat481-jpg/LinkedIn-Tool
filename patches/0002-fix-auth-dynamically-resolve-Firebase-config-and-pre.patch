@@ -1,7 +1,7 @@
 From d67ddf83b439d52a1db65a6ec4c70ef31b44196a Mon Sep 17 00:00:00 2001
 From: Soham Kharat <sohamkharat481@gmail.com>
 Date: Thu, 22 Oct 2026 18:13:24 +0000
-Subject: [PATCH 2/3] fix(auth): dynamically resolve Firebase config and
+Subject: [PATCH 2/4] fix(auth): dynamically resolve Firebase config and
  prevent stale instance mismatch
 
 ---

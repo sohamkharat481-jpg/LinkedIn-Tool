@@ -17,14 +17,15 @@ export const getResolvedFirebaseConfig = () => {
   const env = (import.meta as any).env || {};
   const baseConfig = firebaseConfig || {};
   const resolvedProjectId = baseConfig.projectId || env.VITE_FIREBASE_PROJECT_ID || 'linkedin-tool-510912';
+  const resolvedApiKey = baseConfig.apiKey || env.VITE_FIREBASE_API_KEY || (typeof window === 'undefined' ? 'test-api-key-for-node-environment' : '');
   return {
     projectId: resolvedProjectId,
-    apiKey: baseConfig.apiKey || env.VITE_FIREBASE_API_KEY || '',
+    apiKey: resolvedApiKey,
     authDomain: baseConfig.authDomain || env.VITE_FIREBASE_AUTH_DOMAIN || `${resolvedProjectId}.firebaseapp.com`,
     storageBucket: baseConfig.storageBucket || env.VITE_FIREBASE_STORAGE_BUCKET || `${resolvedProjectId}.firebasestorage.app`,
-    messagingSenderId: baseConfig.messagingSenderId || env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
-    appId: baseConfig.appId || env.VITE_FIREBASE_APP_ID || '',
-    measurementId: baseConfig.measurementId || env.VITE_FIREBASE_MEASUREMENT_ID || ''
+    messagingSenderId: baseConfig.messagingSenderId || env.VITE_FIREBASE_MESSAGING_SENDER_ID || '686590748568',
+    appId: baseConfig.appId || env.VITE_FIREBASE_APP_ID || '1:686590748568:web:586515f694e144b3476ded',
+    measurementId: baseConfig.measurementId || env.VITE_FIREBASE_MEASUREMENT_ID || 'G-FW3RLGF071'
   };
 };
 
