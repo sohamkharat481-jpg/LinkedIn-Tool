@@ -379,35 +379,19 @@ export async function verifyServerAuthToken(
 }
 
 export function isEmailAuthorized(email?: string): boolean {
-  if (!email) {
+  if (!email || typeof email !== 'string' || !email.includes('@')) {
     return Boolean(process.env.NODE_ENV === 'test' || process.env.VITEST || process.env.JEST_WORKER_ID);
   }
   const lowerEmail = email.toLowerCase().trim();
 
-  // Allow common test emails in test environment
-  if (process.env.NODE_ENV === 'test' || process.env.VITEST || process.env.JEST_WORKER_ID) {
-    if (
-      lowerEmail.includes('tenant') ||
-      lowerEmail.includes('company') ||
-      lowerEmail.includes('leadfinder.app') ||
-      lowerEmail.includes('test') ||
-      lowerEmail === 'alice@tenant-a.com' ||
-      lowerEmail === 'alice@company-a.com' ||
-      lowerEmail === 'corp@tenant.com' ||
-      lowerEmail === 'service@leadfinder.app'
-    ) {
-      return true;
-    }
-  }
-
+  // If AUTHORIZED_USER_EMAILS env var is explicitly configured, respect it. Otherwise, allow any valid email (public access).
   const envEmails = process.env.AUTHORIZED_USER_EMAILS || process.env.AUTHORIZED_USER_EMAIL;
-  let allowed: string[] = ['anjanapadhi21@gmail.com', 'sohamkharat481@gmail.com'];
-
   if (envEmails) {
-    allowed = envEmails.split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
+    const allowed = envEmails.split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
+    return allowed.includes(lowerEmail);
   }
 
-  return allowed.includes(lowerEmail);
+  return true;
 }
 
 

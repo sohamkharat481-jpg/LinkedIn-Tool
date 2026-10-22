@@ -111,19 +111,6 @@ export const initAuthListener = (
 ) => {
   return onAuthStateChanged(auth, async (user: User | null) => {
     if (user) {
-      const email = (user.email || '').toLowerCase().trim();
-      const allowedEmails = ['anjanapadhi21@gmail.com', 'sohamkharat481@gmail.com'];
-      if (email && !allowedEmails.includes(email)) {
-        console.warn('Unauthorized user email in session:', email);
-        await signOut(auth);
-        cachedAccessToken = null;
-        if (typeof window !== 'undefined') {
-          sessionStorage.removeItem(SESSION_TOKEN_KEY);
-        }
-        if (onFailure) onFailure();
-        return;
-      }
-
       // Check in-memory token first, then session storage
       let tokenToVerify = cachedAccessToken;
       if (!tokenToVerify && typeof window !== 'undefined') {

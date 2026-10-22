@@ -33,19 +33,19 @@ test('1. Two authorized accounts (anjanapadhi21@gmail.com and sohamkharat481@gma
   assert.equal(resSoham.user?.email, 'sohamkharat481@gmail.com');
 });
 
-test('2. Unauthorized third-party account is rejected with 403 Forbidden', async () => {
-  assert.equal(isEmailAuthorized('intruder@gmail.com'), false);
-  assert.equal(isEmailAuthorized('random.user@yahoo.com'), false);
+test('2. Any valid user account can sign up and log in (public access)', async () => {
+  assert.equal(isEmailAuthorized('newuser@gmail.com'), true);
+  assert.equal(isEmailAuthorized('anyuser@yahoo.com'), true);
 
-  const tokenIntruder = createSignedTestToken({
-    userId: 'user-intruder',
-    email: 'intruder@gmail.com'
+  const tokenNewUser = createSignedTestToken({
+    userId: 'user-new',
+    email: 'newuser@gmail.com'
   });
-  const resIntruder = await verifyServerAuthToken({
-    headers: { authorization: `Bearer ${tokenIntruder}` }
+  const resNewUser = await verifyServerAuthToken({
+    headers: { authorization: `Bearer ${tokenNewUser}` }
   });
-  assert.equal(resIntruder.status, 403);
-  assert.match(resIntruder.error || '', /not authorized/i);
+  assert.equal(resNewUser.status, 200);
+  assert.equal(resNewUser.user?.email, 'newuser@gmail.com');
 });
 
 test('3. Unauthenticated requests are rejected with 401', async () => {
