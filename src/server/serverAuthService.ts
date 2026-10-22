@@ -21,28 +21,10 @@ let cachedFirebaseConfig: { projectId?: string; apiKey?: string } | null = null;
 function getFirebaseConfig(): { projectId?: string; apiKey?: string } {
   if (cachedFirebaseConfig) return cachedFirebaseConfig;
   
-  // Primary: Config File (firebase-applet-config.json) to prevent stale environment variables from overriding the correct project
-  try {
-    const configPath = path.resolve(process.cwd(), 'firebase-applet-config.json');
-    if (fs.existsSync(configPath)) {
-      const content = fs.readFileSync(configPath, 'utf8');
-      const parsed = JSON.parse(content);
-      if (parsed?.projectId) {
-        cachedFirebaseConfig = parsed as { projectId?: string; apiKey?: string };
-        return cachedFirebaseConfig;
-      }
-    }
-  } catch (e) {
-    console.warn('Could not read firebase-applet-config.json:', e);
-  }
-
-  // Fallback: Environment Variables
-  const envConfig = {
-    projectId: process.env.VITE_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID || 'linkedin-tool-510912',
-    apiKey: process.env.VITE_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY
+  cachedFirebaseConfig = {
+    projectId: 'linkedin-tool-510912',
+    apiKey: process.env.VITE_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY || 'AIzaSyAIOhDtP8yjvPTFdepJ9n9Wh0pbN3Os8rQ'
   };
-
-  cachedFirebaseConfig = envConfig;
   return cachedFirebaseConfig;
 }
 

@@ -14,16 +14,15 @@ import {
 import firebaseConfig from '../../firebase-applet-config.json';
 
 const getResolvedFirebaseConfig = () => {
-  const env = (import.meta as any).env || {};
   const baseConfig = firebaseConfig || {};
   return {
-    projectId: baseConfig.projectId || env.VITE_FIREBASE_PROJECT_ID || 'linkedin-tool-510912',
-    apiKey: baseConfig.apiKey || env.VITE_FIREBASE_API_KEY,
-    authDomain: baseConfig.authDomain || env.VITE_FIREBASE_AUTH_DOMAIN || 'linkedin-tool-510912.firebaseapp.com',
-    storageBucket: baseConfig.storageBucket || env.VITE_FIREBASE_STORAGE_BUCKET || 'linkedin-tool-510912.firebasestorage.app',
-    messagingSenderId: baseConfig.messagingSenderId || env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-    appId: baseConfig.appId || env.VITE_FIREBASE_APP_ID,
-    measurementId: baseConfig.measurementId || env.VITE_FIREBASE_MEASUREMENT_ID
+    projectId: 'linkedin-tool-510912',
+    apiKey: baseConfig.apiKey || (import.meta as any).env?.VITE_FIREBASE_API_KEY || 'AIzaSyAIOhDtP8yjvPTFdepJ9n9Wh0pbN3Os8rQ',
+    authDomain: 'linkedin-tool-510912.firebaseapp.com',
+    storageBucket: 'linkedin-tool-510912.firebasestorage.app',
+    messagingSenderId: baseConfig.messagingSenderId || '868647160060',
+    appId: baseConfig.appId || '1:868647160060:web:80a9e5c5a101bc7341ef79',
+    measurementId: baseConfig.measurementId || ''
   };
 };
 
