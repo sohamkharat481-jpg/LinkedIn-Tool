@@ -15,7 +15,7 @@ import {
 import { dbService } from './services/storage';
 import { SupabaseDataService } from './services/supabaseDataService';
 import type { LeadPersistenceStatus } from './services/supabaseDataService';
-import { initAuthListener, setCachedAccessToken, googleSignIn, googleSignOut, verifyGoogleAccountConnection } from './services/auth';
+import { initAuthListener, setCachedAccessToken, googleSignIn, googleSignOut, verifyGoogleAccountConnection, firebaseSignIn } from './services/auth';
 import { apiUrl } from './services/apiClient';
 import { RefreshCw } from 'lucide-react';
 
@@ -564,6 +564,11 @@ export default function App() {
             setTopBarWsError(null);
             setIsTopBarCreating(false);
             setIsTopBarCreateModalOpen(true);
+          }}
+          firebaseUser={firebaseUser}
+          onSignIn={async () => {
+            const user = await firebaseSignIn();
+            setFirebaseUser(user);
           }}
         />
 

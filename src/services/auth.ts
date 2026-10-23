@@ -116,6 +116,16 @@ export interface GoogleAccountInfo {
   verifiedEmail?: boolean;
 }
 
+export const firebaseSignIn = async (): Promise<User | null> => {
+  try {
+    const result = await signInWithPopup(auth, provider);
+    return result.user;
+  } catch (error) {
+    console.error('Firebase Auth sign-in error:', error);
+    return null;
+  }
+};
+
 /**
  * Validates the OAuth access token with Google API (tokeninfo endpoint) to confirm the connection is genuine.
  * Never reports Connected without verifying live with Google.
