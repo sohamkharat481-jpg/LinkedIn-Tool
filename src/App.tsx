@@ -44,7 +44,8 @@ export default function App() {
   const [supabaseError, setSupabaseError] = useState<string | null>(null);
 
   // Auth & Sheets Integration State
-  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
+  const [googleAccount, setGoogleAccount] = useState<any>(null);
   const [userEmail, setUserEmail] = useState<string>('');
   const [isGoogleConnected, setIsGoogleConnected] = useState<boolean>(false);
 
@@ -90,7 +91,7 @@ export default function App() {
     try {
       let url = apiUrl(`/api/provider-status?type=${activeCfg.providerType}`);
 
-      const idToken = currentUser ? await currentUser.getIdToken().catch(() => null) : null;
+      const idToken = firebaseUser ? await firebaseUser.getIdToken().catch(() => null) : null;
       const headers: Record<string, string> = {};
       if (idToken) {
         headers['Authorization'] = `Bearer ${idToken}`;
@@ -174,13 +175,28 @@ export default function App() {
     }
     fetchProviderStatus();
 
+    // Firebase Auth Listener
+    const unsubscribe = initAuthListener(
+      (user, _, accountInfo) => {
+        setFirebaseUser(user);
+        if (accountInfo) {
+          setGoogleAccount(accountInfo);
+          setUserEmail(accountInfo.email);
+          setIsGoogleConnected(true);
+        }
+      },
+      () => {
+        setFirebaseUser(null);
+      }
+    );
+
     // Restore Google Sheets OAuth session from sessionStorage if present
     const savedToken = typeof window !== 'undefined' ? sessionStorage.getItem('__g_oauth_session_token') : null;
     if (savedToken && savedToken.length > 10) {
       verifyGoogleAccountConnection(savedToken)
         .then((account) => {
           setCachedAccessToken(savedToken);
-          setCurrentUser(account);
+          setGoogleAccount(account);
           setUserEmail(account.email || '');
           setIsGoogleConnected(true);
         })
@@ -189,10 +205,12 @@ export default function App() {
             sessionStorage.removeItem('__g_oauth_session_token');
           }
           setCachedAccessToken(null);
-          setCurrentUser(null);
+          setGoogleAccount(null);
           setIsGoogleConnected(false);
         });
     }
+
+    return () => unsubscribe();
   }, []);
 
   const handleSelectWorkspace = (wsId: string) => {
@@ -205,12 +223,12 @@ export default function App() {
   };
 
   const handleCreateWorkspace = async (name: string, desc: string): Promise<Workspace> => {
-    const currentEmail = (currentUser?.email || userEmail || '').toLowerCase().trim();
+    const currentEmail = (firebaseUser?.email || userEmail || '').toLowerCase().trim();
     if (name.toLowerCase().includes('anjana') && currentEmail && currentEmail !== 'anjanapadhi21@gmail.com') {
       throw new Error(`You are signed in as ${currentEmail}. Please sign in as Anjana (anjanapadhi21@gmail.com) to create Anjana Workspace.`);
     }
 
-    const idToken = currentUser ? await currentUser.getIdToken().catch(() => null) : null;
+    const idToken = firebaseUser ? await firebaseUser.getIdToken().catch(() => null) : null;
     if (!idToken) {
       throw new Error('Authentication required. Please sign in with Google to persist workspace creation in the database.');
     }
@@ -293,7 +311,7 @@ export default function App() {
     }
 
     // Call server endpoint
-    const idToken = currentUser ? await currentUser.getIdToken().catch(() => null) : null;
+    const idToken = firebaseUser ? await firebaseUser.getIdToken().catch(() => null) : null;
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (idToken) {
       headers['Authorization'] = `Bearer ${idToken}`;
@@ -469,7 +487,7 @@ export default function App() {
     try {
       const res = await googleSignIn();
       if (res) {
-        setCurrentUser(res.account);
+        setGoogleAccount(res.account);
         setUserEmail(res.account.email);
         setCachedAccessToken(res.accessToken);
         setIsGoogleConnected(true);
@@ -493,7 +511,7 @@ export default function App() {
   const handleDisconnectSheets = async () => {
     try {
       await googleSignOut();
-      setCurrentUser(null);
+      setGoogleAccount(null);
       setIsGoogleConnected(false);
       setSheetsAuthError(null);
     } catch (e) {
@@ -636,6 +654,15 @@ export default function App() {
               clients={clients}
               activeClient={activeClient}
               onSelectClient={handleSelectClient}
+              currentUser={googleAccount}
+              userEmail={userEmail}
+              isGoogleConnected={isGoogleConnected}
+              onGoogleAuthSuccess={(account, token) => {
+                setGoogleAccount(account);
+                setUserEmail(account.email || 'user@example.com');
+                setCachedAccessToken(token);
+                setIsGoogleConnected(true);
+              }}
             />
           )}
         </main>
@@ -647,15 +674,15 @@ export default function App() {
         onClose={() => setIsExportModalOpen(false)}
         clientName={exportTargetClientName}
         leadsToExport={exportTargetLeads}
-        currentUser={currentUser}
+        currentUser={firebaseUser}
         existingSpreadsheetId={
           exportTargetClientId && activeWorkspace
             ? dbService.getGoogleIntegration(activeWorkspace.id, exportTargetClientId)?.spreadsheetId
             : undefined
         }
-        onGoogleAuthSuccess={(user, token) => {
-          setCurrentUser(user);
-          setUserEmail(user.email || 'user@example.com');
+        onGoogleAuthSuccess={(account, token) => {
+          setGoogleAccount(account);
+          setUserEmail(account.email || 'user@example.com');
           setCachedAccessToken(token);
           setIsGoogleConnected(true);
         }}
