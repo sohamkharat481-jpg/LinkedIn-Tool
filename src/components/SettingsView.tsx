@@ -32,10 +32,10 @@ interface SettingsViewProps {
   onCreateWorkspace: (name: string, desc: string) => Promise<any>;
   providerConfig: LeadProviderConfig;
   onUpdateProviderConfig: (config: Partial<LeadProviderConfig>) => void;
-  currentUser: FirebaseUser | null;
-  userEmail: string;
-  isGoogleConnected: boolean;
-  onGoogleAuthSuccess: (user: FirebaseUser, token: string) => void;
+  currentUser?: any;
+  userEmail?: string;
+  isGoogleConnected?: boolean;
+  onGoogleAuthSuccess?: (user: any, token: string) => void;
   providerStatus: ProviderStatusInfo;
   onRefreshProviderStatus: () => void;
   clients: Client[];
@@ -398,7 +398,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 await googleSignOut();
               } else {
                 const res = await googleSignIn();
-                if (res) onGoogleAuthSuccess(res.user, res.accessToken);
+                if (res && onGoogleAuthSuccess) {
+                  onGoogleAuthSuccess(res.user, res.accessToken);
+                }
               }
             }}
             className="px-4 py-2 bg-white border border-gray-300 hover:bg-gray-100 text-gray-800 text-xs font-bold rounded-xl transition-colors shadow-xs"

@@ -43,6 +43,11 @@ export default function App() {
   const [isLoadingData, setIsLoadingData] = useState<boolean>(false);
   const [supabaseError, setSupabaseError] = useState<string | null>(null);
 
+  // Auth & Sheets Integration State
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [userEmail, setUserEmail] = useState<string>('');
+  const [isGoogleConnected, setIsGoogleConnected] = useState<boolean>(false);
+
   // Top Bar Workspace Creation Modal state
   const [isTopBarCreateModalOpen, setIsTopBarCreateModalOpen] = useState(false);
   const [topBarWsName, setTopBarWsName] = useState('');
