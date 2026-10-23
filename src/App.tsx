@@ -15,7 +15,7 @@ import {
 import { dbService } from './services/storage';
 import { SupabaseDataService } from './services/supabaseDataService';
 import type { LeadPersistenceStatus } from './services/supabaseDataService';
-import { initAuthListener, setCachedAccessToken, googleSignIn, googleSignOut, verifyGoogleAccountConnection, firebaseSignIn } from './services/auth';
+import { initAuthListener, setCachedAccessToken, googleSignIn, googleSignOut, verifyGoogleAccountConnection, firebaseSignIn, auth } from './services/auth';
 import { apiUrl } from './services/apiClient';
 import { RefreshCw } from 'lucide-react';
 
@@ -91,7 +91,10 @@ export default function App() {
     try {
       let url = apiUrl(`/api/provider-status?type=${activeCfg.providerType}`);
 
-      const idToken = firebaseUser ? await firebaseUser.getIdToken().catch(() => null) : null;
+      const idToken = auth.currentUser ? await auth.currentUser.getIdToken(true).catch((err: any) => {
+        console.error('getIdToken error:', err);
+        return null;
+      }) : null;
       const headers: Record<string, string> = {};
       if (idToken) {
         headers['Authorization'] = `Bearer ${idToken}`;
@@ -228,7 +231,11 @@ export default function App() {
       throw new Error(`You are signed in as ${currentEmail}. Please sign in as Anjana (anjanapadhi21@gmail.com) to create Anjana Workspace.`);
     }
 
-    const idToken = firebaseUser ? await firebaseUser.getIdToken().catch(() => null) : null;
+    const idToken = auth.currentUser ? await auth.currentUser.getIdToken(true).catch((err: any) => {
+      console.error('getIdToken error:', err);
+      setTopBarWsError('Authentication token error: ' + err.message);
+      return null;
+    }) : null;
     if (!idToken) {
       throw new Error('Authentication required. Please sign in with Google to persist workspace creation in the database.');
     }
@@ -311,7 +318,10 @@ export default function App() {
     }
 
     // Call server endpoint
-    const idToken = firebaseUser ? await firebaseUser.getIdToken().catch(() => null) : null;
+    const idToken = auth.currentUser ? await auth.currentUser.getIdToken(true).catch((err: any) => {
+      console.error('getIdToken error:', err);
+      return null;
+    }) : null;
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (idToken) {
       headers['Authorization'] = `Bearer ${idToken}`;
