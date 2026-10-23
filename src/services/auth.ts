@@ -120,9 +120,10 @@ export const firebaseSignIn = async (): Promise<User | null> => {
   try {
     const result = await signInWithPopup(auth, provider);
     return result.user;
-  } catch (error) {
+  } catch (error: any) {
     console.error('Firebase Auth sign-in error:', error);
-    return null;
+    // Rethrow to allow UI to show error
+    throw error;
   }
 };
 

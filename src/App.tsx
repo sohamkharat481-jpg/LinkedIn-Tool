@@ -577,8 +577,13 @@ export default function App() {
           }}
           firebaseUser={firebaseUser}
           onSignIn={async () => {
-            const user = await firebaseSignIn();
-            setFirebaseUser(user);
+            try {
+              const user = await firebaseSignIn();
+              setFirebaseUser(user);
+            } catch (err: any) {
+              console.error('Sign-in error in TopBar:', err);
+              alert(`Authentication failed: ${err.message || 'Unknown error'}`);
+            }
           }}
         />
 
