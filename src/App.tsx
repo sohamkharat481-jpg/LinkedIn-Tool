@@ -15,7 +15,7 @@ import {
 import { dbService } from './services/storage';
 import { SupabaseDataService } from './services/supabaseDataService';
 import type { LeadPersistenceStatus } from './services/supabaseDataService';
-import { initAuthListener, setCachedAccessToken, googleSignIn, googleSignOut } from './services/auth';
+import { initAuthListener, setCachedAccessToken, googleSignIn, googleSignOut, verifyGoogleAccountConnection } from './services/auth';
 import { apiUrl } from './services/apiClient';
 import { RefreshCw } from 'lucide-react';
 
@@ -174,7 +174,25 @@ export default function App() {
     }
     fetchProviderStatus();
 
-    // Initial Data Load
+    // Restore Google Sheets OAuth session from sessionStorage if present
+    const savedToken = typeof window !== 'undefined' ? sessionStorage.getItem('__g_oauth_session_token') : null;
+    if (savedToken && savedToken.length > 10) {
+      verifyGoogleAccountConnection(savedToken)
+        .then((account) => {
+          setCachedAccessToken(savedToken);
+          setCurrentUser(account);
+          setUserEmail(account.email || '');
+          setIsGoogleConnected(true);
+        })
+        .catch(() => {
+          if (typeof window !== 'undefined') {
+            sessionStorage.removeItem('__g_oauth_session_token');
+          }
+          setCachedAccessToken(null);
+          setCurrentUser(null);
+          setIsGoogleConnected(false);
+        });
+    }
   }, []);
 
   const handleSelectWorkspace = (wsId: string) => {

@@ -62,6 +62,8 @@ export async function exportLeadsToGoogleSheet(
         if (searchData.files && searchData.files.length > 0) {
           spreadsheetId = searchData.files[0].id;
         }
+      } else if (searchRes.status === 401) {
+        throw new Error('Google OAuth token is expired or unauthorized (HTTP 401). Please re-authenticate.');
       }
 
       // If still no spreadsheet found, create a new one
@@ -102,6 +104,16 @@ export async function exportLeadsToGoogleSheet(
         });
 
         if (!createRes.ok) {
+          if (createRes.status === 401) {
+            throw new Error('Google OAuth token is expired or unauthorized (HTTP 401). Please re-authenticate.');
+          }
+          if (createRes.status === 403) {
+            const errJson = await createRes.json().catch(() => ({}));
+            throw new Error(
+              errJson.error?.message ||
+                'Google Sheets access denied (HTTP 403). Please verify Google Sheets API is enabled and test user access is granted in Google Cloud Console.'
+            );
+          }
           const errText = await createRes.text();
           throw new Error(`Failed to create Google Sheet: ${errText}`);
         }

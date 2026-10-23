@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { User as FirebaseUser } from 'firebase/auth';
 import { LeadRecord } from '../types';
 import { exportLeadsToGoogleSheet } from '../services/sheetsExport';
-import { googleSignIn, getCachedAccessToken } from '../services/auth';
+import { googleSignIn, getCachedAccessToken, setCachedAccessToken } from '../services/auth';
 import { FileSpreadsheet, Loader2, CheckCircle2, AlertCircle, ExternalLink, X, ShieldCheck } from 'lucide-react';
 
 interface GoogleSheetsExportModalProps {
@@ -75,7 +75,17 @@ export const GoogleSheetsExportModal: React.FC<GoogleSheetsExportModalProps> = (
       }
     } catch (err: any) {
       console.error('Export modal error:', err);
-      setExportError(err.message || 'Failed to export leads to Google Sheets.');
+      const msg = err.message || '';
+      if (
+        msg.includes('401') ||
+        msg.includes('expired') ||
+        msg.includes('unauthorized') ||
+        msg.includes('re-authenticate') ||
+        msg.includes('revoked')
+      ) {
+        setCachedAccessToken(null);
+      }
+      setExportError(msg || 'Failed to export leads to Google Sheets.');
     } finally {
       setIsExporting(false);
     }

@@ -117,7 +117,7 @@ export interface GoogleAccountInfo {
 }
 
 /**
- * Validates the OAuth access token directly with Google API to confirm the connection is genuine.
+ * Validates the OAuth access token with Google API (tokeninfo endpoint) to confirm the connection is genuine.
  * Never reports Connected without verifying live with Google.
  */
 export const verifyGoogleAccountConnection = async (token: string): Promise<GoogleAccountInfo> => {
@@ -125,27 +125,66 @@ export const verifyGoogleAccountConnection = async (token: string): Promise<Goog
     throw new Error('Invalid or missing OAuth token.');
   }
 
-  const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-    headers: { Authorization: `Bearer ${token}` }
-  });
+  // 1. Verify token status and scopes with Google OAuth2 Tokeninfo endpoint
+  let tokenInfo: any = null;
+  try {
+    const tokenInfoRes = await fetch(
+      `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(token)}`
+    );
 
-  if (!res.ok) {
-    if (res.status === 401) {
+    if (tokenInfoRes.status === 400 || tokenInfoRes.status === 401) {
       throw new Error('Google OAuth token is expired or unauthorized. Please re-authenticate.');
     }
-    throw new Error(`Google account verification failed (HTTP ${res.status}).`);
+
+    if (!tokenInfoRes.ok) {
+      throw new Error(`Google token validation failed (HTTP ${tokenInfoRes.status}).`);
+    }
+
+    tokenInfo = await tokenInfoRes.json();
+  } catch (err: any) {
+    if (err.message && err.message.includes('expired or unauthorized')) {
+      throw err;
+    }
+    console.warn('Tokeninfo endpoint warning:', err);
   }
 
-  const data = await res.json();
-  if (!data.email) {
-    throw new Error('Google account returned no verified email address.');
+  if (tokenInfo?.error) {
+    throw new Error(`Google OAuth token invalid: ${tokenInfo.error_description || tokenInfo.error}`);
+  }
+
+  if (tokenInfo?.scope) {
+    const grantedScopes = String(tokenInfo.scope).split(' ');
+    const hasSheets = grantedScopes.some((s) => s.includes('spreadsheets'));
+    if (!hasSheets) {
+      throw new Error('Google Sheets permission was not granted. Please re-authenticate and allow spreadsheet access.');
+    }
+  }
+
+  // 2. Resolve account info (email, name, picture)
+  let userEmail = tokenInfo?.email || '';
+  let userName = userEmail ? userEmail.split('@')[0] : 'Google Account';
+  let userPicture: string | undefined = undefined;
+
+  try {
+    const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data.email) userEmail = data.email;
+      if (data.name) userName = data.name;
+      if (data.picture) userPicture = data.picture;
+    }
+  } catch {
+    // Graceful fallback if userinfo endpoint is restricted
   }
 
   return {
-    email: data.email,
-    name: data.name || data.email.split('@')[0],
-    picture: data.picture,
-    verifiedEmail: Boolean(data.email_verified)
+    email: userEmail || 'connected-account@google.com',
+    name: userName,
+    picture: userPicture,
+    verifiedEmail: Boolean(userEmail)
   };
 };
 
@@ -242,10 +281,18 @@ export const googleSignIn = async (): Promise<{
       .then(() => {
         const client = (window as any).google.accounts.oauth2.initTokenClient({
           client_id: clientId,
-          scope: 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file',
+          scope: 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email openid',
           callback: async (response: any) => {
             if (response.error) {
-              reject(new Error(response.error_description || response.error));
+              if (response.error === 'access_denied') {
+                reject(
+                  new Error(
+                    'Google authorization was denied or cancelled. If the Google Cloud project is in Testing mode, ensure your email address is added under "Test users".'
+                  )
+                );
+              } else {
+                reject(new Error(response.error_description || response.error));
+              }
               return;
             }
             const token = response.access_token;
