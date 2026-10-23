@@ -399,7 +399,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               } else {
                 const res = await googleSignIn();
                 if (res && onGoogleAuthSuccess) {
-                  onGoogleAuthSuccess(res.user, res.accessToken);
+                  onGoogleAuthSuccess(res.account as any, res.accessToken);
                 }
               }
             }}

@@ -50,7 +50,7 @@ export const GoogleSheetsExportModal: React.FC<GoogleSheetsExportModalProps> = (
         setExportStepMessage('Connecting Google Account via OAuth...');
         const authRes = await googleSignIn();
         if (!authRes) throw new Error('Google authentication cancelled or failed.');
-        onGoogleAuthSuccess(authRes.user, authRes.accessToken);
+        onGoogleAuthSuccess(authRes.account as any, authRes.accessToken);
         token = authRes.accessToken;
       }
 

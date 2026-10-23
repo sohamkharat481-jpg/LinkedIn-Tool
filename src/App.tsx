@@ -451,7 +451,7 @@ export default function App() {
     try {
       const res = await googleSignIn();
       if (res) {
-        setCurrentUser(res.user);
+        setCurrentUser(res.account);
         setUserEmail(res.account.email);
         setCachedAccessToken(res.accessToken);
         setIsGoogleConnected(true);
@@ -459,7 +459,14 @@ export default function App() {
       }
     } catch (err: any) {
       console.error('Google Sheets sign in error:', err);
-      setSheetsAuthError(err.message || 'Google Sheets authorization failed.');
+      const rawMsg = err.message || '';
+      if (rawMsg.includes('api-key') || rawMsg.includes('apiKey')) {
+        setSheetsAuthError('Google authorization configuration required.');
+      } else if (rawMsg.includes('closed') || rawMsg.includes('cancel')) {
+        setSheetsAuthError('Authorization window was closed.');
+      } else {
+        setSheetsAuthError(rawMsg || 'Google account not connected.');
+      }
     } finally {
       setIsConnectingSheets(false);
     }

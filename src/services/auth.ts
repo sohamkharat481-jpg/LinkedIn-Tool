@@ -199,94 +199,79 @@ export const initAuthListener = (
 };
 
 /**
- * Sign in with Google popup (with automatic redirect fallback for blocked popups in iframes) and verify OAuth token live against Google API.
+ * Sign in with Google using Google Identity Services (GIS) Token Client for Google Sheets OAuth scopes.
  */
 export const googleSignIn = async (): Promise<{
-  user: User;
   accessToken: string;
   account: GoogleAccountInfo;
 } | null> => {
-  try {
-    isSigningIn = true;
-    const activeCfg = getResolvedFirebaseConfig();
-    if (
-      activeCfg.projectId === 'linkedin-tool-510912' &&
-      (activeCfg.appId.includes('868647160060') || activeCfg.apiKey === 'AIzaSyAIOhDtP8yjvPTFdepJ9n9Wh0pbN3Os8rQ')
-    ) {
-      console.warn(
-        '[Firebase Configuration Mismatch] Project ID is "linkedin-tool-510912", but API key or App ID belongs to project 868647160060 (project-8f9ec042-024f-49a1-9f1). This causes auth/unauthorized-domain until genuine Web App credentials for linkedin-tool-510912 are provided.'
-      );
+  return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined') {
+      reject(new Error('Window not available'));
+      return;
     }
 
-    let result;
-    try {
-      result = await signInWithPopup(auth, provider);
-    } catch (popupError: any) {
-      if (popupError?.code === 'auth/popup-blocked') {
-        console.warn('Popup blocked by browser (iframe environment). Falling back to signInWithRedirect...');
-        await signInWithRedirect(auth, provider);
-        return null;
-      }
-      throw popupError;
-    }
+    const clientId = firebaseConfig.oAuthClientId || '686590748568-4v48h52di3kt9gi8d9r1hpn8hlf8tq95.apps.googleusercontent.com';
 
-    const credential = GoogleAuthProvider.credentialFromResult(result);
-
-    if (!credential?.accessToken) {
-      throw new Error(
-        'Google sign-in succeeded, but Google Sheets OAuth access token was not returned. Please ensure spreadsheet permissions are approved.'
-      );
-    }
-
-    // Step 2: Live confirmation against Google API before returning
-    const verifiedAccount = await verifyGoogleAccountConnection(credential.accessToken);
-
-    cachedAccessToken = credential.accessToken;
-    if (typeof window !== 'undefined') {
-      sessionStorage.setItem(SESSION_TOKEN_KEY, credential.accessToken);
-    }
-
-    return {
-      user: result.user,
-      accessToken: cachedAccessToken,
-      account: verifiedAccount
+    const loadGIS = () => {
+      return new Promise<void>((resolveLoad, rejectLoad) => {
+        if ((window as any).google?.accounts?.oauth2) {
+          resolveLoad();
+          return;
+        }
+        const existingScript = document.querySelector('script[src*="accounts.google.com/gsi/client"]');
+        if (existingScript) {
+          existingScript.addEventListener('load', () => resolveLoad());
+          existingScript.addEventListener('error', () => rejectLoad(new Error('Failed to load Google Identity Services script.')));
+          if ((window as any).google?.accounts?.oauth2) {
+            resolveLoad();
+          }
+          return;
+        }
+        const script = document.createElement('script');
+        script.src = 'https://accounts.google.com/gsi/client';
+        script.async = true;
+        script.defer = true;
+        script.onload = () => resolveLoad();
+        script.onerror = () => rejectLoad(new Error('Failed to load Google Identity Services script.'));
+        document.head.appendChild(script);
+      });
     };
-  } catch (error: any) {
-    const activeCfg = getResolvedFirebaseConfig();
-    const runtimeOptions = auth.app.options;
-    const rawKey = activeCfg.apiKey || runtimeOptions.apiKey || '';
-    const keyPrefix = rawKey.length > 8 ? `${rawKey.substring(0, 8)}...` : (rawKey || 'none');
 
-    console.error('Google Sign-In Diagnostic Failure:', {
-      errorCode: error?.code || 'unknown',
-      errorMessage: error?.message || 'unknown',
-      configProjectId: activeCfg.projectId,
-      configAuthDomain: activeCfg.authDomain,
-      runtimeProjectId: runtimeOptions.projectId,
-      runtimeAuthDomain: runtimeOptions.authDomain,
-      hostname: typeof window !== 'undefined' ? window.location.hostname : 'unknown',
-      apiKeyPrefix: keyPrefix,
-      runtimeAppId: runtimeOptions.appId || activeCfg.appId || 'none'
-    });
-    if (error?.code === 'auth/popup-closed-by-user') {
-      throw new Error('Sign-in cancelled: The authorization popup was closed before completion.');
-    }
-    if (error?.code === 'auth/unauthorized-domain') {
-      const hostname = typeof window !== 'undefined' ? window.location.hostname : 'current domain';
-      throw new Error(
-        `Domain (${hostname}) is not authorized in Firebase Console -> Authentication -> Settings -> Authorized Domains (Project: ${runtimeOptions.projectId || activeCfg.projectId}). Please ensure the apiKey and appId in firebase-applet-config.json match the Web App settings in your Firebase Console project where this domain is authorized.`
-      );
-    }
-    if (error?.code === 'auth/cancelled-popup-request') {
-      throw new Error('Sign-in conflict: another popup was already open. Please retry.');
-    }
-    if (error?.code === 'auth/operation-not-allowed') {
-      throw new Error('Google Sign-In is not enabled in the Firebase Console under Authentication -> Sign-in method.');
-    }
-    throw new Error(error?.message || 'Google authentication failed.');
-  } finally {
-    isSigningIn = false;
-  }
+    loadGIS()
+      .then(() => {
+        const client = (window as any).google.accounts.oauth2.initTokenClient({
+          client_id: clientId,
+          scope: 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file',
+          callback: async (response: any) => {
+            if (response.error) {
+              reject(new Error(response.error_description || response.error));
+              return;
+            }
+            const token = response.access_token;
+            if (!token) {
+              reject(new Error('Failed to obtain Google access token.'));
+              return;
+            }
+            try {
+              const verifiedAccount = await verifyGoogleAccountConnection(token);
+              cachedAccessToken = token;
+              if (typeof window !== 'undefined') {
+                sessionStorage.setItem(SESSION_TOKEN_KEY, token);
+              }
+              resolve({
+                accessToken: token,
+                account: verifiedAccount
+              });
+            } catch (err: any) {
+              reject(err);
+            }
+          }
+        });
+        client.requestAccessToken();
+      })
+      .catch((err) => reject(err));
+  });
 };
 
 /**
@@ -330,10 +315,13 @@ export const setCachedAccessToken = (token: string | null): void => {
  * Signs out the current user and clears cached tokens.
  */
 export const googleSignOut = async (): Promise<void> => {
-  try {
-    await signOut(auth);
-  } catch (e) {
-    console.warn('Firebase signOut error:', e);
+  const token = cachedAccessToken || (typeof window !== 'undefined' ? sessionStorage.getItem(SESSION_TOKEN_KEY) : null);
+  if (token && typeof window !== 'undefined' && (window as any).google?.accounts?.oauth2?.revoke) {
+    try {
+      (window as any).google.accounts.oauth2.revoke(token, () => {});
+    } catch (e) {
+      console.warn('GIS token revoke warning:', e);
+    }
   }
   cachedAccessToken = null;
   if (typeof window !== 'undefined') {

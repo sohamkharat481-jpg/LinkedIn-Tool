@@ -1,0 +1,85 @@
+From 9895cadc70a7d3ac2c855d1aaf326c30e7082c8d Mon Sep 17 00:00:00 2001
+From: Soham Kharat <sohamkharat481@gmail.com>
+Date: Fri, 23 Oct 2026 11:38:21 +0000
+Subject: [PATCH 2/2] fix(oauth): preload GIS client script, sanitize sheets
+ error messages, and refine token revocation
+
+---
+ index.html           |  1 +
+ src/App.tsx          |  9 ++++++++-
+ src/services/auth.ts | 20 ++++++++++++++++----
+ 3 files changed, 25 insertions(+), 5 deletions(-)
+
+diff --git a/index.html b/index.html
+index 6ed9a39..028c54f 100644
+--- a/index.html
++++ b/index.html
+@@ -8,6 +8,7 @@
+     <meta name="description" content="Internal B2B lead discovery tool for agencies with client management, deduplication, and Google Sheets export." />
+     <meta property="og:title" content="LinkedIn Lead Finder" />
+     <meta property="og:description" content="Internal B2B lead discovery tool for agencies with client management, deduplication, and Google Sheets export." />
++    <script src="https://accounts.google.com/gsi/client" async defer></script>
+   </head>
+   <body>
+     <div id="root"></div>
+diff --git a/src/App.tsx b/src/App.tsx
+index c99d22f..6acaa11 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -459,7 +459,14 @@ export default function App() {
+       }
+     } catch (err: any) {
+       console.error('Google Sheets sign in error:', err);
+-      setSheetsAuthError(err.message || 'Google Sheets authorization failed.');
++      const rawMsg = err.message || '';
++      if (rawMsg.includes('api-key') || rawMsg.includes('apiKey')) {
++        setSheetsAuthError('Google authorization configuration required.');
++      } else if (rawMsg.includes('closed') || rawMsg.includes('cancel')) {
++        setSheetsAuthError('Authorization window was closed.');
++      } else {
++        setSheetsAuthError(rawMsg || 'Google account not connected.');
++      }
+     } finally {
+       setIsConnectingSheets(false);
+     }
+diff --git a/src/services/auth.ts b/src/services/auth.ts
+index 140c390..2fa0676 100644
+--- a/src/services/auth.ts
++++ b/src/services/auth.ts
+@@ -219,6 +219,15 @@ export const googleSignIn = async (): Promise<{
+           resolveLoad();
+           return;
+         }
++        const existingScript = document.querySelector('script[src*="accounts.google.com/gsi/client"]');
++        if (existingScript) {
++          existingScript.addEventListener('load', () => resolveLoad());
++          existingScript.addEventListener('error', () => rejectLoad(new Error('Failed to load Google Identity Services script.')));
++          if ((window as any).google?.accounts?.oauth2) {
++            resolveLoad();
++          }
++          return;
++        }
+         const script = document.createElement('script');
+         script.src = 'https://accounts.google.com/gsi/client';
+         script.async = true;
+@@ -306,10 +315,13 @@ export const setCachedAccessToken = (token: string | null): void => {
+  * Signs out the current user and clears cached tokens.
+  */
+ export const googleSignOut = async (): Promise<void> => {
+-  try {
+-    await signOut(auth);
+-  } catch (e) {
+-    console.warn('Firebase signOut error:', e);
++  const token = cachedAccessToken || (typeof window !== 'undefined' ? sessionStorage.getItem(SESSION_TOKEN_KEY) : null);
++  if (token && typeof window !== 'undefined' && (window as any).google?.accounts?.oauth2?.revoke) {
++    try {
++      (window as any).google.accounts.oauth2.revoke(token, () => {});
++    } catch (e) {
++      console.warn('GIS token revoke warning:', e);
++    }
+   }
+   cachedAccessToken = null;
+   if (typeof window !== 'undefined') {
+-- 
+2.34.1
+
