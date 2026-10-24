@@ -121,6 +121,10 @@ const executeLeadSearch = async (
     const rawCandidates: RawLead[] = await ServerLeadProviderService.fetchCandidateLeads(filters);
     const dedupeResult = filterAndDeduplicateLeads(rawCandidates);
 
+    console.log(
+      `[Diagnostic] Deduplication Pipeline: Raw Candidates: ${dedupeResult.rawCandidatesCount}, Valid Records: ${dedupeResult.validRecordsCount}, Duplicates Removed: ${dedupeResult.totalDuplicatesRemoved}, Final Unique Leads: ${dedupeResult.finalUniqueLeads.length}`
+    );
+
     return {
       status: 200,
       body: {
@@ -143,10 +147,12 @@ const executeLeadSearch = async (
       }
     };
   } catch (error: any) {
+    const isTimeout = Boolean(error.message && error.message.toLowerCase().includes('time'));
+    console.error(`[Diagnostic] Lead Search Execution Failed (${isTimeout ? 'Timeout' : 'Error'}):`, error.message || error);
     return {
-      status: 502,
+      status: isTimeout ? 504 : 502,
       body: {
-        error: error.message || 'Lead provider temporarily unavailable.'
+        error: error.message || 'Lead provider request timed out or failed. Please refine your search filters or try again.'
       }
     };
   }

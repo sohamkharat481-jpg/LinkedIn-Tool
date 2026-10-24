@@ -3,9 +3,9 @@ import { LeadProvider } from './LeadProvider';
 import { enrichRawLead } from '../b2bRelevanceService';
 
 const SOURCE_NAME = 'Wikidata SPARQL Query Service';
-const DEFAULT_TIMEOUT_MS = 15000;
+const DEFAULT_TIMEOUT_MS = 25000;
 
-// Verified Wikidata QIDs for human occupations
+// Verified Wikidata QIDs for human occupations and leadership positions
 export const OCCUPATION_MAP: Record<string, string[]> = {
   'consultant': ['wd:Q15978655'],
   'management consultant': ['wd:Q15978655'],
@@ -24,14 +24,20 @@ export const OCCUPATION_MAP: Record<string, string[]> = {
   'businessperson': ['wd:Q43845'],
   'ceo': ['wd:Q484876', 'wd:Q43845'],
   'chief executive officer': ['wd:Q484876', 'wd:Q43845'],
+  'c-level': ['wd:Q484876', 'wd:Q43845', 'wd:Q3455803'],
+  'c-suite': ['wd:Q484876', 'wd:Q43845', 'wd:Q3455803'],
+  'executive': ['wd:Q484876', 'wd:Q43845', 'wd:Q3455803'],
   'director': ['wd:Q3455803', 'wd:Q1622275'],
   'managing director': ['wd:Q3455803', 'wd:Q1622275'],
+  'vp': ['wd:Q43845', 'wd:Q3455803'],
+  'vp of sales': ['wd:Q43845', 'wd:Q3455803'],
+  'vice president': ['wd:Q43845', 'wd:Q3455803'],
   'manager': ['wd:Q1622275'],
-  'marketing manager': ['wd:Q329439'],
+  'marketing manager': ['wd:Q329439', 'wd:Q1622275'],
   'marketer': ['wd:Q329439'],
-  'vp of sales': ['wd:Q43845'],
   'clinical director': ['wd:Q3455803'],
-  'chief medical officer': ['wd:Q484876']
+  'chief medical officer': ['wd:Q484876', 'wd:Q3455803'],
+  'senior': ['wd:Q3455803', 'wd:Q1622275', 'wd:Q43845']
 };
 
 export const COUNTRY_MAP: Record<string, string> = {
@@ -68,6 +74,7 @@ export class WikidataLeadProvider implements LeadProvider {
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+    const startTime = Date.now();
 
     try {
       const response = await fetch(sparqlUrl, {
@@ -79,13 +86,18 @@ export class WikidataLeadProvider implements LeadProvider {
       });
 
       clearTimeout(timeoutId);
+      const durationMs = Date.now() - startTime;
 
       if (!response.ok) {
+        console.error(`[Diagnostic] Wikidata HTTP Error ${response.status} in ${durationMs}ms`);
         throw new Error(`Wikidata SPARQL query failed with HTTP ${response.status}`);
       }
 
       const data = await response.json();
+      const rawResultsCount = Array.isArray(data?.results?.bindings) ? data.results.bindings.length : 0;
+
       if (!data?.results?.bindings || !Array.isArray(data.results.bindings)) {
+        console.warn(`[Diagnostic] Wikidata Search HTTP 200 in ${durationMs}ms | Raw bindings: 0 | Mapped unique leads: 0`);
         return [];
       }
 
@@ -101,16 +113,17 @@ export class WikidataLeadProvider implements LeadProvider {
         }
       }
 
-      console.log(`[Diagnostic] Wikidata Search: Found ${data.results.bindings.length} raw results, processed ${leads.length} unique leads.`);
+      console.log(`[Diagnostic] Wikidata Search HTTP ${response.status} in ${durationMs}ms | Raw bindings: ${rawResultsCount} | Mapped unique leads: ${leads.length}`);
       return leads;
     } catch (e: any) {
       clearTimeout(timeoutId);
+      const elapsedMs = Date.now() - startTime;
       if (e.name === 'AbortError') {
-        console.error(`Wikidata search timed out after ${DEFAULT_TIMEOUT_MS}ms`);
-      } else {
-        console.error('Wikidata search error:', e.message || e);
+        console.error(`[Diagnostic] Wikidata Search Timeout after ${elapsedMs}ms (Limit: ${DEFAULT_TIMEOUT_MS}ms)`);
+        throw new Error(`Wikidata SPARQL query service timed out after ${Math.round(elapsedMs / 1000)}s. Please try again or narrow your search filters.`);
       }
-      return [];
+      console.error(`[Diagnostic] Wikidata Search Error after ${elapsedMs}ms:`, e.message || e);
+      throw e;
     }
   }
 
@@ -169,7 +182,14 @@ export class WikidataLeadProvider implements LeadProvider {
 
   private buildOccupationQuery(filters: LeadFilter): string {
     const rawTitles = filters.jobTitles && filters.jobTitles.length > 0 ? filters.jobTitles : ['consultant'];
-    const qids = this.resolveQidsForTitles(rawTitles);
+    
+    // Combine job titles and seniority filters for comprehensive QID coverage
+    const titleCandidates = [...rawTitles];
+    if (filters.seniority && filters.seniority.length > 0) {
+      filters.seniority.forEach(s => titleCandidates.push(s));
+    }
+
+    const qids = this.resolveQidsForTitles(titleCandidates);
     const occValues = qids.join(' ');
 
     const countryNorm = (filters.country || '').toLowerCase().trim();
@@ -179,15 +199,14 @@ export class WikidataLeadProvider implements LeadProvider {
     const limit = Math.min(Math.max(Number(filters.maxLeads) || 20, 1), 100);
 
     return `
-      SELECT DISTINCT ?item ?itemLabel ?itemDescription ?website ?countryLabel ?dateOfDeath ?dateOfBirth ?email ?phone ?linkedin ?instagram WHERE {
-        ?item wdt:P31 wd:Q5 ;
-              wdt:P106 ?occ ;
-              wdt:P856 ?website .
-        FILTER NOT EXISTS { ?item wdt:P570 ?deathDate . }
-        VALUES ?occ { ${occValues} }
+      SELECT DISTINCT ?item ?itemLabel ?itemDescription ?website ?countryLabel ?dateOfBirth ?email ?phone ?linkedin ?instagram WHERE {
+        ?item wdt:P31 wd:Q5 .
         ${countryClause}
+        ?item wdt:P106 ?occ .
+        VALUES ?occ { ${occValues} }
+        FILTER NOT EXISTS { ?item wdt:P570 ?deathDate . }
+        OPTIONAL { ?item wdt:P856 ?website . }
         OPTIONAL { ?item wdt:P27 ?country . }
-        OPTIONAL { ?item wdt:P570 ?dateOfDeath . }
         OPTIONAL { ?item wdt:P569 ?dateOfBirth . }
         OPTIONAL { ?item wdt:P968 ?email . }
         OPTIONAL { ?item wdt:P1329 ?phone . }
@@ -230,7 +249,6 @@ export class WikidataLeadProvider implements LeadProvider {
     const instagramLastCheckedAt = instagramUsername ? new Date().toISOString() : undefined;
 
     const country = binding.countryLabel?.value ? binding.countryLabel.value.trim() : 'N/A';
-    const dateOfDeath = binding.dateOfDeath?.value;
     const dateOfBirth = binding.dateOfBirth?.value;
 
     const hasContact = Boolean(website || email || phone || linkedInProfileUrl || instagramUsername);
@@ -260,6 +278,6 @@ export class WikidataLeadProvider implements LeadProvider {
       instagramLastCheckedAt
     };
 
-    return enrichRawLead(baseLead, filters, undefined, dateOfDeath, dateOfBirth);
+    return enrichRawLead(baseLead, filters, undefined, undefined, dateOfBirth);
   }
 }

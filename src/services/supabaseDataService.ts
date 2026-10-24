@@ -555,12 +555,14 @@ export class SupabaseDataService {
       throw new Error(apiRes.error || 'Access denied.');
     }
     if (apiRes.success && apiRes.data) {
-      return {
+      const result = {
         added: apiRes.data.added ?? localResult.added,
         duplicatesSkipped: apiRes.data.duplicatesSkipped ?? localResult.duplicatesSkipped,
         persistenceStatus: apiRes.data.persistenceStatus,
         persistenceMessage: apiRes.data.persistenceMessage
       };
+      console.log(`[Diagnostic] Database Persistence: Input Leads: ${newLeads.length}, Persisted: ${result.added}, Skipped Duplicates: ${result.duplicatesSkipped}`);
+      return result;
     }
 
     if (supabase && newLeads.length > 0) {
