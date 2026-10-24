@@ -60,11 +60,49 @@ dataRouter.get('/workspaces', async (req: Request, res: Response) => {
       }
     }
 
-    // If user has no workspaces authorized yet, associate them with default workspace
-    if (authorizedList.length === 0 && allWorkspaces.length > 0) {
-      const defaultWs = allWorkspaces[0];
-      registerWorkspaceAuthorization(auth.user.userId, defaultWs.id);
-      authorizedList.push(defaultWs);
+    // If user has no workspaces authorized yet, automatically initialize a personalized workspace
+    if (authorizedList.length === 0) {
+      const rawName = auth.user.email
+        ? auth.user.email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+        : 'User';
+      const wsName = `${rawName}'s Workspace`;
+      const wsDesc = `Primary workspace for ${auth.user.email || rawName}`;
+
+      const newWs = dbService.createWorkspace(wsName, wsDesc);
+      registerWorkspaceAuthorization(auth.user.userId, newWs.id);
+
+      if (supabase) {
+        try {
+          await supabase.from('workspaces').insert([
+            {
+              id: newWs.id,
+              name: newWs.name,
+              description: newWs.description || null,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            }
+          ]);
+
+          await supabase.from('users').upsert(
+            [
+              {
+                id: auth.user.userId,
+                email: auth.user.email || `${auth.user.userId}@leadfinder.app`,
+                full_name: rawName,
+                workspace_id: newWs.id,
+                role: 'owner',
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              }
+            ],
+            { onConflict: 'email' }
+          );
+        } catch (dbErr) {
+          console.warn('Database workspace sync error during auto-initialization:', dbErr);
+        }
+      }
+
+      authorizedList.push(newWs);
     }
 
     res.json({ workspaces: authorizedList });
