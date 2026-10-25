@@ -29,8 +29,32 @@ import { SearchHistoryView } from './components/SearchHistoryView';
 import { SettingsView } from './components/SettingsView';
 import { GoogleSheetsExportModal } from './components/GoogleSheetsExportModal';
 import { LoginScreen } from './components/LoginScreen';
+import { PrivacyPolicyView } from './components/PrivacyPolicyView';
+import { TermsOfServiceView } from './components/TermsOfServiceView';
 
 export default function App() {
+  // Router / Path state for public pages
+  const [currentPath, setCurrentPath] = useState<string>(() =>
+    typeof window !== 'undefined' ? window.location.pathname : '/'
+  );
+
+  useEffect(() => {
+    const handleLocationChange = () => {
+      if (typeof window !== 'undefined') {
+        setCurrentPath(window.location.pathname);
+      }
+    };
+    window.addEventListener('popstate', handleLocationChange);
+    return () => window.removeEventListener('popstate', handleLocationChange);
+  }, []);
+
+  const navigateTo = (path: string) => {
+    if (typeof window !== 'undefined') {
+      window.history.pushState({}, '', path);
+      setCurrentPath(path);
+    }
+  };
+
   // Navigation & Workspace State
   const [activeTab, setActiveTab] = useState<NavTab>('finder');
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -294,11 +318,6 @@ export default function App() {
   };
 
   const handleCreateWorkspace = async (name: string, desc: string): Promise<Workspace> => {
-    const currentEmail = (firebaseUser?.email || userEmail || '').toLowerCase().trim();
-    if (name.toLowerCase().includes('anjana') && currentEmail && currentEmail !== 'anjanapadhi21@gmail.com') {
-      throw new Error(`You are signed in as ${currentEmail}. Please sign in as Anjana (anjanapadhi21@gmail.com) to create Anjana Workspace.`);
-    }
-
     let idToken: string | null = null;
     if (auth.currentUser) {
       idToken = await auth.currentUser.getIdToken(true).catch(() => null);
@@ -632,6 +651,15 @@ export default function App() {
       }
     }, 100);
   };
+
+  // Public Unauthenticated Legal Routes
+  if (currentPath === '/privacy') {
+    return <PrivacyPolicyView onNavigateHome={() => navigateTo('/')} />;
+  }
+
+  if (currentPath === '/terms') {
+    return <TermsOfServiceView onNavigateHome={() => navigateTo('/')} />;
+  }
 
   // Auth Loading View
   if (isAuthLoading) {

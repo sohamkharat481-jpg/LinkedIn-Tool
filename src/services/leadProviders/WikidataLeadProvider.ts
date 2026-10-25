@@ -200,10 +200,10 @@ export class WikidataLeadProvider implements LeadProvider {
 
     return `
       SELECT DISTINCT ?item ?itemLabel ?itemDescription ?website ?countryLabel ?dateOfBirth ?email ?phone ?linkedin ?instagram WHERE {
+        VALUES ?occ { ${occValues} }
+        ?item wdt:P106 ?occ .
         ?item wdt:P31 wd:Q5 .
         ${countryClause}
-        ?item wdt:P106 ?occ .
-        VALUES ?occ { ${occValues} }
         FILTER NOT EXISTS { ?item wdt:P570 ?deathDate . }
         OPTIONAL { ?item wdt:P856 ?website . }
         OPTIONAL { ?item wdt:P27 ?country . }

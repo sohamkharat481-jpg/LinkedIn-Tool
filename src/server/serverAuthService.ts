@@ -70,7 +70,7 @@ export function createSignedTestToken(
   const exp = payload.exp !== undefined ? payload.exp : Math.floor(Date.now() / 1000) + 3600; // default 1 hour
   const fullPayload = {
     sub: payload.userId,
-    email: payload.email,
+    email: payload.email || `${payload.userId}@leadfinder.app`,
     role: payload.role || 'member',
     exp,
     iat: Math.floor(Date.now() / 1000),
@@ -218,7 +218,7 @@ export async function verifyServerAuthToken(
     if (!isEmailAuthorized(userEmail)) {
       return {
         status: 403,
-        error: `Access denied: Email "${userEmail || 'unknown'}" is not authorized. Only anjanapadhi21@gmail.com and sohamkharat481@gmail.com are permitted.`
+        error: `Access denied: Email "${userEmail || 'unknown'}" is not authorized.`
       };
     }
 
@@ -281,7 +281,7 @@ export async function verifyServerAuthToken(
             if (!isEmailAuthorized(verifiedEmail)) {
               return {
                 status: 403,
-                error: `Access denied: Email "${verifiedEmail || 'unknown'}" is not authorized. Only anjanapadhi21@gmail.com and sohamkharat481@gmail.com are permitted.`
+                error: `Access denied: Email "${verifiedEmail || 'unknown'}" is not authorized.`
               };
             }
             return {
@@ -321,7 +321,7 @@ export async function verifyServerAuthToken(
             if (!isEmailAuthorized(verifiedEmail)) {
               return {
                 status: 403,
-                error: `Access denied: Email "${verifiedEmail || 'unknown'}" is not authorized. Only anjanapadhi21@gmail.com and sohamkharat481@gmail.com are permitted.`
+                error: `Access denied: Email "${verifiedEmail || 'unknown'}" is not authorized.`
               };
             }
             return {
@@ -354,7 +354,7 @@ export async function verifyServerAuthToken(
         if (!isEmailAuthorized(supabaseEmail)) {
           return {
             status: 403,
-            error: `Access denied: Email "${supabaseEmail || 'unknown'}" is not authorized. Only anjanapadhi21@gmail.com and sohamkharat481@gmail.com are permitted.`
+            error: `Access denied: Email "${supabaseEmail || 'unknown'}" is not authorized.`
           };
         }
         return {

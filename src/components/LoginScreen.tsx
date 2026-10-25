@@ -166,9 +166,36 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
             </button>
           </div>
 
-          <p className="text-[11px] text-center text-slate-500 leading-normal">
-            By signing in, an isolated workspace will be automatically initialized for your account or guest session.
-          </p>
+          <div className="pt-2 border-t border-slate-700/50 flex items-center justify-between text-[11px] text-slate-400">
+            <p className="leading-normal">
+              Isolated workspace created automatically upon login or guest access.
+            </p>
+            <div className="flex items-center gap-3 shrink-0 font-medium">
+              <a
+                href="/privacy"
+                onClick={(e) => {
+                  e.preventDefault();
+                  window.history.pushState({}, '', '/privacy');
+                  window.dispatchEvent(new Event('popstate'));
+                }}
+                className="hover:text-blue-400 transition-colors underline decoration-slate-600 hover:decoration-blue-400"
+              >
+                Privacy Policy
+              </a>
+              <span>·</span>
+              <a
+                href="/terms"
+                onClick={(e) => {
+                  e.preventDefault();
+                  window.history.pushState({}, '', '/terms');
+                  window.dispatchEvent(new Event('popstate'));
+                }}
+                className="hover:text-blue-400 transition-colors underline decoration-slate-600 hover:decoration-blue-400"
+              >
+                Terms of Service
+              </a>
+            </div>
+          </div>
         </div>
       </div>
     </div>

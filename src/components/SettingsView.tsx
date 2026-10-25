@@ -170,8 +170,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
           <button
             onClick={() => {
-              const email = (currentUser?.email || userEmail || '').toLowerCase();
-              setWsNameInput(email === 'anjanapadhi21@gmail.com' ? 'Anjana Workspace' : '');
+              setWsNameInput('');
               setWsDescInput('');
               setWsModalError(null);
               setIsNewWsModalOpen(true);

@@ -103,9 +103,34 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </p>
       </div>
 
-      {/* Footer info */}
-      <div className="p-4 border-t border-slate-800 text-[11px] text-slate-500 text-center">
-        Phase 1 • Manual Lead Discovery
+      {/* Footer info & Legal Links */}
+      <div className="p-4 border-t border-slate-800 text-[11px] text-slate-500 flex flex-col items-center gap-1.5">
+        <div>Phase 1 • Manual Lead Discovery</div>
+        <div className="flex items-center gap-2 text-[10px] text-slate-400">
+          <a
+            href="/privacy"
+            onClick={(e) => {
+              e.preventDefault();
+              window.history.pushState({}, '', '/privacy');
+              window.dispatchEvent(new Event('popstate'));
+            }}
+            className="hover:text-blue-400 transition-colors"
+          >
+            Privacy Policy
+          </a>
+          <span>·</span>
+          <a
+            href="/terms"
+            onClick={(e) => {
+              e.preventDefault();
+              window.history.pushState({}, '', '/terms');
+              window.dispatchEvent(new Event('popstate'));
+            }}
+            className="hover:text-blue-400 transition-colors"
+          >
+            Terms of Service
+          </a>
+        </div>
       </div>
     </aside>
   );
