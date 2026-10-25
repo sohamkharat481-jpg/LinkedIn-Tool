@@ -46,21 +46,69 @@ dataRouter.get('/workspaces', async (req: Request, res: Response) => {
   }
 
   try {
-    const allWorkspaces = dbService.getWorkspaces();
     const authorizedList: Workspace[] = [];
+    const seenWsIds = new Set<string>();
 
-    for (const ws of allWorkspaces) {
-      const authorized = await isUserAuthorizedForWorkspace(
-        auth.user.userId,
-        ws.id,
-        auth.user.email
-      );
-      if (authorized) {
-        authorizedList.push(ws);
+    // 1. Query Supabase database for existing workspace associations for this user
+    if (supabase) {
+      try {
+        const userFilter = auth.user.email && auth.user.email.includes('@')
+          ? `id.eq.${auth.user.userId},email.eq.${auth.user.email}`
+          : `id.eq.${auth.user.userId}`;
+
+        const { data: dbUsers } = await supabase
+          .from('users')
+          .select('workspace_id')
+          .or(userFilter);
+
+        const linkedWsIds = new Set<string>();
+        if (Array.isArray(dbUsers)) {
+          dbUsers.forEach((u: any) => u.workspace_id && linkedWsIds.add(u.workspace_id));
+        }
+
+        const { data: dbWorkspaces } = await supabase
+          .from('workspaces')
+          .select('id, name, description');
+
+        if (Array.isArray(dbWorkspaces)) {
+          for (const ws of dbWorkspaces) {
+            if (linkedWsIds.has(ws.id) || await isUserAuthorizedForWorkspace(auth.user.userId, ws.id, auth.user.email)) {
+              registerWorkspaceAuthorization(auth.user.userId, ws.id);
+              const formattedWs: Workspace = {
+                id: ws.id,
+                name: ws.name,
+                description: ws.description || ''
+              };
+              dbService.addOrUpdateWorkspace(formattedWs);
+              if (!seenWsIds.has(ws.id)) {
+                seenWsIds.add(ws.id);
+                authorizedList.push(formattedWs);
+              }
+            }
+          }
+        }
+      } catch (dbErr) {
+        console.warn('Supabase workspace lookup error:', dbErr);
       }
     }
 
-    // If user has no workspaces authorized yet, automatically initialize a personalized workspace
+    // 2. Also check in-memory local dbService workspaces
+    const localWorkspaces = dbService.getWorkspaces();
+    for (const ws of localWorkspaces) {
+      if (!seenWsIds.has(ws.id)) {
+        const authorized = await isUserAuthorizedForWorkspace(
+          auth.user.userId,
+          ws.id,
+          auth.user.email
+        );
+        if (authorized) {
+          seenWsIds.add(ws.id);
+          authorizedList.push(ws);
+        }
+      }
+    }
+
+    // 3. If user has no workspaces authorized yet, automatically initialize exactly ONE personalized workspace
     if (authorizedList.length === 0) {
       const rawName = auth.user.email
         ? auth.user.email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
@@ -83,11 +131,12 @@ dataRouter.get('/workspaces', async (req: Request, res: Response) => {
             }
           ]);
 
+          const userEmail = auth.user.email || `${auth.user.userId}@leadfinder.app`;
           await supabase.from('users').upsert(
             [
               {
                 id: auth.user.userId,
-                email: auth.user.email || `${auth.user.userId}@leadfinder.app`,
+                email: userEmail,
                 full_name: rawName,
                 workspace_id: newWs.id,
                 role: 'owner',
@@ -95,7 +144,7 @@ dataRouter.get('/workspaces', async (req: Request, res: Response) => {
                 updated_at: new Date().toISOString()
               }
             ],
-            { onConflict: 'email' }
+            { onConflict: 'id' }
           );
         } catch (dbErr) {
           console.warn('Database workspace sync error during auto-initialization:', dbErr);

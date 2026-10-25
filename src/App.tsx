@@ -193,7 +193,15 @@ export default function App() {
       setAllSearches(searches);
     } catch (err: any) {
       console.warn('refreshWorkspaceData error:', err);
-      setSupabaseError(err.message || 'Database synchronization error.');
+      const rawMsg = err.message || '';
+      if (rawMsg.toLowerCase().includes('not authorized') || rawMsg.includes('403')) {
+        // Recovery: Workspace is unauthorized for current user, re-sync authorized workspaces
+        if (firebaseUser) {
+          loadUserWorkspaces(firebaseUser);
+          return;
+        }
+      }
+      setSupabaseError(rawMsg || 'Database synchronization error.');
     } finally {
       setIsLoadingData(false);
     }
@@ -206,7 +214,7 @@ export default function App() {
         idToken = await user.getIdToken(true).catch(() => null);
       }
       if (!idToken) {
-        idToken = await generateFallbackJwtToken(user?.email || 'sohamkharat481@gmail.com', user?.uid || 'user-sohamkharat481');
+        idToken = await generateFallbackJwtToken(user?.email || 'user@leadfinder.app', user?.uid || `user-${Date.now()}`);
       }
 
       const res = await fetch(apiUrl('/api/workspaces'), {
@@ -218,6 +226,7 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         const wsList: Workspace[] = data.workspaces || [];
+        dbService.syncWorkspaces(wsList);
         setWorkspaces(wsList);
 
         if (wsList.length > 0) {
@@ -642,6 +651,7 @@ export default function App() {
       console.warn('Sign out error:', err);
     }
     await handleDisconnectSheets();
+    dbService.clearUserWorkspaceSession();
     setFirebaseUser(null);
     setWorkspaces([]);
     setActiveWorkspace(null);

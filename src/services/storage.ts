@@ -177,12 +177,47 @@ class StorageService {
     return list;
   }
 
+  syncWorkspaces(syncedWorkspaces: Workspace[]): void {
+    this.setItem(STORAGE_KEYS.WORKSPACES, syncedWorkspaces);
+    if (syncedWorkspaces.length > 0) {
+      const activeId = this.getItem<string>(STORAGE_KEYS.ACTIVE_WORKSPACE_ID, '');
+      const activeExists = syncedWorkspaces.some((w) => w.id === activeId);
+      if (!activeExists) {
+        this.setActiveWorkspaceId(syncedWorkspaces[0].id);
+      }
+    } else {
+      this.setItem(STORAGE_KEYS.ACTIVE_WORKSPACE_ID, '');
+    }
+  }
+
+  addOrUpdateWorkspace(ws: Workspace): void {
+    const list = this.getWorkspaces();
+    const index = list.findIndex((w) => w.id === ws.id);
+    if (index !== -1) {
+      list[index] = ws;
+    } else {
+      list.push(ws);
+    }
+    this.setItem(STORAGE_KEYS.WORKSPACES, list);
+  }
+
+  clearUserWorkspaceSession(): void {
+    try {
+      this.setItem(STORAGE_KEYS.WORKSPACES, []);
+      this.setItem(STORAGE_KEYS.ACTIVE_WORKSPACE_ID, '');
+    } catch (e) {
+      console.warn('Error clearing workspace session:', e);
+    }
+  }
+
   getActiveWorkspaceId(): string {
-    const activeId = this.getItem<string>(STORAGE_KEYS.ACTIVE_WORKSPACE_ID, DEFAULT_WORKSPACE.id);
-    const exists = this.getWorkspaces().some((w) => w.id === activeId);
+    const list = this.getWorkspaces();
+    const activeId = this.getItem<string>(STORAGE_KEYS.ACTIVE_WORKSPACE_ID, '');
+    const exists = list.some((w) => w.id === activeId);
     if (!exists) {
-      this.setItem(STORAGE_KEYS.ACTIVE_WORKSPACE_ID, DEFAULT_WORKSPACE.id);
-      return DEFAULT_WORKSPACE.id;
+      const fallbackId = list.length > 0 ? list[0].id : '';
+      this.setItem(STORAGE_KEYS.ACTIVE_WORKSPACE_ID, fallbackId);
+      return fallbackId;
     }
     return activeId;
   }
