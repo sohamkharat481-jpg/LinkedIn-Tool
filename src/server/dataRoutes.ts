@@ -126,6 +126,7 @@ dataRouter.get('/workspaces', async (req: Request, res: Response) => {
               id: newWs.id,
               name: newWs.name,
               description: newWs.description || null,
+              owner_id: auth.user.userId,
               created_at: new Date().toISOString(),
               updated_at: new Date().toISOString()
             }
@@ -188,24 +189,26 @@ dataRouter.post('/workspaces', async (req: Request, res: Response) => {
             id: newWs.id,
             name: newWs.name,
             description: newWs.description || null,
+            owner_id: auth.user.userId,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
           }
         ]);
 
+        const userEmail = auth.user.email || `${auth.user.userId}@leadfinder.app`;
         await supabase.from('users').upsert(
           [
             {
               id: auth.user.userId,
-              email: auth.user.email || `${auth.user.userId}@leadfinder.app`,
-              full_name: auth.user.email?.split('@')[0] || 'User',
+              email: userEmail,
+              full_name: userEmail.split('@')[0],
               workspace_id: newWs.id,
               role: 'owner',
               created_at: new Date().toISOString(),
               updated_at: new Date().toISOString()
             }
           ],
-          { onConflict: 'email' }
+          { onConflict: 'id' }
         );
       } catch (dbErr) {
         console.warn('Database workspace sync error:', dbErr);
