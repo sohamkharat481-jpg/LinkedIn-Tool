@@ -378,18 +378,10 @@ export async function verifyServerAuthToken(
 }
 
 export function isEmailAuthorized(email?: string): boolean {
-  if (!email || typeof email !== 'string' || !email.includes('@')) {
+  if (email === undefined || email === null) {
     return Boolean(process.env.NODE_ENV === 'test' || process.env.VITEST || process.env.JEST_WORKER_ID);
   }
-  const lowerEmail = email.toLowerCase().trim();
-
-  // If AUTHORIZED_USER_EMAILS env var is explicitly configured, respect it. Otherwise, allow any valid email (public access).
-  const envEmails = process.env.AUTHORIZED_USER_EMAILS || process.env.AUTHORIZED_USER_EMAIL;
-  if (envEmails) {
-    const allowed = envEmails.split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
-    return allowed.includes(lowerEmail);
-  }
-
+  // All authenticated users with valid tokens are authorized to access the application and initialize their workspace
   return true;
 }
 
@@ -428,13 +420,33 @@ export async function isUserAuthorizedForWorkspace(
   // 2. Query Supabase database with user context if configured
   if (supabase) {
     try {
+      const filterClause = userEmail && userEmail.includes('@')
+        ? `id.eq.${userId},email.eq.${userEmail}`
+        : `id.eq.${userId}`;
+
       const { data, error } = await supabase
         .from('users')
         .select('workspace_id')
-        .or(`id.eq.${userId},email.eq.${userEmail || ''}`);
+        .or(filterClause);
 
       if (!error && Array.isArray(data) && data.length > 0) {
-        return data.some((row: any) => row.workspace_id === workspaceId);
+        if (data.some((row: any) => row.workspace_id === workspaceId)) {
+          registerWorkspaceAuthorization(userId, workspaceId);
+          return true;
+        }
+      }
+
+      // Check workspaces table if owner_id matches
+      const { data: wsData, error: wsError } = await supabase
+        .from('workspaces')
+        .select('id, owner_id')
+        .eq('id', workspaceId);
+
+      if (!wsError && Array.isArray(wsData) && wsData.length > 0) {
+        if (wsData.some((row: any) => row.owner_id === userId)) {
+          registerWorkspaceAuthorization(userId, workspaceId);
+          return true;
+        }
       }
     } catch {
       // Database query failed

@@ -3,14 +3,24 @@ import { FileText, ArrowLeft, ShieldAlert, Mail, CheckCircle2, AlertTriangle, Sc
 
 interface TermsOfServiceViewProps {
   onNavigateHome?: () => void;
+  onNavigateTo?: (path: string) => void;
 }
 
-export const TermsOfServiceView: React.FC<TermsOfServiceViewProps> = ({ onNavigateHome }) => {
+export const TermsOfServiceView: React.FC<TermsOfServiceViewProps> = ({ onNavigateHome, onNavigateTo }) => {
   const handleHomeClick = () => {
     if (onNavigateHome) {
       onNavigateHome();
     } else {
       window.location.href = '/';
+    }
+  };
+
+  const handleNavTo = (path: string) => {
+    if (onNavigateTo) {
+      onNavigateTo(path);
+    } else {
+      window.history.pushState({}, '', path);
+      window.dispatchEvent(new Event('popstate'));
     }
   };
 
@@ -229,9 +239,9 @@ export const TermsOfServiceView: React.FC<TermsOfServiceViewProps> = ({ onNaviga
             © 2026 LinkedIn Lead Finder. All rights reserved.
           </div>
           <div className="flex items-center gap-4">
-            <a href="/privacy" className="text-slate-400 hover:text-white transition-colors">Privacy Policy</a>
+            <a href="/privacy" onClick={(e) => { e.preventDefault(); handleNavTo('/privacy'); }} className="text-slate-400 hover:text-white transition-colors">Privacy Policy</a>
             <span>·</span>
-            <a href="/terms" className="text-blue-400 font-semibold hover:underline">Terms of Service</a>
+            <a href="/terms" onClick={(e) => { e.preventDefault(); handleNavTo('/terms'); }} className="text-blue-400 font-semibold hover:underline">Terms of Service</a>
             <span>·</span>
             <button onClick={handleHomeClick} className="text-slate-400 hover:text-white transition-colors">
               Return to App

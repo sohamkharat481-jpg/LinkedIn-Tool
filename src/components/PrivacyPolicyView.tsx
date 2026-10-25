@@ -3,14 +3,24 @@ import { ShieldCheck, ArrowLeft, Mail, FileText, CheckCircle2, Lock, Database, G
 
 interface PrivacyPolicyViewProps {
   onNavigateHome?: () => void;
+  onNavigateTo?: (path: string) => void;
 }
 
-export const PrivacyPolicyView: React.FC<PrivacyPolicyViewProps> = ({ onNavigateHome }) => {
+export const PrivacyPolicyView: React.FC<PrivacyPolicyViewProps> = ({ onNavigateHome, onNavigateTo }) => {
   const handleHomeClick = () => {
     if (onNavigateHome) {
       onNavigateHome();
     } else {
       window.location.href = '/';
+    }
+  };
+
+  const handleNavTo = (path: string) => {
+    if (onNavigateTo) {
+      onNavigateTo(path);
+    } else {
+      window.history.pushState({}, '', path);
+      window.dispatchEvent(new Event('popstate'));
     }
   };
 
@@ -258,9 +268,9 @@ export const PrivacyPolicyView: React.FC<PrivacyPolicyViewProps> = ({ onNavigate
             © 2026 LinkedIn Lead Finder. All rights reserved.
           </div>
           <div className="flex items-center gap-4">
-            <a href="/privacy" className="text-blue-400 font-semibold hover:underline">Privacy Policy</a>
+            <a href="/privacy" onClick={(e) => { e.preventDefault(); handleNavTo('/privacy'); }} className="text-blue-400 font-semibold hover:underline">Privacy Policy</a>
             <span>·</span>
-            <a href="/terms" className="text-slate-400 hover:text-white transition-colors">Terms of Service</a>
+            <a href="/terms" onClick={(e) => { e.preventDefault(); handleNavTo('/terms'); }} className="text-slate-400 hover:text-white transition-colors">Terms of Service</a>
             <span>·</span>
             <button onClick={handleHomeClick} className="text-slate-400 hover:text-white transition-colors">
               Return to App

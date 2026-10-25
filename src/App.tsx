@@ -32,16 +32,23 @@ import { LoginScreen } from './components/LoginScreen';
 import { PrivacyPolicyView } from './components/PrivacyPolicyView';
 import { TermsOfServiceView } from './components/TermsOfServiceView';
 
+export function normalizePath(rawPath: string): string {
+  if (!rawPath) return '/';
+  const base = rawPath.split('?')[0].split('#')[0];
+  const trimmed = base.toLowerCase().replace(/\/+$/, '');
+  return trimmed || '/';
+}
+
 export default function App() {
   // Router / Path state for public pages
   const [currentPath, setCurrentPath] = useState<string>(() =>
-    typeof window !== 'undefined' ? window.location.pathname : '/'
+    typeof window !== 'undefined' ? window.location.pathname + window.location.search : '/'
   );
 
   useEffect(() => {
     const handleLocationChange = () => {
       if (typeof window !== 'undefined') {
-        setCurrentPath(window.location.pathname);
+        setCurrentPath(window.location.pathname + window.location.search);
       }
     };
     window.addEventListener('popstate', handleLocationChange);
@@ -653,12 +660,24 @@ export default function App() {
   };
 
   // Public Unauthenticated Legal Routes
-  if (currentPath === '/privacy') {
-    return <PrivacyPolicyView onNavigateHome={() => navigateTo('/')} />;
+  const normalizedPath = normalizePath(currentPath);
+
+  if (normalizedPath === '/privacy') {
+    return (
+      <PrivacyPolicyView
+        onNavigateHome={() => navigateTo('/')}
+        onNavigateTo={(path) => navigateTo(path)}
+      />
+    );
   }
 
-  if (currentPath === '/terms') {
-    return <TermsOfServiceView onNavigateHome={() => navigateTo('/')} />;
+  if (normalizedPath === '/terms') {
+    return (
+      <TermsOfServiceView
+        onNavigateHome={() => navigateTo('/')}
+        onNavigateTo={(path) => navigateTo(path)}
+      />
+    );
   }
 
   // Auth Loading View

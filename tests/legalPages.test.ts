@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import fs from 'node:fs';
 import path from 'node:path';
+import { normalizePath } from '../src/App';
 
 test('Privacy Policy view component exists and contains all required compliance disclosures', () => {
   const fileContent = fs.readFileSync(path.resolve(process.cwd(), 'src/components/PrivacyPolicyView.tsx'), 'utf8');
@@ -40,18 +41,32 @@ test('Terms of Service view component exists and contains all required terms and
   assert.ok(fileContent.includes('sohamkharat481@gmail.com'), 'Must state legal contact email');
 });
 
-test('App.tsx integrates unauthenticated routing for /privacy and /terms', () => {
+test('App.tsx integrates unauthenticated routing and path normalization for /privacy and /terms', () => {
   const appContent = fs.readFileSync(path.resolve(process.cwd(), 'src/App.tsx'), 'utf8');
 
-  assert.ok(appContent.includes("currentPath === '/privacy'"), 'App.tsx must handle /privacy route');
-  assert.ok(appContent.includes("currentPath === '/terms'"), 'App.tsx must handle /terms route');
+  assert.ok(appContent.includes("normalizedPath === '/privacy'"), 'App.tsx must handle normalized /privacy route');
+  assert.ok(appContent.includes("normalizedPath === '/terms'"), 'App.tsx must handle normalized /terms route');
   assert.ok(appContent.includes('PrivacyPolicyView'), 'App.tsx must import PrivacyPolicyView');
   assert.ok(appContent.includes('TermsOfServiceView'), 'App.tsx must import TermsOfServiceView');
 
   // Confirm route handling occurs before login block
-  const privacyRouteIndex = appContent.indexOf("currentPath === '/privacy'");
+  const privacyRouteIndex = appContent.indexOf("normalizedPath === '/privacy'");
   const loginBlockIndex = appContent.indexOf('if (!firebaseUser)');
   assert.ok(privacyRouteIndex < loginBlockIndex, '/privacy route check must precede the authentication guard');
+});
+
+test('normalizePath helper function handles trailing slashes, query parameters, uppercase, and empty paths', () => {
+  assert.equal(normalizePath('/privacy'), '/privacy');
+  assert.equal(normalizePath('/privacy/'), '/privacy');
+  assert.equal(normalizePath('/privacy?ref=google'), '/privacy');
+  assert.equal(normalizePath('/privacy/?ref=google#section'), '/privacy');
+  assert.equal(normalizePath('/PRIVACY/'), '/privacy');
+  assert.equal(normalizePath('/terms'), '/terms');
+  assert.equal(normalizePath('/terms/'), '/terms');
+  assert.equal(normalizePath('/terms?utm_source=email'), '/terms');
+  assert.equal(normalizePath('/TERMS/'), '/terms');
+  assert.equal(normalizePath('/'), '/');
+  assert.equal(normalizePath(''), '/');
 });
 
 test('LoginScreen.tsx and Sidebar.tsx contain accessible links to Privacy Policy and Terms of Service', () => {
