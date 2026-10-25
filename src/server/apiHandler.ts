@@ -8,9 +8,6 @@ import { dataRouter } from './dataRoutes';
 
 export const apiRouter = express.Router();
 
-apiRouter.use(express.json());
-apiRouter.use(dataRouter);
-
 apiRouter.use((req: any, res: any, next) => {
   if (typeof res.status !== 'function') {
     res.status = function (statusCode: number) {
@@ -41,6 +38,9 @@ apiRouter.use((req: any, res: any, next) => {
   }
   next();
 });
+
+apiRouter.use(express.json());
+apiRouter.use(dataRouter);
 
 apiRouter.get('/health', (_req: Request, res: Response) => {
   res.json({

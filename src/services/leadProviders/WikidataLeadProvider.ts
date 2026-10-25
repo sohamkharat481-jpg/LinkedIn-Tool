@@ -3,7 +3,9 @@ import { LeadProvider } from './LeadProvider';
 import { enrichRawLead } from '../b2bRelevanceService';
 
 const SOURCE_NAME = 'Wikidata SPARQL Query Service';
-const DEFAULT_TIMEOUT_MS = 25000;
+const PRIMARY_TIMEOUT_MS = 14000;
+const FALLBACK_TIMEOUT_MS = 10000;
+const USER_AGENT = 'LinkedInLeadFinder/1.0 (https://github.com/sohamkharat481-jpg/LinkedIn-Tool; contact@example.com)';
 
 // Verified Wikidata QIDs for human occupations and leadership positions
 export const OCCUPATION_MAP: Record<string, string[]> = {
@@ -13,7 +15,7 @@ export const OCCUPATION_MAP: Record<string, string[]> = {
   'adviser': ['wd:Q15978655'],
   'advisor': ['wd:Q15978655'],
   'business coach': ['wd:Q105201291', 'wd:Q2790938', 'wd:Q26831130'],
-  'executive coach': ['wd:Q2790938', 'wd:Q105201291'],
+  'executive coach': ['wd:Q105201291', 'wd:Q2790938', 'wd:Q26831130'],
   'coach': ['wd:Q105201291', 'wd:Q2790938', 'wd:Q26831130'],
   'life coach': ['wd:Q26831130'],
   'entrepreneur': ['wd:Q131524', 'wd:Q43845'],
@@ -24,20 +26,20 @@ export const OCCUPATION_MAP: Record<string, string[]> = {
   'businessperson': ['wd:Q43845'],
   'ceo': ['wd:Q484876', 'wd:Q43845'],
   'chief executive officer': ['wd:Q484876', 'wd:Q43845'],
-  'c-level': ['wd:Q484876', 'wd:Q43845', 'wd:Q3455803'],
-  'c-suite': ['wd:Q484876', 'wd:Q43845', 'wd:Q3455803'],
-  'executive': ['wd:Q484876', 'wd:Q43845', 'wd:Q3455803'],
-  'director': ['wd:Q3455803', 'wd:Q1622275'],
-  'managing director': ['wd:Q3455803', 'wd:Q1622275'],
-  'vp': ['wd:Q43845', 'wd:Q3455803'],
-  'vp of sales': ['wd:Q43845', 'wd:Q3455803'],
-  'vice president': ['wd:Q43845', 'wd:Q3455803'],
-  'manager': ['wd:Q1622275'],
-  'marketing manager': ['wd:Q329439', 'wd:Q1622275'],
-  'marketer': ['wd:Q329439'],
-  'clinical director': ['wd:Q3455803'],
-  'chief medical officer': ['wd:Q484876', 'wd:Q3455803'],
-  'senior': ['wd:Q3455803', 'wd:Q1622275', 'wd:Q43845']
+  'c-level': ['wd:Q484876', 'wd:Q43845', 'wd:Q1162163', 'wd:Q3455803'],
+  'c-suite': ['wd:Q484876', 'wd:Q43845', 'wd:Q1162163', 'wd:Q3455803'],
+  'executive': ['wd:Q484876', 'wd:Q43845', 'wd:Q1162163', 'wd:Q3455803'],
+  'director': ['wd:Q1162163', 'wd:Q19940089', 'wd:Q3455803', 'wd:Q1622275'],
+  'managing director': ['wd:Q19940089', 'wd:Q1162163', 'wd:Q3455803', 'wd:Q1622275'],
+  'vp': ['wd:Q42178', 'wd:Q43845', 'wd:Q3455803'],
+  'vp of sales': ['wd:Q64155861', 'wd:Q42178', 'wd:Q43845', 'wd:Q3455803'],
+  'vice president': ['wd:Q42178', 'wd:Q43845', 'wd:Q3455803'],
+  'manager': ['wd:Q2462658', 'wd:Q1622275'],
+  'marketing manager': ['wd:Q88206817', 'wd:Q329439', 'wd:Q1622275'],
+  'marketer': ['wd:Q88206817', 'wd:Q329439'],
+  'clinical director': ['wd:Q1162163', 'wd:Q3455803'],
+  'chief medical officer': ['wd:Q484876', 'wd:Q1162163', 'wd:Q3455803'],
+  'senior': ['wd:Q1162163', 'wd:Q3455803', 'wd:Q1622275', 'wd:Q43845']
 };
 
 export const COUNTRY_MAP: Record<string, string> = {
@@ -69,18 +71,58 @@ export class WikidataLeadProvider implements LeadProvider {
   readonly isMock = false;
 
   async search(filters: LeadFilter): Promise<RawLead[]> {
-    const sparqlQuery = this.buildOccupationQuery(filters);
+    const primaryTitle = (filters.jobTitles && filters.jobTitles[0]) ? filters.jobTitles[0] : 'Consultant';
+
+    // Attempt 1: Optimized primary query with subselect pattern
+    try {
+      const primaryQuery = this.buildOccupationQuery(filters, false);
+      const leads = await this.executeSparqlQuery(primaryQuery, PRIMARY_TIMEOUT_MS, filters, primaryTitle, 1);
+      if (leads.length > 0) {
+        return leads;
+      }
+      console.warn('[Diagnostic] Wikidata primary query returned 0 leads. Attempting streamlined executive fallback...');
+    } catch (primaryErr: any) {
+      const isRetryable = primaryErr.isRetryable || primaryErr.name === 'AbortError' || primaryErr.status === 429 || (primaryErr.status >= 500 && primaryErr.status <= 504);
+      if (!isRetryable) {
+        throw primaryErr;
+      }
+
+      const retryAfterMs = primaryErr.retryAfterMs || 1500;
+      console.warn(`[Diagnostic] Wikidata primary query failed (${primaryErr.message}). Waiting ${retryAfterMs}ms before fallback attempt...`);
+      await new Promise(resolve => setTimeout(resolve, retryAfterMs));
+    }
+
+    // Attempt 2: Streamlined executive query with controlled backoff
+    try {
+      const fallbackQuery = this.buildOccupationQuery(filters, true);
+      const fallbackLeads = await this.executeSparqlQuery(fallbackQuery, FALLBACK_TIMEOUT_MS, filters, primaryTitle, 2);
+      return fallbackLeads;
+    } catch (fallbackErr: any) {
+      if (fallbackErr.name === 'AbortError') {
+        throw new Error('Wikidata SPARQL query service timed out after retry. Please try again or narrow your search filters.');
+      }
+      throw fallbackErr;
+    }
+  }
+
+  private async executeSparqlQuery(
+    sparqlQuery: string,
+    timeoutMs: number,
+    filters: LeadFilter,
+    primaryTitle: string,
+    attempt: number
+  ): Promise<RawLead[]> {
     const sparqlUrl = `https://query.wikidata.org/sparql?query=${encodeURIComponent(sparqlQuery)}&format=json`;
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     const startTime = Date.now();
 
     try {
       const response = await fetch(sparqlUrl, {
         headers: {
           'Accept': 'application/sparql-results+json',
-          'User-Agent': 'LinkedInLeadFinder/1.0 (https://github.com/leadfinder; mailto:contact@example.com)'
+          'User-Agent': USER_AGENT
         },
         signal: controller.signal
       });
@@ -89,19 +131,31 @@ export class WikidataLeadProvider implements LeadProvider {
       const durationMs = Date.now() - startTime;
 
       if (!response.ok) {
-        console.error(`[Diagnostic] Wikidata HTTP Error ${response.status} in ${durationMs}ms`);
-        throw new Error(`Wikidata SPARQL query failed with HTTP ${response.status}`);
+        const retryAfterHeader = response.headers.get('Retry-After');
+        let retryAfterMs = 1500;
+        if (retryAfterHeader) {
+          const parsedSeconds = parseInt(retryAfterHeader, 10);
+          if (!isNaN(parsedSeconds) && parsedSeconds > 0 && parsedSeconds <= 5) {
+            retryAfterMs = parsedSeconds * 1000;
+          }
+        }
+
+        const err: any = new Error(`Wikidata SPARQL query failed with HTTP ${response.status}`);
+        err.status = response.status;
+        err.retryAfterMs = retryAfterMs;
+        err.isRetryable = response.status === 429 || (response.status >= 500 && response.status <= 504);
+        console.error(`[Diagnostic] Wikidata HTTP Error ${response.status} in ${durationMs}ms (Attempt ${attempt})`);
+        throw err;
       }
 
       const data = await response.json();
       const rawResultsCount = Array.isArray(data?.results?.bindings) ? data.results.bindings.length : 0;
 
       if (!data?.results?.bindings || !Array.isArray(data.results.bindings)) {
-        console.warn(`[Diagnostic] Wikidata Search HTTP 200 in ${durationMs}ms | Raw bindings: 0 | Mapped unique leads: 0`);
+        console.warn(`[Diagnostic] Wikidata Search HTTP 200 in ${durationMs}ms (Attempt ${attempt}) | Raw bindings: 0 | Mapped unique leads: 0`);
         return [];
       }
 
-      const primaryTitle = (filters.jobTitles && filters.jobTitles[0]) ? filters.jobTitles[0] : 'Consultant';
       const seenUrls = new Set<string>();
       const leads: RawLead[] = [];
 
@@ -113,16 +167,19 @@ export class WikidataLeadProvider implements LeadProvider {
         }
       }
 
-      console.log(`[Diagnostic] Wikidata Search HTTP ${response.status} in ${durationMs}ms | Raw bindings: ${rawResultsCount} | Mapped unique leads: ${leads.length}`);
+      console.log(`[Diagnostic] Wikidata Search HTTP ${response.status} in ${durationMs}ms (Attempt ${attempt}) | Raw bindings: ${rawResultsCount} | Mapped unique leads: ${leads.length}`);
       return leads;
     } catch (e: any) {
       clearTimeout(timeoutId);
       const elapsedMs = Date.now() - startTime;
       if (e.name === 'AbortError') {
-        console.error(`[Diagnostic] Wikidata Search Timeout after ${elapsedMs}ms (Limit: ${DEFAULT_TIMEOUT_MS}ms)`);
-        throw new Error(`Wikidata SPARQL query service timed out after ${Math.round(elapsedMs / 1000)}s. Please try again or narrow your search filters.`);
+        console.error(`[Diagnostic] Wikidata Search Timeout after ${elapsedMs}ms (Attempt ${attempt}, Limit: ${timeoutMs}ms)`);
+        const abortErr: any = new Error(`Wikidata SPARQL query service timed out after ${Math.round(elapsedMs / 1000)}s.`);
+        abortErr.name = 'AbortError';
+        abortErr.isRetryable = true;
+        throw abortErr;
       }
-      console.error(`[Diagnostic] Wikidata Search Error after ${elapsedMs}ms:`, e.message || e);
+      console.error(`[Diagnostic] Wikidata Search Error after ${elapsedMs}ms (Attempt ${attempt}):`, e.message || e);
       throw e;
     }
   }
@@ -138,7 +195,7 @@ export class WikidataLeadProvider implements LeadProvider {
       const response = await fetch(sparqlUrl, {
         headers: {
           'Accept': 'application/sparql-results+json',
-          'User-Agent': 'LinkedInLeadFinder/1.0 (https://github.com/leadfinder; mailto:contact@example.com)'
+          'User-Agent': USER_AGENT
         },
         signal: controller.signal
       });
@@ -180,31 +237,41 @@ export class WikidataLeadProvider implements LeadProvider {
     return Array.from(qidSet);
   }
 
-  private buildOccupationQuery(filters: LeadFilter): string {
-    const rawTitles = filters.jobTitles && filters.jobTitles.length > 0 ? filters.jobTitles : ['consultant'];
-    
-    // Combine job titles and seniority filters for comprehensive QID coverage
-    const titleCandidates = [...rawTitles];
-    if (filters.seniority && filters.seniority.length > 0) {
-      filters.seniority.forEach(s => titleCandidates.push(s));
+  public buildOccupationQuery(filters: LeadFilter, isFallback = false): string {
+    let occValues: string;
+    if (isFallback) {
+      // High-yield, fast-executing business executive QIDs
+      occValues = 'wd:Q4479442 wd:Q484876 wd:Q131524 wd:Q43845';
+    } else {
+      const rawTitles = filters.jobTitles && filters.jobTitles.length > 0 ? filters.jobTitles : ['consultant'];
+      const titleCandidates = [...rawTitles];
+      if (filters.seniority && filters.seniority.length > 0) {
+        filters.seniority.forEach(s => titleCandidates.push(s));
+      }
+      const qids = this.resolveQidsForTitles(titleCandidates);
+      occValues = qids.join(' ');
     }
-
-    const qids = this.resolveQidsForTitles(titleCandidates);
-    const occValues = qids.join(' ');
 
     const countryNorm = (filters.country || '').toLowerCase().trim();
     const countryQid = COUNTRY_MAP[countryNorm];
     const countryClause = countryQid ? `?item wdt:P27 ${countryQid} .` : '';
 
     const limit = Math.min(Math.max(Number(filters.maxLeads) || 20, 1), 100);
+    const innerLimit = Math.min(Math.max(limit * 2, limit + 25), 150);
 
     return `
       SELECT DISTINCT ?item ?itemLabel ?itemDescription ?website ?countryLabel ?dateOfBirth ?email ?phone ?linkedin ?instagram WHERE {
-        VALUES ?occ { ${occValues} }
-        ?item wdt:P106 ?occ .
-        ?item wdt:P31 wd:Q5 .
-        ${countryClause}
-        FILTER NOT EXISTS { ?item wdt:P570 ?deathDate . }
+        {
+          SELECT DISTINCT ?item WHERE {
+            ?item wdt:P106 ?occ .
+            VALUES ?occ { ${occValues} }
+            ${countryClause}
+            ?item wdt:P31 wd:Q5 .
+          }
+          LIMIT ${innerLimit}
+        }
+        OPTIONAL { ?item wdt:P570 ?deathDate . }
+        FILTER(!BOUND(?deathDate))
         OPTIONAL { ?item wdt:P856 ?website . }
         OPTIONAL { ?item wdt:P27 ?country . }
         OPTIONAL { ?item wdt:P569 ?dateOfBirth . }
@@ -224,6 +291,11 @@ export class WikidataLeadProvider implements LeadProvider {
     // Ignore internal placeholder IDs if label missing
     const label = binding.itemLabel.value.trim();
     if (!label || /^Q\d+$/.test(label)) return null;
+
+    // Filter out deceased individuals if any slipped past SPARQL filter
+    if (binding.deathDate && binding.deathDate.value) {
+      return null;
+    }
 
     const description = binding.itemDescription?.value || '';
     const rawWebsite = binding.website?.value ? binding.website.value.trim() : undefined;
