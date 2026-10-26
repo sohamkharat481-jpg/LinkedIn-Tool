@@ -1,11 +1,13 @@
 import express, { Request, Response } from 'express';
+import crypto from 'node:crypto';
 import { supabase } from '../services/supabase';
 import { dbService } from '../services/storage';
 import {
   verifyServerAuthToken,
   verifyWorkspaceAccess,
   registerWorkspaceAuthorization,
-  isUserAuthorizedForWorkspace
+  isUserAuthorizedForWorkspace,
+  getDeterministicWorkspaceId
 } from './serverAuthService';
 import {
   Client,
@@ -52,6 +54,26 @@ dataRouter.get('/workspaces', async (req: Request, res: Response) => {
   try {
     const authorizedList: Workspace[] = [];
     const seenWsIds = new Set<string>();
+    const deterministicWsId = getDeterministicWorkspaceId(auth.user.userId);
+    registerWorkspaceAuthorization(auth.user.userId, deterministicWsId);
+
+    const rawName = auth.user.email
+      ? auth.user.email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+      : 'User';
+    const wsName = `${rawName}'s Workspace`;
+    const wsDesc = `Primary workspace for ${auth.user.email || rawName}`;
+
+    let deterministicWs = dbService.getWorkspaces().find(w => w.id === deterministicWsId);
+    if (!deterministicWs) {
+      deterministicWs = {
+        id: deterministicWsId,
+        name: wsName,
+        description: wsDesc
+      };
+      dbService.addOrUpdateWorkspace(deterministicWs);
+    }
+    seenWsIds.add(deterministicWsId);
+    authorizedList.push(deterministicWs);
 
     // 1. Query Supabase database for existing workspace associations for this user
     if (supabase) {
@@ -72,11 +94,11 @@ dataRouter.get('/workspaces', async (req: Request, res: Response) => {
 
         const { data: dbWorkspaces } = await supabase
           .from('workspaces')
-          .select('id, name, description');
+          .select('id, name, description, owner_id');
 
         if (Array.isArray(dbWorkspaces)) {
           for (const ws of dbWorkspaces) {
-            if (linkedWsIds.has(ws.id) || await isUserAuthorizedForWorkspace(auth.user.userId, ws.id, auth.user.email)) {
+            if (ws.id === deterministicWsId || linkedWsIds.has(ws.id) || ws.owner_id === auth.user.userId || await isUserAuthorizedForWorkspace(auth.user.userId, ws.id, auth.user.email)) {
               registerWorkspaceAuthorization(auth.user.userId, ws.id);
               const formattedWs: Workspace = {
                 id: ws.id,
@@ -91,8 +113,36 @@ dataRouter.get('/workspaces', async (req: Request, res: Response) => {
             }
           }
         }
+
+        // Ensure deterministic workspace is persisted in Supabase
+        await supabase.from('workspaces').upsert([
+          {
+            id: deterministicWsId,
+            name: wsName,
+            description: wsDesc,
+            owner_id: auth.user.userId,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }
+        ], { onConflict: 'id' });
+
+        const userEmail = auth.user.email || `${auth.user.userId}@leadfinder.app`;
+        await supabase.from('users').upsert(
+          [
+            {
+              id: auth.user.userId,
+              email: userEmail,
+              full_name: rawName,
+              workspace_id: deterministicWsId,
+              role: 'owner',
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            }
+          ],
+          { onConflict: 'id' }
+        );
       } catch (dbErr) {
-        console.warn('Supabase workspace lookup error:', dbErr);
+        console.warn('Supabase workspace lookup/sync error:', dbErr);
       }
     }
 
@@ -110,53 +160,6 @@ dataRouter.get('/workspaces', async (req: Request, res: Response) => {
           authorizedList.push(ws);
         }
       }
-    }
-
-    // 3. If user has no workspaces authorized yet, automatically initialize exactly ONE personalized workspace
-    if (authorizedList.length === 0) {
-      const rawName = auth.user.email
-        ? auth.user.email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-        : 'User';
-      const wsName = `${rawName}'s Workspace`;
-      const wsDesc = `Primary workspace for ${auth.user.email || rawName}`;
-
-      const newWs = dbService.createWorkspace(wsName, wsDesc);
-      registerWorkspaceAuthorization(auth.user.userId, newWs.id);
-
-      if (supabase) {
-        try {
-          await supabase.from('workspaces').insert([
-            {
-              id: newWs.id,
-              name: newWs.name,
-              description: newWs.description || null,
-              owner_id: auth.user.userId,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            }
-          ]);
-
-          const userEmail = auth.user.email || `${auth.user.userId}@leadfinder.app`;
-          await supabase.from('users').upsert(
-            [
-              {
-                id: auth.user.userId,
-                email: userEmail,
-                full_name: rawName,
-                workspace_id: newWs.id,
-                role: 'owner',
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString()
-              }
-            ],
-            { onConflict: 'id' }
-          );
-        } catch (dbErr) {
-          console.warn('Database workspace sync error during auto-initialization:', dbErr);
-        }
-      }
-
-      authorizedList.push(newWs);
     }
 
     res.json({ workspaces: authorizedList });

@@ -386,6 +386,11 @@ export function isEmailAuthorized(email?: string): boolean {
 }
 
 
+export function getDeterministicWorkspaceId(userId: string): string {
+  const hash = crypto.createHash('sha256').update(`workspace-${userId}`).digest('hex');
+  return `${hash.substring(0, 8)}-${hash.substring(8, 12)}-4${hash.substring(13, 16)}-8${hash.substring(17, 20)}-${hash.substring(20, 32)}`;
+}
+
 // Authorized workspace store for server-side verification and testing
 const authorizedWorkspaceMap = new Map<string, Set<string>>();
 
@@ -410,6 +415,12 @@ export async function isUserAuthorizedForWorkspace(
   userEmail?: string
 ): Promise<boolean> {
   if (!userId || !workspaceId || !workspaceId.trim()) return false;
+
+  // 0. Check if workspaceId matches the user's deterministic workspace ID
+  if (workspaceId === getDeterministicWorkspaceId(userId)) {
+    registerWorkspaceAuthorization(userId, workspaceId);
+    return true;
+  }
 
   // 1. Check in-memory registered authorizations (test / session runtime)
   const userWorkspaces = authorizedWorkspaceMap.get(userId);
