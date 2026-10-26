@@ -1,0 +1,5 @@
+{
+  "summary":  "Patch implementing comprehensive data persistence across Supabase and PostgreSQL for LinkedIn Lead Finder. Ensures clients, discovered leads, search history, dashboard statistics, and Google Sheets export history are authoritatively persisted and survive page refreshes, re-logins, and serverless teardowns while enforcing strict tenant isolation.",
+  "updatedAt":  "2026-10-26T13:50:31.619522832Z",
+  "userFacing":  true
+}

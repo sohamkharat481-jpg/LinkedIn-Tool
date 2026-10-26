@@ -9,17 +9,17 @@ CREATE TABLE IF NOT EXISTS public.workspaces (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
   description TEXT,
-  owner_id UUID,
+  owner_id TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 ALTER TABLE public.workspaces
-  ADD COLUMN IF NOT EXISTS owner_id UUID;
+  ADD COLUMN IF NOT EXISTS owner_id TEXT;
 
 -- 1. USERS TABLE
 CREATE TABLE IF NOT EXISTS public.users (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id TEXT PRIMARY KEY,
   email TEXT UNIQUE NOT NULL,
   full_name TEXT,
   avatar_url TEXT,
@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS public.clients (
   name TEXT NOT NULL,
   niche TEXT NOT NULL,
   notes TEXT,
-  created_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  created_by TEXT REFERENCES public.users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );

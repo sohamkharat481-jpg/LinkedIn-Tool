@@ -333,6 +333,12 @@ class StorageService {
     return searches.filter((s) => s.workspaceId === workspaceId);
   }
 
+  syncSearchesForWorkspace(workspaceId: string, syncedSearches: SearchHistoryRecord[]): void {
+    const searches = this.getItem<SearchHistoryRecord[]>(STORAGE_KEYS.SEARCHES, SEED_SEARCHES);
+    const otherSearches = searches.filter((s) => s.workspaceId !== workspaceId);
+    this.setItem(STORAGE_KEYS.SEARCHES, [...syncedSearches, ...otherSearches]);
+  }
+
   getSearchById(workspaceId: string, searchId: string): SearchHistoryRecord | undefined {
     return this.getSearches(workspaceId).find((s) => s.id === searchId);
   }
@@ -468,6 +474,12 @@ class StorageService {
     const allLeads = this.getItem<LeadRecord[]>(STORAGE_KEYS.LEADS, SEED_LEADS);
     const filtered = allLeads.filter((l) => !(l.workspaceId === workspaceId && idSet.has(l.id)));
     this.setItem(STORAGE_KEYS.LEADS, filtered);
+  }
+
+  syncLeadsForWorkspace(workspaceId: string, syncedLeads: LeadRecord[]): void {
+    const allLeads = this.getItem<LeadRecord[]>(STORAGE_KEYS.LEADS, SEED_LEADS);
+    const otherLeads = allLeads.filter((l) => l.workspaceId !== workspaceId);
+    this.setItem(STORAGE_KEYS.LEADS, [...syncedLeads, ...otherLeads]);
   }
 
   // Google Integration & Export History

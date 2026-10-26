@@ -1,0 +1,12 @@
+From: AI Studio Build Engineer <engineer@aistudio.google.com>
+Subject: [PATCH] fix: resolve data persistence across Supabase, serverless API routes, and multi-tenant workspaces
+
+- Alter workspaces.owner_id and users.id to TEXT in Supabase schema and migration, eliminating invalid input syntax for type uuid when handling Firebase 28-character UIDs.
+- Update GET /api/workspaces/:workspaceId/leads to query Supabase directly with client_leads linkage and fallback synchronization.
+- Update POST /api/workspaces/:workspaceId/leads to enforce valid UUIDs, resolve existing leads by profile_url to prevent foreign key violations on client_leads, and persist all rich B2B and contact fields.
+- Update GET /api/workspaces/:workspaceId/searches to query lead_searches and clients(name) from Supabase.
+- Update GET /api/workspaces/:workspaceId/clients to compute leadsCount and searchesCount from Supabase tables rather than empty serverless memory.
+- Implement Google Integrations and Export History REST endpoints in dataRoutes.ts with Supabase persistence.
+- Update App.tsx onExportSuccess to persist Google Sheet export events and spreadsheet links via SupabaseDataService using canonical UUIDs.
+- Add comprehensive regression tests in tests/ServerDataApiIntegration.test.ts (87/87 tests passing).
+---

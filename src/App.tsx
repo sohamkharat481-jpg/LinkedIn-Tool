@@ -13,7 +13,7 @@ import {
   InstagramVerificationStatus
 } from './types';
 import { dbService } from './services/storage';
-import { SupabaseDataService } from './services/supabaseDataService';
+import { SupabaseDataService, generateUuid } from './services/supabaseDataService';
 import type { LeadPersistenceStatus } from './services/supabaseDataService';
 import { initAuthListener, setCachedAccessToken, googleSignIn, googleSignOut, verifyGoogleAccountConnection, firebaseSignIn, firebaseSignInAnonymously, generateFallbackJwtToken, auth } from './services/auth';
 import { apiUrl } from './services/apiClient';
@@ -464,7 +464,7 @@ export default function App() {
     // Convert to LeadRecords
     const dateToday = new Date().toISOString().split('T')[0];
     const newLeadRecords: LeadRecord[] = rawLeads.map((raw) => ({
-      id: `lead-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      id: generateUuid(),
       workspaceId: activeWorkspace.id,
       clientId: targetClient.id,
       fullName: raw.fullName,
@@ -863,10 +863,12 @@ export default function App() {
           setCachedAccessToken(token);
           setIsGoogleConnected(true);
         }}
-        onExportSuccess={(sheetId, sheetUrl, addedCount, skippedCount) => {
+        onExportSuccess={async (sheetId, sheetUrl, addedCount, skippedCount) => {
           if (exportTargetClientId && activeWorkspace) {
-            dbService.saveGoogleIntegration({
-              id: `gint-${Date.now()}`,
+            const intId = generateUuid();
+            const expId = generateUuid();
+            await SupabaseDataService.saveGoogleIntegration(activeWorkspace.id, {
+              id: intId,
               workspaceId: activeWorkspace.id,
               clientId: exportTargetClientId,
               spreadsheetId: sheetId,
@@ -874,8 +876,8 @@ export default function App() {
               sheetTitle: exportTargetClientName,
               lastExportedAt: new Date().toISOString()
             });
-            dbService.saveExportHistory({
-              id: `exp-${Date.now()}`,
+            await SupabaseDataService.saveExportHistory(activeWorkspace.id, {
+              id: expId,
               workspaceId: activeWorkspace.id,
               clientId: exportTargetClientId,
               spreadsheetId: sheetId,
@@ -884,7 +886,7 @@ export default function App() {
               exportedByEmail: userEmail,
               createdAt: new Date().toISOString()
             });
-            refreshWorkspaceData(activeWorkspace.id);
+            await refreshWorkspaceData(activeWorkspace.id);
           }
         }}
       />

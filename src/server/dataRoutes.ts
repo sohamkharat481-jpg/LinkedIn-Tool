@@ -14,10 +14,14 @@ import {
   LeadFilter,
   SearchHistoryRecord,
   Workspace,
-  InstagramVerificationStatus
+  InstagramVerificationStatus,
+  GoogleIntegration,
+  ExportHistoryRecord
 } from '../types';
 
 export const dataRouter = express.Router();
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function generateUuid(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -246,6 +250,33 @@ dataRouter.get('/workspaces/:workspaceId/clients', async (req: Request, res: Res
         .order('created_at', { ascending: false });
 
       if (!error && Array.isArray(data)) {
+        const leadCountsByClient = new Map<string, number>();
+        const searchCountsByClient = new Map<string, number>();
+
+        try {
+          const { data: clData } = await supabase
+            .from('client_leads')
+            .select('client_id')
+            .eq('workspace_id', workspaceId);
+          if (Array.isArray(clData)) {
+            for (const item of clData) {
+              leadCountsByClient.set(item.client_id, (leadCountsByClient.get(item.client_id) || 0) + 1);
+            }
+          }
+
+          const { data: lsData } = await supabase
+            .from('lead_searches')
+            .select('client_id')
+            .eq('workspace_id', workspaceId);
+          if (Array.isArray(lsData)) {
+            for (const item of lsData) {
+              searchCountsByClient.set(item.client_id, (searchCountsByClient.get(item.client_id) || 0) + 1);
+            }
+          }
+        } catch (cntErr) {
+          console.warn('Failed to fetch counts from Supabase:', cntErr);
+        }
+
         const localLeads = dbService.getAllLeads(workspaceId);
         const localSearches = dbService.getSearches(workspaceId);
 
@@ -257,8 +288,12 @@ dataRouter.get('/workspaces/:workspaceId/clients', async (req: Request, res: Res
           notes: c.notes || '',
           createdAt: c.created_at,
           updatedAt: c.updated_at,
-          leadsCount: localLeads.filter((l) => l.clientId === c.id).length,
-          searchesCount: localSearches.filter((s) => s.clientId === c.id).length
+          leadsCount: leadCountsByClient.has(c.id)
+            ? leadCountsByClient.get(c.id)!
+            : localLeads.filter((l) => l.clientId === c.id).length,
+          searchesCount: searchCountsByClient.has(c.id)
+            ? searchCountsByClient.get(c.id)!
+            : localSearches.filter((s) => s.clientId === c.id).length
         }));
 
         dbService.syncClientsForWorkspace(workspaceId, clients);
@@ -436,6 +471,101 @@ dataRouter.get('/workspaces/:workspaceId/leads', async (req: Request, res: Respo
   }
 
   try {
+    if (supabase) {
+      try {
+        const { data: leadsData, error: leadsError } = await supabase
+          .from('leads')
+          .select('*')
+          .eq('workspace_id', workspaceId)
+          .order('created_at', { ascending: false });
+
+        if (!leadsError && Array.isArray(leadsData)) {
+          let clQuery = supabase
+            .from('client_leads')
+            .select('*')
+            .eq('workspace_id', workspaceId);
+
+          if (clientId) {
+            clQuery = clQuery.eq('client_id', clientId);
+          }
+
+          const { data: junctionData } = await clQuery;
+          const junctionMap = new Map<string, any>();
+          if (Array.isArray(junctionData)) {
+            for (const j of junctionData) {
+              junctionMap.set(j.lead_id, j);
+            }
+          }
+
+          const records: LeadRecord[] = [];
+          for (const item of leadsData) {
+            const junction = junctionMap.get(item.id);
+            if (clientId && !junction) {
+              continue;
+            }
+
+            records.push({
+              id: item.id,
+              workspaceId: item.workspace_id,
+              clientId: junction?.client_id || clientId || '',
+              searchId: junction?.search_id || undefined,
+              fullName: item.full_name || 'N/A',
+              headline: item.headline || '',
+              currentJobTitle: item.current_job_title || 'N/A',
+              companyName: item.company_name || 'N/A',
+              location: item.location || 'N/A',
+              profileUrl: item.profile_url || '',
+              connectionsOrFollowers:
+                item.lead_type === 'business'
+                  ? item.connections_or_followers || ''
+                  : item.connections_or_followers || '500+ connections',
+              lastActivityDate: item.last_activity_date || 'N/A',
+              dateAdded: (item.created_at || new Date().toISOString()).split('T')[0],
+              status: (junction?.status as LeadStatus) || 'Not Contacted',
+              notes: junction?.notes || '',
+              source: item.source || 'Wikidata SPARQL Query Service',
+              leadType: item.lead_type || undefined,
+              businessCategory: item.business_category || undefined,
+              businessWebsite: item.business_website || undefined,
+              businessPhone: item.business_phone || undefined,
+              businessAddress: item.business_address || undefined,
+              businessCity: item.business_city || undefined,
+              businessCountry: item.business_country || undefined,
+              latitude: typeof item.latitude === 'number' ? item.latitude : undefined,
+              longitude: typeof item.longitude === 'number' ? item.longitude : undefined,
+              businessEmail: item.business_email || undefined,
+              linkedInProfileUrl: item.linkedin_profile_url || undefined,
+              contactSource: item.contact_source || undefined,
+              contactVerificationStatus: item.contact_verification_status || undefined,
+              instagramUsername: item.instagram_username || undefined,
+              instagramProfileUrl: item.instagram_profile_url || undefined,
+              instagramVerificationStatus: item.instagram_verification_status || undefined,
+              instagramVerificationEvidence: item.instagram_verification_evidence || undefined,
+              instagramDiscoverySource: item.instagram_discovery_source || undefined,
+              instagramLastCheckedAt: item.instagram_last_checked_at || undefined,
+              relevanceScore: typeof item.relevance_score === 'number' ? item.relevance_score : undefined,
+              relevanceExplanation: item.relevance_explanation || undefined,
+              relevanceBreakdown: item.relevance_breakdown || undefined,
+              b2bClassification: item.b2b_classification || undefined,
+              isDeceased: typeof item.is_deceased === 'boolean' ? item.is_deceased : undefined,
+              dateOfDeath: item.date_of_death || undefined,
+              dateOfBirth: item.date_of_birth || undefined,
+              entityPeriod: item.entity_period || undefined,
+              activeEvidence: item.active_evidence || undefined
+            });
+          }
+
+          if (!clientId) {
+            dbService.syncLeadsForWorkspace(workspaceId, records);
+          }
+          res.json({ leads: records });
+          return;
+        }
+      } catch (dbErr) {
+        console.warn('Database lead fetch error, falling back to cache:', dbErr);
+      }
+    }
+
     if (clientId) {
       const leads = dbService.getLeadsForClient(workspaceId, clientId);
       res.json({ leads });
@@ -470,43 +600,102 @@ dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Resp
     const localResult = dbService.saveLeadsForClient(workspaceId, clientId, leads);
 
     if (supabase && leads.length > 0) {
+      const now = new Date().toISOString();
       const leadRows = leads.map((l: LeadRecord) => ({
-        id: l.id && l.id.length > 20 ? l.id : generateUuid(),
+        id: l.id && UUID_REGEX.test(l.id) ? l.id : generateUuid(),
         workspace_id: workspaceId,
-        full_name: l.fullName,
-        headline: l.headline,
-        current_job_title: l.currentJobTitle,
-        company_name: l.companyName,
-        location: l.location,
+        full_name: l.fullName || 'N/A',
+        headline: l.headline || '',
+        current_job_title: l.currentJobTitle || 'N/A',
+        company_name: l.companyName || 'N/A',
+        location: l.location || 'N/A',
         profile_url: l.profileUrl,
-        connections_or_followers: l.connectionsOrFollowers,
-        last_activity_date: l.lastActivityDate,
+        connections_or_followers: l.connectionsOrFollowers || null,
+        last_activity_date: l.lastActivityDate || null,
         source: l.source || 'Wikidata SPARQL Query Service',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
+        lead_type: l.leadType || null,
+        business_category: l.businessCategory || null,
+        business_website: l.businessWebsite || null,
+        business_phone: l.businessPhone || null,
+        business_address: l.businessAddress || null,
+        business_city: l.businessCity || null,
+        business_country: l.businessCountry || null,
+        latitude: typeof l.latitude === 'number' ? l.latitude : null,
+        longitude: typeof l.longitude === 'number' ? l.longitude : null,
+        business_email: l.businessEmail || null,
+        linkedin_profile_url: l.linkedInProfileUrl || null,
+        contact_source: l.contactSource || null,
+        contact_verification_status: l.contactVerificationStatus || null,
+        instagram_username: l.instagramUsername || null,
+        instagram_profile_url: l.instagramProfileUrl || null,
+        instagram_verification_status: l.instagramVerificationStatus || null,
+        instagram_verification_evidence: l.instagramVerificationEvidence || null,
+        instagram_discovery_source: l.instagramDiscoverySource || null,
+        instagram_last_checked_at: l.instagramLastCheckedAt || null,
+        relevance_score: typeof l.relevanceScore === 'number' ? l.relevanceScore : null,
+        relevance_explanation: l.relevanceExplanation || null,
+        relevance_breakdown: l.relevanceBreakdown || null,
+        b2b_classification: l.b2bClassification || null,
+        is_deceased: typeof l.isDeceased === 'boolean' ? l.isDeceased : null,
+        date_of_death: l.dateOfDeath || null,
+        date_of_birth: l.dateOfBirth || null,
+        entity_period: l.entityPeriod || null,
+        active_evidence: l.activeEvidence || null,
+        created_at: now,
+        updated_at: now
       }));
 
-      await supabase.from('leads').upsert(leadRows, {
+      const { error: upsertLeadErr } = await supabase.from('leads').upsert(leadRows, {
         onConflict: 'workspace_id,profile_url',
         ignoreDuplicates: true
       });
 
-      const clientLeadRows = leadRows.map((lead: any) => ({
-        id: generateUuid(),
-        workspace_id: workspaceId,
-        client_id: clientId,
-        lead_id: lead.id,
-        search_id: searchId || null,
-        status: 'Not Contacted',
-        notes: '',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      }));
+      if (upsertLeadErr) {
+        console.error('Supabase lead upsert error:', upsertLeadErr.message);
+        throw new Error(`Database rejected leads persistence: ${upsertLeadErr.message}`);
+      }
 
-      await supabase.from('client_leads').upsert(clientLeadRows, {
+      const urls = leadRows.map((r: any) => r.profile_url);
+      const { data: existingLeads, error: lookupErr } = await supabase
+        .from('leads')
+        .select('id, profile_url')
+        .eq('workspace_id', workspaceId)
+        .in('profile_url', urls);
+
+      if (lookupErr) {
+        console.error('Supabase lookup error:', lookupErr.message);
+        throw new Error(`Database lookup failed: ${lookupErr.message}`);
+      }
+
+      const urlToId = new Map<string, string>();
+      if (Array.isArray(existingLeads)) {
+        existingLeads.forEach((el: any) => urlToId.set(el.profile_url.toLowerCase(), el.id));
+      }
+
+      const clientLeadRows = leads.map((l: LeadRecord) => {
+        const leadId = urlToId.get(l.profileUrl.toLowerCase()) || (l.id && UUID_REGEX.test(l.id) ? l.id : generateUuid());
+        return {
+          id: generateUuid(),
+          workspace_id: workspaceId,
+          client_id: clientId,
+          lead_id: leadId,
+          search_id: (searchId && UUID_REGEX.test(searchId)) ? searchId : null,
+          status: l.status || 'Not Contacted',
+          notes: l.notes || '',
+          created_at: now,
+          updated_at: now
+        };
+      });
+
+      const { error: linkErr } = await supabase.from('client_leads').upsert(clientLeadRows, {
         onConflict: 'client_id,lead_id',
         ignoreDuplicates: true
       });
+
+      if (linkErr) {
+        console.error('Supabase client_leads upsert error:', linkErr.message);
+        throw new Error(`Database rejected client links: ${linkErr.message}`);
+      }
     }
 
     res.json({
@@ -515,7 +704,7 @@ dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Resp
       duplicatesSkipped: localResult.duplicatesSkipped,
       persistenceStatus: supabase ? 'confirmed' : 'local_only',
       persistenceMessage: supabase
-        ? 'Leads persisted securely to workspace.'
+        ? 'Leads persisted securely to workspace database.'
         : 'Leads saved in local workspace cache.'
     });
   } catch (error: any) {
@@ -680,6 +869,38 @@ dataRouter.get('/workspaces/:workspaceId/searches', async (req: Request, res: Re
   }
 
   try {
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('lead_searches')
+          .select('*, clients(name)')
+          .eq('workspace_id', workspaceId)
+          .order('created_at', { ascending: false });
+
+        if (!error && Array.isArray(data)) {
+          const searches: SearchHistoryRecord[] = data.map((s: any) => ({
+            id: s.id,
+            workspaceId: s.workspace_id,
+            clientId: s.client_id,
+            clientName: s.clients?.name || 'Client',
+            searchDate: s.created_at,
+            filters: s.filters,
+            candidatesFound: s.candidates_found || 0,
+            validLeads: s.valid_leads || 0,
+            duplicatesRemoved: s.duplicates_removed || 0,
+            finalLeadCount: s.final_lead_count || 0,
+            createdBy: s.created_by_user_email || 'User'
+          }));
+
+          dbService.syncSearchesForWorkspace(workspaceId, searches);
+          res.json({ searches });
+          return;
+        }
+      } catch (dbErr) {
+        console.warn('Database searches lookup error, falling back to cache:', dbErr);
+      }
+    }
+
     const searches = dbService.getSearches(workspaceId);
     res.json({ searches });
   } catch (error: any) {
@@ -764,9 +985,224 @@ dataRouter.post('/workspaces/:workspaceId/searches', async (req: Request, res: R
       searchId
     );
 
-
     res.status(201).json({ search: record });
   } catch (error: any) {
     res.status(500).json({ error: error.message || 'Failed to record search.' });
+  }
+});
+
+// ==========================================
+// 5. GOOGLE INTEGRATION ENDPOINTS
+// ==========================================
+
+/**
+ * GET /api/workspaces/:workspaceId/google-integrations
+ */
+dataRouter.get('/workspaces/:workspaceId/google-integrations', async (req: Request, res: Response) => {
+  const { workspaceId } = req.params;
+  const clientId = req.query.clientId as string | undefined;
+
+  const access = await verifyWorkspaceAccess(req, workspaceId);
+  if (!access.authorized) {
+    res.status(access.status).json({ error: access.error });
+    return;
+  }
+
+  try {
+    if (supabase && clientId) {
+      const { data, error } = await supabase
+        .from('google_integrations')
+        .select('*')
+        .eq('workspace_id', workspaceId)
+        .eq('client_id', clientId)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!error && data) {
+        const integration: GoogleIntegration = {
+          id: data.id,
+          workspaceId: data.workspace_id,
+          clientId: data.client_id,
+          spreadsheetId: data.spreadsheet_id,
+          spreadsheetUrl: data.spreadsheet_url,
+          sheetTitle: data.sheet_title,
+          lastExportedAt: data.last_exported_at
+        };
+        dbService.saveGoogleIntegration(integration);
+        res.json({ integration });
+        return;
+      }
+    }
+
+    if (clientId) {
+      const integration = dbService.getGoogleIntegration(workspaceId, clientId);
+      res.json({ integration });
+      return;
+    }
+
+    res.json({ integration: undefined });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to fetch Google integration.' });
+  }
+});
+
+/**
+ * POST /api/workspaces/:workspaceId/google-integrations
+ */
+dataRouter.post('/workspaces/:workspaceId/google-integrations', async (req: Request, res: Response) => {
+  const { workspaceId } = req.params;
+  const access = await verifyWorkspaceAccess(req, workspaceId);
+  if (!access.authorized) {
+    res.status(access.status).json({ error: access.error });
+    return;
+  }
+
+  const { clientId, spreadsheetId, spreadsheetUrl, sheetTitle, lastExportedAt, id } = req.body;
+  if (!clientId || !spreadsheetId) {
+    res.status(400).json({ error: 'clientId and spreadsheetId are required.' });
+    return;
+  }
+
+  try {
+    const integrationId = id && UUID_REGEX.test(id) ? id : generateUuid();
+    const now = lastExportedAt || new Date().toISOString();
+
+    const integration: GoogleIntegration = {
+      id: integrationId,
+      workspaceId,
+      clientId,
+      spreadsheetId,
+      spreadsheetUrl: spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${spreadsheetId}`,
+      sheetTitle: sheetTitle || 'Leads Export',
+      lastExportedAt: now
+    };
+
+    if (supabase) {
+      await supabase.from('google_integrations').upsert([
+        {
+          id: integrationId,
+          workspace_id: workspaceId,
+          client_id: clientId,
+          spreadsheet_id: spreadsheetId,
+          spreadsheet_url: integration.spreadsheetUrl,
+          sheet_title: integration.sheetTitle,
+          last_exported_at: now,
+          updated_at: now
+        }
+      ]);
+    }
+
+    dbService.saveGoogleIntegration(integration);
+    res.status(201).json({ integration });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to save Google integration.' });
+  }
+});
+
+// ==========================================
+// 6. EXPORT HISTORY ENDPOINTS
+// ==========================================
+
+/**
+ * GET /api/workspaces/:workspaceId/export-history
+ */
+dataRouter.get('/workspaces/:workspaceId/export-history', async (req: Request, res: Response) => {
+  const { workspaceId } = req.params;
+  const clientId = req.query.clientId as string | undefined;
+
+  const access = await verifyWorkspaceAccess(req, workspaceId);
+  if (!access.authorized) {
+    res.status(access.status).json({ error: access.error });
+    return;
+  }
+
+  try {
+    if (supabase) {
+      let query = supabase
+        .from('export_history')
+        .select('*')
+        .eq('workspace_id', workspaceId)
+        .order('created_at', { ascending: false });
+
+      if (clientId) {
+        query = query.eq('client_id', clientId);
+      }
+
+      const { data, error } = await query;
+      if (!error && Array.isArray(data)) {
+        const history: ExportHistoryRecord[] = data.map((d: any) => ({
+          id: d.id,
+          workspaceId: d.workspace_id,
+          clientId: d.client_id,
+          spreadsheetId: d.spreadsheet_id,
+          exportedLeadsCount: d.exported_leads_count,
+          skippedDuplicatesCount: d.skipped_duplicates_count || 0,
+          exportedByEmail: d.exported_by_email,
+          createdAt: d.created_at
+        }));
+        res.json({ history });
+        return;
+      }
+    }
+
+    const history = dbService.getExportHistory(workspaceId, clientId);
+    res.json({ history });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to fetch export history.' });
+  }
+});
+
+/**
+ * POST /api/workspaces/:workspaceId/export-history
+ */
+dataRouter.post('/workspaces/:workspaceId/export-history', async (req: Request, res: Response) => {
+  const { workspaceId } = req.params;
+  const access = await verifyWorkspaceAccess(req, workspaceId);
+  if (!access.authorized) {
+    res.status(access.status).json({ error: access.error });
+    return;
+  }
+
+  const { clientId, spreadsheetId, exportedLeadsCount, skippedDuplicatesCount, exportedByEmail, createdAt, id } = req.body;
+  if (!clientId || !spreadsheetId) {
+    res.status(400).json({ error: 'clientId and spreadsheetId are required.' });
+    return;
+  }
+
+  try {
+    const recordId = id && UUID_REGEX.test(id) ? id : generateUuid();
+    const now = createdAt || new Date().toISOString();
+
+    const record: ExportHistoryRecord = {
+      id: recordId,
+      workspaceId,
+      clientId,
+      spreadsheetId,
+      exportedLeadsCount: exportedLeadsCount || 0,
+      skippedDuplicatesCount: skippedDuplicatesCount || 0,
+      exportedByEmail: exportedByEmail || access.user?.email || 'User',
+      createdAt: now
+    };
+
+    if (supabase) {
+      await supabase.from('export_history').insert([
+        {
+          id: recordId,
+          workspace_id: workspaceId,
+          client_id: clientId,
+          spreadsheet_id: spreadsheetId,
+          exported_leads_count: record.exportedLeadsCount,
+          skipped_duplicates_count: record.skippedDuplicatesCount,
+          exported_by_email: record.exportedByEmail,
+          created_at: now
+        }
+      ]);
+    }
+
+    dbService.saveExportHistory(record);
+    res.status(201).json({ record });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to save export history.' });
   }
 });

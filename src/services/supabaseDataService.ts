@@ -1,6 +1,16 @@
 import { supabase } from './supabase';
 import { dbService } from './storage';
-import { Client, LeadRecord, LeadStatus, SearchHistoryRecord, RawLead, LeadFilter, InstagramVerificationStatus } from '../types';
+import {
+  Client,
+  LeadRecord,
+  LeadStatus,
+  SearchHistoryRecord,
+  RawLead,
+  LeadFilter,
+  InstagramVerificationStatus,
+  GoogleIntegration,
+  ExportHistoryRecord
+} from '../types';
 import { apiUrl } from './apiClient';
 import { getFirebaseIdToken, getCachedAccessToken } from './auth';
 
@@ -74,7 +84,9 @@ async function callDataApi<T>(
   }
 }
 
-function generateUuid(): string {
+export const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function generateUuid(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
   }
@@ -568,7 +580,7 @@ export class SupabaseDataService {
     if (supabase && newLeads.length > 0) {
       const client = supabase;
       const leadRows = newLeads.map((l) => ({
-        id: l.id && l.id.length > 20 ? l.id : generateUuid(),
+        id: l.id && UUID_REGEX.test(l.id) ? l.id : generateUuid(),
         workspace_id: workspaceId,
         full_name: l.fullName,
         headline: l.headline,
@@ -983,6 +995,61 @@ export class SupabaseDataService {
     );
 
     return record;
+  }
+
+  /**
+   * Fetch Google Sheets integration details for client.
+   */
+  static async getGoogleIntegration(workspaceId: string, clientId: string): Promise<GoogleIntegration | undefined> {
+    const apiRes = await callDataApi<{ integration?: GoogleIntegration }>(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/google-integrations?clientId=${encodeURIComponent(clientId)}`
+    );
+    if (apiRes.success && apiRes.data?.integration) {
+      dbService.saveGoogleIntegration(apiRes.data.integration);
+      return apiRes.data.integration;
+    }
+    return dbService.getGoogleIntegration(workspaceId, clientId);
+  }
+
+  /**
+   * Persist Google Sheets integration details to database and local cache.
+   */
+  static async saveGoogleIntegration(workspaceId: string, integration: GoogleIntegration): Promise<void> {
+    dbService.saveGoogleIntegration(integration);
+    await callDataApi(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/google-integrations`,
+      {
+        method: 'POST',
+        body: JSON.stringify(integration)
+      }
+    );
+  }
+
+  /**
+   * Fetch Google Sheets export history for workspace / client.
+   */
+  static async getExportHistory(workspaceId: string, clientId?: string): Promise<ExportHistoryRecord[]> {
+    const apiRes = await callDataApi<{ history?: ExportHistoryRecord[] }>(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/export-history${clientId ? `?clientId=${encodeURIComponent(clientId)}` : ''}`
+    );
+    if (apiRes.success && Array.isArray(apiRes.data?.history)) {
+      return apiRes.data.history;
+    }
+    return dbService.getExportHistory(workspaceId, clientId);
+  }
+
+  /**
+   * Persist Google Sheets export history record to database and local cache.
+   */
+  static async saveExportHistory(workspaceId: string, record: ExportHistoryRecord): Promise<void> {
+    dbService.saveExportHistory(record);
+    await callDataApi(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/export-history`,
+      {
+        method: 'POST',
+        body: JSON.stringify(record)
+      }
+    );
   }
 }
 

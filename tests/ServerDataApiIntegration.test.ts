@@ -221,3 +221,194 @@ test('4. Frontend SupabaseDataService seamlessly routes operations through authe
   const remainingClients = await SupabaseDataService.getClients(serviceWs);
   assert.ok(!remainingClients.some((c) => c.id === client.id));
 });
+
+test('5. Lead creation, retrieval, status update, and client lead count persist accurately via API', async () => {
+  const tenantUser = 'user-leads-persist';
+  const tenantWs = 'ws-leads-persist-e2e';
+  registerWorkspaceAuthorization(tenantUser, tenantWs);
+
+  const token = createSignedTestToken({ userId: tenantUser, email: 'leads@persist.com' });
+
+  // 1. Create client
+  const resClient = await fetch(`${baseUrl}/api/workspaces/${tenantWs}/clients`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({
+      name: 'Persisted Tech Inc',
+      niche: 'AI SaaS',
+      notes: 'Testing lead persistence'
+    })
+  });
+  assert.equal(resClient.status, 201);
+  const clientData = await resClient.json();
+  const clientId = clientData.client.id;
+
+  // 2. Post leads
+  const testLead = {
+    id: '11111111-2222-3333-4444-555555555555',
+    fullName: 'Jane Doe',
+    headline: 'CTO at CloudTech',
+    currentJobTitle: 'CTO',
+    companyName: 'CloudTech',
+    location: 'San Francisco, CA',
+    profileUrl: 'https://linkedin.com/in/janedoe-persist-test',
+    connectionsOrFollowers: '500+ connections',
+    lastActivityDate: '2026-10-26',
+    source: 'Wikidata SPARQL Query Service'
+  };
+
+  const resSaveLeads = await fetch(`${baseUrl}/api/workspaces/${tenantWs}/leads`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({
+      clientId,
+      leads: [testLead]
+    })
+  });
+  assert.equal(resSaveLeads.status, 200);
+  const saveLeadsData = await resSaveLeads.json();
+  assert.equal(saveLeadsData.success, true);
+  assert.equal(saveLeadsData.added, 1);
+
+  // 3. Retrieve leads via GET /leads
+  const resGetLeads = await fetch(`${baseUrl}/api/workspaces/${tenantWs}/leads`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  assert.equal(resGetLeads.status, 200);
+  const getLeadsData = await resGetLeads.json();
+  assert.ok(getLeadsData.leads.some((l: any) => l.profileUrl === testLead.profileUrl));
+
+  // 4. Check client leadsCount is updated
+  const resClients = await fetch(`${baseUrl}/api/workspaces/${tenantWs}/clients`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  const clientsData = await resClients.json();
+  const foundClient = clientsData.clients.find((c: any) => c.id === clientId);
+  assert.ok(foundClient);
+  assert.equal(foundClient.leadsCount, 1);
+
+  // 5. Update lead status
+  const resStatus = await fetch(`${baseUrl}/api/workspaces/${tenantWs}/leads/${testLead.id}/status`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({ status: 'Request Sent' })
+  });
+  assert.equal(resStatus.status, 200);
+});
+
+test('6. Google Integrations and Export History endpoints persist and retrieve records', async () => {
+  const tenantUser = 'user-google-export';
+  const tenantWs = 'ws-google-export-e2e';
+  const clientId = '22222222-3333-4444-5555-666666666666';
+  registerWorkspaceAuthorization(tenantUser, tenantWs);
+
+  const token = createSignedTestToken({ userId: tenantUser, email: 'export@google.com' });
+
+  // 1. Save Google Integration
+  const resSaveInt = await fetch(`${baseUrl}/api/workspaces/${tenantWs}/google-integrations`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({
+      clientId,
+      spreadsheetId: 'sheet-abc-123',
+      spreadsheetUrl: 'https://docs.google.com/spreadsheets/d/sheet-abc-123',
+      sheetTitle: 'Export Sheet 1'
+    })
+  });
+  assert.equal(resSaveInt.status, 201);
+
+  // 2. Retrieve Google Integration
+  const resGetInt = await fetch(`${baseUrl}/api/workspaces/${tenantWs}/google-integrations?clientId=${clientId}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  assert.equal(resGetInt.status, 200);
+  const getIntData = await resGetInt.json();
+  assert.equal(getIntData.integration?.spreadsheetId, 'sheet-abc-123');
+
+  // 3. Save Export History
+  const resSaveExp = await fetch(`${baseUrl}/api/workspaces/${tenantWs}/export-history`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({
+      clientId,
+      spreadsheetId: 'sheet-abc-123',
+      exportedLeadsCount: 25,
+      skippedDuplicatesCount: 2,
+      exportedByEmail: 'export@google.com'
+    })
+  });
+  assert.equal(resSaveExp.status, 201);
+
+  // 4. Retrieve Export History
+  const resGetExp = await fetch(`${baseUrl}/api/workspaces/${tenantWs}/export-history?clientId=${clientId}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  assert.equal(resGetExp.status, 200);
+  const getExpData = await resGetExp.json();
+  assert.ok(getExpData.history.some((h: any) => h.spreadsheetId === 'sheet-abc-123' && h.exportedLeadsCount === 25));
+});
+
+test('7. Cross-tenant isolation strictly blocks unauthorized access to leads, searches, integrations, and export history', async () => {
+  const userTenantA = 'user-sec-a';
+  const wsA = 'ws-sec-a-iso';
+  const userTenantB = 'user-sec-b';
+  const wsB = 'ws-sec-b-iso';
+
+  registerWorkspaceAuthorization(userTenantA, wsA);
+  registerWorkspaceAuthorization(userTenantB, wsB);
+
+  const tokenB = createSignedTestToken({ userId: userTenantB, email: 'attacker@tenantb.com' });
+
+  // User B attempts to read User A's leads -> 403 Forbidden
+  const resLeads = await fetch(`${baseUrl}/api/workspaces/${wsA}/leads`, {
+    headers: { Authorization: `Bearer ${tokenB}` }
+  });
+  assert.equal(resLeads.status, 403);
+
+  // User B attempts to post leads into User A's workspace -> 403 Forbidden
+  const resPostLeads = await fetch(`${baseUrl}/api/workspaces/${wsA}/leads`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${tokenB}`
+    },
+    body: JSON.stringify({
+      clientId: 'fake-client',
+      leads: []
+    })
+  });
+  assert.equal(resPostLeads.status, 403);
+
+  // User B attempts to read User A's searches -> 403 Forbidden
+  const resSearches = await fetch(`${baseUrl}/api/workspaces/${wsA}/searches`, {
+    headers: { Authorization: `Bearer ${tokenB}` }
+  });
+  assert.equal(resSearches.status, 403);
+
+  // User B attempts to read User A's google integrations -> 403 Forbidden
+  const resInt = await fetch(`${baseUrl}/api/workspaces/${wsA}/google-integrations?clientId=any`, {
+    headers: { Authorization: `Bearer ${tokenB}` }
+  });
+  assert.equal(resInt.status, 403);
+
+  // User B attempts to read User A's export history -> 403 Forbidden
+  const resExp = await fetch(`${baseUrl}/api/workspaces/${wsA}/export-history`, {
+    headers: { Authorization: `Bearer ${tokenB}` }
+  });
+  assert.equal(resExp.status, 403);
+});
