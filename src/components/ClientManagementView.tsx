@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Client, LeadRecord, SearchHistoryRecord, InstagramVerificationStatus } from '../types';
-import { Plus, Edit2, Trash2, FolderOpen, Users, Search, FileText, X, Check, FileSpreadsheet, AlertCircle, Building2 } from 'lucide-react';
+import { Plus, Edit2, Trash2, FolderOpen, Users, Search, FileText, X, Check, FileSpreadsheet, AlertCircle, Building2, CheckCircle2 } from 'lucide-react';
 import { LeadsTableView } from './LeadsTableView';
 
 interface ClientManagementViewProps {
@@ -27,7 +27,7 @@ interface ClientManagementViewProps {
     }
   ) => void;
   onDeleteLeads: (leadIds: string[]) => void;
-  onExportToSheets: (leadsToExport: LeadRecord[], clientName: string) => void;
+  onExportToSheets: (leadsToExport: LeadRecord[], clientName: string, clientId?: string) => void;
   isGoogleConnected: boolean;
   supabaseError?: string | null;
   isLoading?: boolean;
@@ -55,7 +55,21 @@ export const ClientManagementView: React.FC<ClientManagementViewProps> = ({
   onRetry
 }) => {
   const [selectedDetailClient, setSelectedDetailClient] = useState<Client | null>(activeClient);
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+
+  // Synchronize detail client when activeClient prop changes or clients load
+  useEffect(() => {
+    if (activeClient) {
+      setSelectedDetailClient(activeClient);
+    } else if (clients.length > 0 && !selectedDetailClient) {
+      setSelectedDetailClient(clients[0]);
+    }
+  }, [activeClient?.id, clients]);
+
+  // Always resolve the freshest client object from clients list
+  const activeOrSelectedClient = (selectedDetailClient
+    ? clients.find((c) => c.id === selectedDetailClient.id) || selectedDetailClient
+    : activeClient) || clients[0] || null;
+
   const [editingClient, setEditingClient] = useState<Client | null>(null);
   const [deletingClientId, setDeletingClientId] = useState<string | null>(null);
 
@@ -141,8 +155,8 @@ export const ClientManagementView: React.FC<ClientManagementViewProps> = ({
     }
   };
 
-  const currentLeads = selectedDetailClient ? getLeadsForClient(selectedDetailClient.id) : [];
-  const currentSearches = selectedDetailClient ? getSearchesForClient(selectedDetailClient.id) : [];
+  const currentLeads = activeOrSelectedClient ? getLeadsForClient(activeOrSelectedClient.id) : [];
+  const currentSearches = activeOrSelectedClient ? getSearchesForClient(activeOrSelectedClient.id) : [];
 
   return (
     <div className="space-y-6">
@@ -221,7 +235,7 @@ export const ClientManagementView: React.FC<ClientManagementViewProps> = ({
         /* Client Selection Cards Grid */
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {clients.map((client) => {
-          const isSelected = selectedDetailClient?.id === client.id;
+          const isSelected = activeOrSelectedClient?.id === client.id;
           const isActive = activeClient?.id === client.id;
           const leads = getLeadsForClient(client.id);
           const searches = getSearchesForClient(client.id);
@@ -297,30 +311,60 @@ export const ClientManagementView: React.FC<ClientManagementViewProps> = ({
       )}
 
       {/* Selected Client Detailed Workstation */}
-      {selectedDetailClient ? (
+      {activeOrSelectedClient ? (
         <div className="bg-white rounded-2xl border border-gray-200 shadow-xs overflow-hidden mt-6">
           <div className="p-6 border-b border-gray-100 bg-slate-900 text-white flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-blue-400 font-semibold uppercase tracking-wider">Client Workspace</span>
                 <span className="text-xs bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full">
-                  ID: {selectedDetailClient.id}
+                  ID: {activeOrSelectedClient.id}
                 </span>
               </div>
-              <h2 className="text-xl font-bold mt-0.5">{selectedDetailClient.name}</h2>
+              <h2 className="text-xl font-bold mt-0.5">{activeOrSelectedClient.name}</h2>
               <p className="text-xs text-slate-300 mt-1">
-                Niche: <span className="font-semibold text-white">{selectedDetailClient.niche}</span> • Isolated Lead Database
+                Niche: <span className="font-semibold text-white">{activeOrSelectedClient.niche}</span> • Isolated Lead Database
               </p>
             </div>
 
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => onExportToSheets(currentLeads, selectedDetailClient.name)}
-                disabled={currentLeads.length === 0}
-                className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition-all shadow-xs"
-              >
-                <FileSpreadsheet className="w-4 h-4" /> Export Client Sheet
-              </button>
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
+              {/* Google Connection Status Badge */}
+              <div className="flex items-center gap-2">
+                {isGoogleConnected ? (
+                  <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-300 bg-emerald-950/60 border border-emerald-800/80 px-2.5 py-1.5 rounded-xl">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> Google Connected
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-400 bg-slate-800 border border-slate-700 px-2.5 py-1.5 rounded-xl" title="Clicking export will connect Google account via OAuth">
+                    <AlertCircle className="w-3.5 h-3.5 text-slate-400" /> Google Offline
+                  </span>
+                )}
+              </div>
+
+              {/* Export Button with Clear Disabled Explanation */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => onExportToSheets(currentLeads, activeOrSelectedClient.name, activeOrSelectedClient.id)}
+                  disabled={currentLeads.length === 0}
+                  title={
+                    currentLeads.length === 0
+                      ? `Export disabled: 0 leads collected for "${activeOrSelectedClient.name}". Please discover leads using the Lead Finder first.`
+                      : `Export ${currentLeads.length} lead(s) for "${activeOrSelectedClient.name}" directly to Google Sheets`
+                  }
+                  className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition-all shadow-xs cursor-pointer"
+                >
+                  <FileSpreadsheet className="w-4 h-4" />
+                  <span>
+                    Export Client Sheet
+                    {currentLeads.length > 0 ? ` (${currentLeads.length})` : ''}
+                  </span>
+                </button>
+                {currentLeads.length === 0 && (
+                  <span className="text-[11px] text-slate-400 bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 hidden sm:inline-block">
+                    0 leads to export
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
@@ -329,18 +373,18 @@ export const ClientManagementView: React.FC<ClientManagementViewProps> = ({
             <div>
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-base font-bold text-gray-900">
-                  Isolated Leads for {selectedDetailClient.name} ({currentLeads.length})
+                  Isolated Leads for {activeOrSelectedClient.name} ({currentLeads.length})
                 </h3>
               </div>
 
               <LeadsTableView
                 leads={currentLeads}
-                clientName={selectedDetailClient.name}
+                clientName={activeOrSelectedClient.name}
                 onUpdateStatus={onUpdateLeadStatus}
                 onUpdateNotes={onUpdateLeadNotes}
                 onUpdateInstagram={onUpdateLeadInstagram}
                 onDeleteLeads={onDeleteLeads}
-                onExportToSheets={(selected) => onExportToSheets(selected, selectedDetailClient.name)}
+                onExportToSheets={(selected) => onExportToSheets(selected, activeOrSelectedClient.name, activeOrSelectedClient.id)}
                 isGoogleConnected={isGoogleConnected}
               />
             </div>

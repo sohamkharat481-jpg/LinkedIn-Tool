@@ -14,9 +14,7 @@ import {
 } from './types';
 import { dbService } from './services/storage';
 import { SupabaseDataService, generateUuid } from './services/supabaseDataService';
-import type { LeadPersistenceStatus } from './services/supabaseDataService';
-import { initAuthListener, setCachedAccessToken, googleSignIn, googleSignOut, verifyGoogleAccountConnection, firebaseSignIn, firebaseSignInAnonymously, generateFallbackJwtToken, auth } from './services/auth';
-import { apiUrl } from './services/apiClient';
+import { initAuthListener, setCachedAccessToken, googleSignIn, googleSignOut, verifyGoogleAccountConnection, firebaseSignIn, firebaseSignInAnonymously, generateFallbackJwtToken, getUserSessionTokenKey, auth } from './services/auth';
 import { RefreshCw } from 'lucide-react';
 
 import { TopBar } from './components/TopBar';
@@ -260,6 +258,31 @@ export default function App() {
         }
         if (user) {
           await loadUserWorkspaces(user);
+
+          // Restore Google Sheets OAuth session from user-scoped sessionStorage if present
+          const userKey = getUserSessionTokenKey(user);
+          const savedToken = typeof window !== 'undefined'
+            ? (sessionStorage.getItem(userKey) || sessionStorage.getItem('__g_oauth_session_token'))
+            : null;
+
+          if (savedToken && savedToken.length > 10) {
+            verifyGoogleAccountConnection(savedToken)
+              .then((account) => {
+                setCachedAccessToken(savedToken);
+                setGoogleAccount(account);
+                setUserEmail(account.email || '');
+                setIsGoogleConnected(true);
+              })
+              .catch(() => {
+                if (typeof window !== 'undefined') {
+                  sessionStorage.removeItem(userKey);
+                  sessionStorage.removeItem('__g_oauth_session_token');
+                }
+                setCachedAccessToken(null);
+                setGoogleAccount(null);
+                setIsGoogleConnected(false);
+              });
+          }
         }
         setIsAuthLoading(false);
       },
@@ -270,26 +293,6 @@ export default function App() {
         setIsAuthLoading(false);
       }
     );
-
-    // Restore Google Sheets OAuth session from sessionStorage if present
-    const savedToken = typeof window !== 'undefined' ? sessionStorage.getItem('__g_oauth_session_token') : null;
-    if (savedToken && savedToken.length > 10) {
-      verifyGoogleAccountConnection(savedToken)
-        .then((account) => {
-          setCachedAccessToken(savedToken);
-          setGoogleAccount(account);
-          setUserEmail(account.email || '');
-          setIsGoogleConnected(true);
-        })
-        .catch(() => {
-          if (typeof window !== 'undefined') {
-            sessionStorage.removeItem('__g_oauth_session_token');
-          }
-          setCachedAccessToken(null);
-          setGoogleAccount(null);
-          setIsGoogleConnected(false);
-        });
-    }
 
     return () => unsubscribe();
   }, []);
@@ -812,7 +815,7 @@ export default function App() {
               onUpdateLeadNotes={handleUpdateLeadNotes}
               onUpdateLeadInstagram={handleUpdateLeadInstagram}
               onDeleteLeads={handleDeleteLeads}
-              onExportToSheets={(selected, cName) => handleOpenExportModal(selected, cName)}
+              onExportToSheets={(selected, cName, cId) => handleOpenExportModal(selected, cName, cId)}
               isGoogleConnected={isGoogleConnected}
               supabaseError={supabaseError}
               isLoading={isLoadingData}
