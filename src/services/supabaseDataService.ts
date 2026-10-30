@@ -904,13 +904,15 @@ export class SupabaseDataService {
     validLeads: number,
     duplicatesRemoved: number,
     finalLeadCount: number,
-    createdBy: string
+    createdBy: string,
+    searchId?: string
   ): Promise<SearchHistoryRecord> {
     const apiRes = await callDataApi<{ search: SearchHistoryRecord }>(
       `/api/workspaces/${encodeURIComponent(workspaceId)}/searches`,
       {
         method: 'POST',
         body: JSON.stringify({
+          searchId,
           clientId,
           clientName,
           filters,
@@ -942,11 +944,11 @@ export class SupabaseDataService {
       return apiRes.data.search;
     }
 
-    const searchId = generateUuid();
+    const finalSearchId = searchId || generateUuid();
     const now = new Date().toISOString();
 
     const record: SearchHistoryRecord = {
-      id: searchId,
+      id: finalSearchId,
       workspaceId,
       clientId,
       clientName,
@@ -963,7 +965,7 @@ export class SupabaseDataService {
       try {
         await supabase.from('lead_searches').insert([
           {
-            id: searchId,
+            id: finalSearchId,
             workspace_id: workspaceId,
             client_id: clientId,
             filters,

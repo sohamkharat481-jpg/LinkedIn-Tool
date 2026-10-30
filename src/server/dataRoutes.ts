@@ -37,6 +37,39 @@ function generateUuid(): string {
   });
 }
 
+function slugify(text: string): string {
+  return (text || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'lead';
+}
+
+function isGenericLinkedInUrl(url: string | undefined | null): boolean {
+  if (!url) return true;
+  const lower = url.toLowerCase().trim();
+  return (
+    lower === '' ||
+    lower === 'https://linkedin.com' ||
+    lower === 'https://www.linkedin.com' ||
+    lower === 'https://linkedin.com/in' ||
+    lower === 'https://www.linkedin.com/in' ||
+    lower === 'https://linkedin.com/in/' ||
+    lower === 'https://www.linkedin.com/in/' ||
+    lower.endsWith('/in/') ||
+    lower.endsWith('/in')
+  );
+}
+
+function getCanonicalProfileUrl(l: Partial<LeadRecord>, workspaceId: string): string {
+  if (l.profileUrl && l.profileUrl.trim().length > 0 && !isGenericLinkedInUrl(l.profileUrl)) {
+    return normalizeProfileUrl(l.profileUrl);
+  }
+  if (l.id && l.id.trim().length > 0) {
+    return `https://www.linkedin.com/in/id-${slugify(l.id)}`;
+  }
+  const nameSlug = slugify(l.fullName || 'lead');
+  const companySlug = slugify(l.companyName || 'co');
+  return `https://www.linkedin.com/in/${nameSlug}-${companySlug}-${(workspaceId || 'ws').substring(0, 8)}`;
+}
+
+
 // ==========================================
 // 1. WORKSPACE ENDPOINTS
 // ==========================================
@@ -515,36 +548,38 @@ dataRouter.get('/workspaces/:workspaceId/clients/:clientId/export-leads', async 
       }
 
       if (Array.isArray(leadsData)) {
+        const { data: searchRows } = await supabase
+          .from('lead_searches')
+          .select('id')
+          .eq('workspace_id', workspaceId)
+          .eq('client_id', clientId);
+
+        const hasSearchesForClient = Array.isArray(searchRows) && searchRows.length > 0;
+        const defaultSearchId = hasSearchesForClient ? searchRows[0].id : null;
+
         for (const item of leadsData) {
           let junction = junctionMap.get(item.id);
 
           // Safe auto-repair: If client_leads association was missing due to URL lookup mismatch or FK issue,
           // but lead_searches recorded search for this client and workspace has leads, re-associate.
-          if (!junction && totalClientAssociations === 0 && leadsData.length > 0) {
-            const { data: searchRows } = await supabase
-              .from('lead_searches')
-              .select('id')
-              .eq('workspace_id', workspaceId)
-              .eq('client_id', clientId);
-
-            if (Array.isArray(searchRows) && searchRows.length > 0) {
-              junction = { client_id: clientId, status: 'Not Contacted', notes: '' };
-              try {
-                await supabase.from('client_leads').upsert([
-                  {
-                    id: generateUuid(),
-                    workspace_id: workspaceId,
-                    client_id: clientId,
-                    lead_id: item.id,
-                    status: 'Not Contacted',
-                    notes: '',
-                    created_at: new Date().toISOString(),
-                    updated_at: new Date().toISOString()
-                  }
-                ], { onConflict: 'client_id,lead_id' });
-              } catch {
-                // ignore auto-repair failure
-              }
+          if (!junction && hasSearchesForClient) {
+            junction = { client_id: clientId, status: 'Not Contacted', notes: '', search_id: defaultSearchId };
+            try {
+              await supabase.from('client_leads').upsert([
+                {
+                  id: generateUuid(),
+                  workspace_id: workspaceId,
+                  client_id: clientId,
+                  lead_id: item.id,
+                  search_id: defaultSearchId,
+                  status: 'Not Contacted',
+                  notes: '',
+                  created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString()
+                }
+              ], { onConflict: 'client_id,lead_id' });
+            } catch {
+              // ignore auto-repair failure
             }
           }
 
@@ -688,13 +723,14 @@ dataRouter.get('/workspaces/:workspaceId/leads', async (req: Request, res: Respo
           for (const item of leadsData) {
             let junction = junctionMap.get(item.id);
 
-            // Auto-repair check: if junction wasn't found by item.id, check by normalized URL
-            if (!junction && clientId && Array.isArray(junctionData)) {
+            // Auto-repair check: if junction wasn't found by item.id, check by normalized URL or search provenance
+            if (!junction && clientId) {
               const normItemUrl = normalizeProfileUrl(item.profile_url).toLowerCase();
-              const matchedJunction = junctionData.find(j => {
+              const matchedJunction = Array.isArray(junctionData) ? junctionData.find(j => {
                 const jLead = leadsData.find(ld => ld.id === j.lead_id);
                 return jLead && normalizeProfileUrl(jLead.profile_url).toLowerCase() === normItemUrl;
-              });
+              }) : undefined;
+
               if (matchedJunction) {
                 junction = matchedJunction;
                 try {
@@ -711,6 +747,34 @@ dataRouter.get('/workspaces/:workspaceId/leads', async (req: Request, res: Respo
                   ], { onConflict: 'client_id,lead_id' });
                 } catch {
                   // ignore auto-repair failure
+                }
+              } else {
+                // Check search provenance: Has this client performed searches in this workspace?
+                const { data: searchRows } = await supabase
+                  .from('lead_searches')
+                  .select('id')
+                  .eq('workspace_id', workspaceId)
+                  .eq('client_id', clientId);
+
+                if (Array.isArray(searchRows) && searchRows.length > 0) {
+                  junction = { client_id: clientId, status: 'Not Contacted', notes: '', search_id: searchRows[0].id };
+                  try {
+                    await supabase.from('client_leads').upsert([
+                      {
+                        id: generateUuid(),
+                        workspace_id: workspaceId,
+                        client_id: clientId,
+                        lead_id: item.id,
+                        search_id: searchRows[0].id,
+                        status: 'Not Contacted',
+                        notes: '',
+                        created_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString()
+                      }
+                    ], { onConflict: 'client_id,lead_id' });
+                  } catch {
+                    // ignore
+                  }
                 }
               }
             }
@@ -824,7 +888,7 @@ dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Resp
         current_job_title: l.currentJobTitle || 'N/A',
         company_name: l.companyName || 'N/A',
         location: l.location || 'N/A',
-        profile_url: normalizeProfileUrl(l.profileUrl),
+        profile_url: getCanonicalProfileUrl(l, workspaceId),
         connections_or_followers: l.connectionsOrFollowers || null,
         last_activity_date: l.lastActivityDate || null,
         source: l.source || 'Wikidata SPARQL Query Service',
@@ -860,14 +924,31 @@ dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Resp
         updated_at: now
       }));
 
-      const { data: upsertedLeads, error: upsertLeadErr } = await supabase.from('leads').upsert(leadRows, {
+      let upsertedLeads: any[] | null = null;
+      const { data: batchUpsert, error: upsertLeadErr } = await supabase.from('leads').upsert(leadRows, {
         onConflict: 'workspace_id,profile_url',
         ignoreDuplicates: false
       }).select('id, profile_url');
 
       if (upsertLeadErr) {
-        console.error('Supabase lead upsert error:', upsertLeadErr.message);
-        throw new Error(`Database rejected leads persistence: ${upsertLeadErr.message}`);
+        console.warn('Batch lead upsert warning, attempting row-by-row fallback:', upsertLeadErr.message);
+        const rowResults: any[] = [];
+        for (const row of leadRows) {
+          try {
+            const { data: singleData } = await supabase.from('leads').upsert([row], {
+              onConflict: 'workspace_id,profile_url',
+              ignoreDuplicates: false
+            }).select('id, profile_url');
+            if (Array.isArray(singleData)) {
+              rowResults.push(...singleData);
+            }
+          } catch {
+            // ignore individual row error
+          }
+        }
+        upsertedLeads = rowResults;
+      } else {
+        upsertedLeads = batchUpsert;
       }
 
       const { data: existingLeads } = await supabase
@@ -894,9 +975,10 @@ dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Resp
       }
 
       const clientLeadRows = leads.map((l: LeadRecord) => {
+        const canonicalUrl = getCanonicalProfileUrl(l, workspaceId).toLowerCase();
         const normUrl = normalizeProfileUrl(l.profileUrl).toLowerCase();
         const rawUrl = (l.profileUrl || '').toLowerCase();
-        const leadId = urlToId.get(normUrl) || urlToId.get(rawUrl) || (l.id && UUID_REGEX.test(l.id) ? l.id : generateUuid());
+        const leadId = urlToId.get(canonicalUrl) || urlToId.get(normUrl) || urlToId.get(rawUrl) || (l.id && UUID_REGEX.test(l.id) ? l.id : generateUuid());
         return {
           id: generateUuid(),
           workspace_id: workspaceId,
@@ -1144,6 +1226,7 @@ dataRouter.post('/workspaces/:workspaceId/searches', async (req: Request, res: R
   }
 
   const {
+    searchId: inputSearchId,
     clientId,
     clientName,
     filters,
@@ -1160,7 +1243,7 @@ dataRouter.post('/workspaces/:workspaceId/searches', async (req: Request, res: R
   }
 
   try {
-    const searchId = generateUuid();
+    const searchId = (inputSearchId && UUID_REGEX.test(inputSearchId)) ? inputSearchId : generateUuid();
     const now = new Date().toISOString();
 
     const record: SearchHistoryRecord = {

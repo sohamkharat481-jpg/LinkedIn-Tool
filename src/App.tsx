@@ -510,11 +510,15 @@ export default function App() {
       activeEvidence: raw.activeEvidence
     }));
 
+    // Synchronize searchId for search history and client_leads junction persistence
+    const searchId = generateUuid();
+
     // Deduplicate against existing client leads and save to Supabase
     const saveResult = await SupabaseDataService.saveLeadsForClient(
       activeWorkspace.id,
       targetClient.id,
-      newLeadRecords
+      newLeadRecords,
+      searchId
     );
 
     // Record Search Audit History to Supabase
@@ -527,7 +531,8 @@ export default function App() {
       data.metrics.validRecordsCount,
       data.metrics.totalDuplicatesRemoved + saveResult.duplicatesSkipped,
       saveResult.added,
-      userEmail
+      userEmail,
+      searchId
     );
 
     // Immediate state refresh so the dashboard and tables update synchronously
