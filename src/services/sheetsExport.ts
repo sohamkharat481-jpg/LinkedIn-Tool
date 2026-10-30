@@ -34,12 +34,12 @@ export async function exportLeadsToGoogleSheet(
 
   if (!leads || leads.length === 0) {
     return {
-      success: true,
+      success: false,
       spreadsheetId: existingSpreadsheetId || '',
       spreadsheetUrl: existingSpreadsheetId ? `https://docs.google.com/spreadsheets/d/${existingSpreadsheetId}` : '',
       addedCount: 0,
       skippedDuplicatesCount: 0,
-      message: 'Export completed — 0 leads selected for export.'
+      message: 'Export failed: Zero leads available or selected for export. Please discover leads for this client using the Lead Finder first.'
     };
   }
 
@@ -215,6 +215,9 @@ export async function exportLeadsToGoogleSheet(
         const errJson = await appendRes.json().catch(() => ({}));
         throw new Error(errJson.error?.message || `Failed to write lead rows to Google Sheet (HTTP ${appendRes.status}).`);
       }
+
+      const appendData = await appendRes.json().catch(() => null);
+      var updatedRowsCount = appendData?.updates?.updatedRows ?? leadsToAdd.length;
     }
 
     const spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}`;
@@ -224,6 +227,7 @@ export async function exportLeadsToGoogleSheet(
       spreadsheetId,
       spreadsheetUrl,
       addedCount: leadsToAdd.length,
+      updatedRows: typeof updatedRowsCount === 'number' ? updatedRowsCount : leadsToAdd.length,
       skippedDuplicatesCount,
       message: `Export completed — ${leadsToAdd.length} leads added.${
         skippedDuplicatesCount > 0 ? ` (${skippedDuplicatesCount} duplicates skipped)` : ''

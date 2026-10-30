@@ -282,9 +282,16 @@ export const verifyGoogleAccountConnection = async (token: string): Promise<Goog
   };
 };
 
+export const getUserSessionTokenKey = (user?: User | null): string => {
+  const activeUser = user || auth.currentUser;
+  if (activeUser?.uid) {
+    return `__g_oauth_session_token_${activeUser.uid}`;
+  }
+  return '__g_oauth_session_token_guest';
+};
+
 /**
- * Initialize auth state listener.
- * Restores Google Sheets session on page refresh via sessionStorage (never localStorage).
+ * Initialize auth state listener with per-user Google OAuth token isolation.
  */
 export const initAuthListener = (
   onSuccess?: (user: User, token: string, accountInfo?: GoogleAccountInfo) => void,
@@ -292,22 +299,45 @@ export const initAuthListener = (
 ) => {
   return onAuthStateChanged(auth, async (user: User | null) => {
     if (user) {
-      // Check in-memory token first, then session storage
+      // Retrieve user-scoped OAuth token for current user
+      const userKey = getUserSessionTokenKey(user);
       let tokenToVerify = cachedAccessToken;
       if (!tokenToVerify && typeof window !== 'undefined') {
-        tokenToVerify = sessionStorage.getItem(SESSION_TOKEN_KEY);
+        tokenToVerify = sessionStorage.getItem(userKey);
       }
 
       if (tokenToVerify) {
         try {
           const verified = await verifyGoogleAccountConnection(tokenToVerify);
+          
+          // Verify email alignment if Firebase email is present
+          if (user.email && verified.email && !user.isAnonymous) {
+            const fbEmail = user.email.toLowerCase().trim();
+            const gEmail = verified.email.toLowerCase().trim();
+            if (fbEmail !== gEmail && !gEmail.includes('connected-account')) {
+              console.warn(`[OAuth Isolation] Mismatched Google account (${gEmail}) for Firebase user (${fbEmail}). Clearing token.`);
+              if (typeof window !== 'undefined') {
+                sessionStorage.removeItem(userKey);
+              }
+              cachedAccessToken = null;
+              if (onSuccess) {
+                onSuccess(user, '', {
+                  email: user.email,
+                  name: user.displayName || user.email.split('@')[0],
+                  verifiedEmail: true
+                });
+              }
+              return;
+            }
+          }
+
           cachedAccessToken = tokenToVerify;
           if (onSuccess) onSuccess(user, tokenToVerify, verified);
           return;
         } catch {
           // Token is invalid/expired - clear session storage
           if (typeof window !== 'undefined') {
-            sessionStorage.removeItem(SESSION_TOKEN_KEY);
+            sessionStorage.removeItem(userKey);
           }
           cachedAccessToken = null;
         }
@@ -324,7 +354,13 @@ export const initAuthListener = (
     } else {
       cachedAccessToken = null;
       if (typeof window !== 'undefined') {
-        sessionStorage.removeItem(SESSION_TOKEN_KEY);
+        // Clear all legacy and user session keys on logout
+        for (let i = sessionStorage.length - 1; i >= 0; i--) {
+          const k = sessionStorage.key(i);
+          if (k && k.startsWith('__g_oauth_session_token')) {
+            sessionStorage.removeItem(k);
+          }
+        }
       }
       if (onFailure) onFailure();
     }
@@ -376,6 +412,7 @@ export const googleSignIn = async (): Promise<{
         const client = (window as any).google.accounts.oauth2.initTokenClient({
           client_id: clientId,
           scope: 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email openid',
+          hint: auth.currentUser?.email || undefined,
           callback: async (response: any) => {
             if (response.error) {
               if (response.error === 'access_denied') {
@@ -398,7 +435,7 @@ export const googleSignIn = async (): Promise<{
               const verifiedAccount = await verifyGoogleAccountConnection(token);
               cachedAccessToken = token;
               if (typeof window !== 'undefined') {
-                sessionStorage.setItem(SESSION_TOKEN_KEY, token);
+                sessionStorage.setItem(getUserSessionTokenKey(auth.currentUser), token);
               }
               resolve({
                 accessToken: token,
@@ -416,38 +453,39 @@ export const googleSignIn = async (): Promise<{
 };
 
 /**
- * Checks if a valid Google OAuth access token is active in memory or session.
+ * Checks if a valid Google OAuth access token is active in memory or session for current user.
  */
 export const hasValidAccessToken = (): boolean => {
   if (cachedAccessToken && cachedAccessToken.length > 10) return true;
   if (typeof window !== 'undefined') {
-    const sessionToken = sessionStorage.getItem(SESSION_TOKEN_KEY);
+    const sessionToken = sessionStorage.getItem(getUserSessionTokenKey(auth.currentUser));
     return Boolean(sessionToken && sessionToken.length > 10);
   }
   return false;
 };
 
 /**
- * Retrieves the current cached access token.
+ * Retrieves the current cached access token for authenticated user.
  */
 export const getCachedAccessToken = (): string | null => {
   if (cachedAccessToken) return cachedAccessToken;
   if (typeof window !== 'undefined') {
-    return sessionStorage.getItem(SESSION_TOKEN_KEY);
+    return sessionStorage.getItem(getUserSessionTokenKey(auth.currentUser));
   }
   return null;
 };
 
 /**
- * Sets or updates the cached access token in memory and session.
+ * Sets or updates the cached access token in memory and user-scoped session storage.
  */
 export const setCachedAccessToken = (token: string | null): void => {
   cachedAccessToken = token;
   if (typeof window !== 'undefined') {
+    const userKey = getUserSessionTokenKey(auth.currentUser);
     if (token) {
-      sessionStorage.setItem(SESSION_TOKEN_KEY, token);
+      sessionStorage.setItem(userKey, token);
     } else {
-      sessionStorage.removeItem(SESSION_TOKEN_KEY);
+      sessionStorage.removeItem(userKey);
     }
   }
 };
@@ -456,7 +494,8 @@ export const setCachedAccessToken = (token: string | null): void => {
  * Signs out the current user and clears cached tokens.
  */
 export const googleSignOut = async (): Promise<void> => {
-  const token = cachedAccessToken || (typeof window !== 'undefined' ? sessionStorage.getItem(SESSION_TOKEN_KEY) : null);
+  const userKey = getUserSessionTokenKey(auth.currentUser);
+  const token = cachedAccessToken || (typeof window !== 'undefined' ? sessionStorage.getItem(userKey) : null);
   if (token && typeof window !== 'undefined' && (window as any).google?.accounts?.oauth2?.revoke) {
     try {
       (window as any).google.accounts.oauth2.revoke(token, () => {});
@@ -466,7 +505,8 @@ export const googleSignOut = async (): Promise<void> => {
   }
   cachedAccessToken = null;
   if (typeof window !== 'undefined') {
-    sessionStorage.removeItem(SESSION_TOKEN_KEY);
+    sessionStorage.removeItem(userKey);
+    sessionStorage.removeItem('__g_oauth_session_token');
   }
 };
 

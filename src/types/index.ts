@@ -213,6 +213,7 @@ export interface GoogleSheetExportResult {
   addedCount: number;
   skippedDuplicatesCount: number;
   message: string;
+  updatedRows?: number;
 }
 
 export interface ProviderStatusInfo {
