@@ -851,6 +851,8 @@ export default function App() {
         onClose={() => setIsExportModalOpen(false)}
         clientName={exportTargetClientName}
         leadsToExport={exportTargetLeads}
+        activeWorkspaceId={activeWorkspace?.id}
+        activeClientId={exportTargetClientId}
         currentUser={firebaseUser}
         existingSpreadsheetId={
           exportTargetClientId && activeWorkspace

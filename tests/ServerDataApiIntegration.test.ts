@@ -412,3 +412,78 @@ test('7. Cross-tenant isolation strictly blocks unauthorized access to leads, se
   });
   assert.equal(resExp.status, 403);
 });
+
+test('8. Export leads endpoint returns authoritative leads and diagnostics for selected client', async () => {
+  const userTenant = 'user-export-diag-owner';
+  const tenantWs = 'ws-export-diag-001';
+
+  registerWorkspaceAuthorization(userTenant, tenantWs);
+  const token = createSignedTestToken({ userId: userTenant, email: 'owner@tenant-export.com' });
+  setAuthTokenProvider(async () => token);
+
+  // 1. Create client
+  const clientRes = await fetch(`${baseUrl}/api/workspaces/${tenantWs}/clients`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({ name: 'Export Target Client', niche: 'Fintech', notes: 'Testing export' })
+  });
+  assert.equal(clientRes.status, 201);
+  const clientData = await clientRes.json();
+  const clientId = clientData.client.id;
+
+  // 2. Post leads for this client
+  const postLeadsRes = await fetch(`${baseUrl}/api/workspaces/${tenantWs}/leads`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({
+      clientId,
+      leads: [
+        {
+          fullName: 'Sundar Pichai',
+          headline: 'CEO at Alphabet',
+          companyName: 'Alphabet Inc.',
+          profileUrl: 'https://www.linkedin.com/in/sundarpichai/',
+          currentJobTitle: 'Chief Executive Officer',
+          location: 'United States',
+          email: 'sundar@google.com',
+          phone: '+1-650-253-0000'
+        },
+        {
+          fullName: 'Satya Nadella',
+          headline: 'CEO at Microsoft',
+          companyName: 'Microsoft Corporation',
+          profileUrl: 'https://www.linkedin.com/in/satyanadella',
+          currentJobTitle: 'Chief Executive Officer',
+          location: 'United States',
+          email: 'satya@microsoft.com',
+          phone: '+1-425-882-8080'
+        }
+      ]
+    })
+  });
+  assert.equal(postLeadsRes.status, 200);
+
+  // 3. Call export-leads endpoint directly
+  const expLeadsRes = await fetch(`${baseUrl}/api/workspaces/${tenantWs}/clients/${clientId}/export-leads`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  assert.equal(expLeadsRes.status, 200);
+  const expLeadsData = await expLeadsRes.json();
+  assert.equal(expLeadsData.success, true);
+  assert.equal(expLeadsData.clientId, clientId);
+  assert.equal(expLeadsData.leads.length, 2);
+  assert.equal(expLeadsData.diagnostics.exportQueryReturnedCount, 2);
+
+  // 4. Test SupabaseDataService.getExportLeads method
+  const exportedResultFromService = await SupabaseDataService.getExportLeads(tenantWs, clientId);
+  assert.ok(exportedResultFromService.leads && Array.isArray(exportedResultFromService.leads));
+  assert.equal(exportedResultFromService.leads.length, 2);
+  assert.ok(exportedResultFromService.leads.some((l) => l.fullName === 'Sundar Pichai'));
+  assert.ok(exportedResultFromService.leads.some((l) => l.fullName === 'Satya Nadella'));
+});

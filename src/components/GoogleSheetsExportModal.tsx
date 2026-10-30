@@ -5,11 +5,15 @@ import { exportLeadsToGoogleSheet } from '../services/sheetsExport';
 import { googleSignIn, getCachedAccessToken, setCachedAccessToken } from '../services/auth';
 import { FileSpreadsheet, Loader2, CheckCircle2, AlertCircle, ExternalLink, X, ShieldCheck } from 'lucide-react';
 
+import { SupabaseDataService } from '../services/supabaseDataService';
+
 interface GoogleSheetsExportModalProps {
   isOpen: boolean;
   onClose: () => void;
   clientName: string;
   leadsToExport: LeadRecord[];
+  activeWorkspaceId?: string;
+  activeClientId?: string;
   currentUser: FirebaseUser | null;
   onGoogleAuthSuccess: (user: FirebaseUser, token: string) => void;
   existingSpreadsheetId?: string;
@@ -21,6 +25,8 @@ export const GoogleSheetsExportModal: React.FC<GoogleSheetsExportModalProps> = (
   onClose,
   clientName,
   leadsToExport,
+  activeWorkspaceId,
+  activeClientId,
   currentUser,
   onGoogleAuthSuccess,
   existingSpreadsheetId,
@@ -44,7 +50,29 @@ export const GoogleSheetsExportModal: React.FC<GoogleSheetsExportModalProps> = (
     setExportResult(null);
 
     try {
-      // Check for OAuth Token
+      // 1. Resolve target leads authoritatively from database if workspace & client are provided
+      let finalLeadsToExport: LeadRecord[] = leadsToExport;
+
+      if (activeWorkspaceId && activeClientId) {
+        setExportStepMessage('Retrieving authoritative leads for client from database...');
+        const authData = await SupabaseDataService.getExportLeads(activeWorkspaceId, activeClientId);
+        if (authData && Array.isArray(authData.leads) && authData.leads.length > 0) {
+          // If specific leads were explicitly selected, filter by selection, otherwise use all authoritative leads for client
+          if (leadsToExport.length > 0 && leadsToExport.length < authData.leads.length) {
+            const selectedSet = new Set(leadsToExport.map(l => l.id));
+            const selectedFromAuth = authData.leads.filter(l => selectedSet.has(l.id));
+            finalLeadsToExport = selectedFromAuth.length > 0 ? selectedFromAuth : authData.leads;
+          } else {
+            finalLeadsToExport = authData.leads;
+          }
+        }
+      }
+
+      if (!finalLeadsToExport || finalLeadsToExport.length === 0) {
+        throw new Error(`Cannot export: Zero leads found for client "${clientName}". Please discover leads for this client using the Lead Finder first.`);
+      }
+
+      // 2. Check for OAuth Token
       let token = getCachedAccessToken();
       if (!token) {
         setExportStepMessage('Connecting Google Account via OAuth...');
@@ -55,13 +83,17 @@ export const GoogleSheetsExportModal: React.FC<GoogleSheetsExportModalProps> = (
       }
 
       setExportStepMessage('Opening Google Sheets REST API connection...');
-      await new Promise((r) => setTimeout(r, 400));
+      await new Promise((r) => setTimeout(r, 300));
 
       setExportStepMessage('Scanning existing rows to prevent duplicate profile insertion...');
-      await new Promise((r) => setTimeout(r, 400));
+      await new Promise((r) => setTimeout(r, 300));
 
-      setExportStepMessage('Writing lead records to Google Sheet...');
-      const res = await exportLeadsToGoogleSheet(token, clientName, leadsToExport, existingSpreadsheetId);
+      setExportStepMessage(`Writing ${finalLeadsToExport.length} lead record(s) to Google Sheet...`);
+      const res = await exportLeadsToGoogleSheet(token, clientName, finalLeadsToExport, existingSpreadsheetId);
+
+      if (!res.success) {
+        throw new Error(res.message || 'Google Sheets export failed.');
+      }
 
       setExportResult({
         addedCount: res.addedCount,

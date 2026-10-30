@@ -998,6 +998,36 @@ export class SupabaseDataService {
   }
 
   /**
+   * Fetch authoritative export leads and diagnostics for a client directly from database.
+   */
+  static async getExportLeads(
+    workspaceId: string,
+    clientId: string
+  ): Promise<{ leads: LeadRecord[]; diagnostics?: any }> {
+    const apiRes = await callDataApi<{
+      leads: LeadRecord[];
+      diagnostics?: any;
+    }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/clients/${encodeURIComponent(clientId)}/export-leads`);
+
+    if (apiRes.success && Array.isArray(apiRes.data?.leads)) {
+      return {
+        leads: apiRes.data.leads,
+        diagnostics: apiRes.data.diagnostics
+      };
+    }
+
+    const localLeads = dbService.getLeadsForClient(workspaceId, clientId);
+    return {
+      leads: localLeads,
+      diagnostics: {
+        workspaceId,
+        clientId,
+        exportQueryReturnedCount: localLeads.length
+      }
+    };
+  }
+
+  /**
    * Fetch Google Sheets integration details for client.
    */
   static async getGoogleIntegration(workspaceId: string, clientId: string): Promise<GoogleIntegration | undefined> {
@@ -1052,5 +1082,6 @@ export class SupabaseDataService {
     );
   }
 }
+
 
 
