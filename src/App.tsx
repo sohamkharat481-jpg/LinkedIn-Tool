@@ -15,6 +15,8 @@ import {
 import { dbService } from './services/storage';
 import { SupabaseDataService, generateUuid } from './services/supabaseDataService';
 import { initAuthListener, setCachedAccessToken, googleSignIn, googleSignOut, verifyGoogleAccountConnection, firebaseSignIn, firebaseSignInAnonymously, generateFallbackJwtToken, getUserSessionTokenKey, auth } from './services/auth';
+import { apiUrl } from './services/apiClient';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { RefreshCw } from 'lucide-react';
 
 import { TopBar } from './components/TopBar';
@@ -799,28 +801,33 @@ export default function App() {
           )}
 
           {activeTab === 'clients' && (
-            <ClientManagementView
-              clients={clients}
-              activeWorkspaceId={activeWorkspace?.id || ''}
-              activeClient={activeClient}
-              onSelectClient={handleSelectClient}
-              onCreateClient={handleCreateClient}
-              onUpdateClient={handleUpdateClient}
-              onDeleteClient={handleDeleteClient}
-              getLeadsForClient={(cId) => allLeads.filter((l) => l.clientId === cId)}
-              getSearchesForClient={(cId) =>
-                allSearches.filter((s) => s.clientId === cId && s.workspaceId === (activeWorkspace?.id || ''))
-              }
-              onUpdateLeadStatus={handleUpdateLeadStatus}
-              onUpdateLeadNotes={handleUpdateLeadNotes}
-              onUpdateLeadInstagram={handleUpdateLeadInstagram}
-              onDeleteLeads={handleDeleteLeads}
-              onExportToSheets={(selected, cName, cId) => handleOpenExportModal(selected, cName, cId)}
-              isGoogleConnected={isGoogleConnected}
-              supabaseError={supabaseError}
-              isLoading={isLoadingData}
-              onRetry={() => activeWorkspace && refreshWorkspaceData(activeWorkspace.id)}
-            />
+            <ErrorBoundary
+              fallbackTitle="Client Directory Error"
+              onReset={() => activeWorkspace && refreshWorkspaceData(activeWorkspace.id)}
+            >
+              <ClientManagementView
+                clients={clients}
+                activeWorkspaceId={activeWorkspace?.id || ''}
+                activeClient={activeClient}
+                onSelectClient={handleSelectClient}
+                onCreateClient={handleCreateClient}
+                onUpdateClient={handleUpdateClient}
+                onDeleteClient={handleDeleteClient}
+                getLeadsForClient={(cId) => allLeads.filter((l) => l.clientId === cId)}
+                getSearchesForClient={(cId) =>
+                  allSearches.filter((s) => s.clientId === cId && s.workspaceId === (activeWorkspace?.id || ''))
+                }
+                onUpdateLeadStatus={handleUpdateLeadStatus}
+                onUpdateLeadNotes={handleUpdateLeadNotes}
+                onUpdateLeadInstagram={handleUpdateLeadInstagram}
+                onDeleteLeads={handleDeleteLeads}
+                onExportToSheets={(selected, cName, cId) => handleOpenExportModal(selected, cName, cId)}
+                isGoogleConnected={isGoogleConnected}
+                supabaseError={supabaseError}
+                isLoading={isLoadingData}
+                onRetry={() => activeWorkspace && refreshWorkspaceData(activeWorkspace.id)}
+              />
+            </ErrorBoundary>
           )}
 
           {activeTab === 'history' && (

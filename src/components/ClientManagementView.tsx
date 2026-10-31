@@ -55,6 +55,7 @@ export const ClientManagementView: React.FC<ClientManagementViewProps> = ({
   onRetry
 }) => {
   const [selectedDetailClient, setSelectedDetailClient] = useState<Client | null>(activeClient);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
   // Synchronize detail client when activeClient prop changes or clients load
   useEffect(() => {
@@ -65,10 +66,10 @@ export const ClientManagementView: React.FC<ClientManagementViewProps> = ({
     }
   }, [activeClient?.id, clients]);
 
-  // Always resolve the freshest client object from clients list
-  const activeOrSelectedClient = (selectedDetailClient
-    ? clients.find((c) => c.id === selectedDetailClient.id) || selectedDetailClient
-    : activeClient) || clients[0] || null;
+  // Always resolve the freshest client object from clients list; if no clients exist, resolve to null
+  const activeOrSelectedClient = (Array.isArray(clients) && clients.length > 0)
+    ? ((selectedDetailClient ? clients.find((c) => c.id === selectedDetailClient.id) || selectedDetailClient : activeClient) || clients[0] || null)
+    : null;
 
   const [editingClient, setEditingClient] = useState<Client | null>(null);
   const [deletingClientId, setDeletingClientId] = useState<string | null>(null);

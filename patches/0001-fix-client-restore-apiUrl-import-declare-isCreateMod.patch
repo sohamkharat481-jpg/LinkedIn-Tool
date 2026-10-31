@@ -1,0 +1,269 @@
+From 98eca378f028dbf8ded353c0e51901d819127f76 Mon Sep 17 00:00:00 2001
+From: Soham Kharat <sohamkharat481@gmail.com>
+Date: Sat, 31 Oct 2026 20:02:38 +0000
+Subject: [PATCH] fix(client): restore apiUrl import, declare isCreateModalOpen
+ state, and add ErrorBoundary
+
+---
+ src/App.tsx                                   | 51 +++++++-----
+ src/components/ClientManagementView.tsx       |  9 +-
+ src/components/ErrorBoundary.tsx              | 82 +++++++++++++++++++
+ ...ientViewAndProviderErrorRegression.test.ts | 61 ++++++++++++++
+ 4 files changed, 177 insertions(+), 26 deletions(-)
+ create mode 100644 src/components/ErrorBoundary.tsx
+ create mode 100644 tests/ClientViewAndProviderErrorRegression.test.ts
+
+diff --git a/src/App.tsx b/src/App.tsx
+index d0b630f..1aaddb7 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -15,6 +15,8 @@ import {
+ import { dbService } from './services/storage';
+ import { SupabaseDataService, generateUuid } from './services/supabaseDataService';
+ import { initAuthListener, setCachedAccessToken, googleSignIn, googleSignOut, verifyGoogleAccountConnection, firebaseSignIn, firebaseSignInAnonymously, generateFallbackJwtToken, getUserSessionTokenKey, auth } from './services/auth';
++import { apiUrl } from './services/apiClient';
++import { ErrorBoundary } from './components/ErrorBoundary';
+ import { RefreshCw } from 'lucide-react';
+ 
+ import { TopBar } from './components/TopBar';
+@@ -799,28 +801,33 @@ export default function App() {
+           )}
+ 
+           {activeTab === 'clients' && (
+-            <ClientManagementView
+-              clients={clients}
+-              activeWorkspaceId={activeWorkspace?.id || ''}
+-              activeClient={activeClient}
+-              onSelectClient={handleSelectClient}
+-              onCreateClient={handleCreateClient}
+-              onUpdateClient={handleUpdateClient}
+-              onDeleteClient={handleDeleteClient}
+-              getLeadsForClient={(cId) => allLeads.filter((l) => l.clientId === cId)}
+-              getSearchesForClient={(cId) =>
+-                allSearches.filter((s) => s.clientId === cId && s.workspaceId === (activeWorkspace?.id || ''))
+-              }
+-              onUpdateLeadStatus={handleUpdateLeadStatus}
+-              onUpdateLeadNotes={handleUpdateLeadNotes}
+-              onUpdateLeadInstagram={handleUpdateLeadInstagram}
+-              onDeleteLeads={handleDeleteLeads}
+-              onExportToSheets={(selected, cName, cId) => handleOpenExportModal(selected, cName, cId)}
+-              isGoogleConnected={isGoogleConnected}
+-              supabaseError={supabaseError}
+-              isLoading={isLoadingData}
+-              onRetry={() => activeWorkspace && refreshWorkspaceData(activeWorkspace.id)}
+-            />
++            <ErrorBoundary
++              fallbackTitle="Client Directory Error"
++              onReset={() => activeWorkspace && refreshWorkspaceData(activeWorkspace.id)}
++            >
++              <ClientManagementView
++                clients={clients}
++                activeWorkspaceId={activeWorkspace?.id || ''}
++                activeClient={activeClient}
++                onSelectClient={handleSelectClient}
++                onCreateClient={handleCreateClient}
++                onUpdateClient={handleUpdateClient}
++                onDeleteClient={handleDeleteClient}
++                getLeadsForClient={(cId) => allLeads.filter((l) => l.clientId === cId)}
++                getSearchesForClient={(cId) =>
++                  allSearches.filter((s) => s.clientId === cId && s.workspaceId === (activeWorkspace?.id || ''))
++                }
++                onUpdateLeadStatus={handleUpdateLeadStatus}
++                onUpdateLeadNotes={handleUpdateLeadNotes}
++                onUpdateLeadInstagram={handleUpdateLeadInstagram}
++                onDeleteLeads={handleDeleteLeads}
++                onExportToSheets={(selected, cName, cId) => handleOpenExportModal(selected, cName, cId)}
++                isGoogleConnected={isGoogleConnected}
++                supabaseError={supabaseError}
++                isLoading={isLoadingData}
++                onRetry={() => activeWorkspace && refreshWorkspaceData(activeWorkspace.id)}
++              />
++            </ErrorBoundary>
+           )}
+ 
+           {activeTab === 'history' && (
+diff --git a/src/components/ClientManagementView.tsx b/src/components/ClientManagementView.tsx
+index 37a7e00..9dc1b7b 100644
+--- a/src/components/ClientManagementView.tsx
++++ b/src/components/ClientManagementView.tsx
+@@ -55,6 +55,7 @@ export const ClientManagementView: React.FC<ClientManagementViewProps> = ({
+   onRetry
+ }) => {
+   const [selectedDetailClient, setSelectedDetailClient] = useState<Client | null>(activeClient);
++  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+ 
+   // Synchronize detail client when activeClient prop changes or clients load
+   useEffect(() => {
+@@ -65,10 +66,10 @@ export const ClientManagementView: React.FC<ClientManagementViewProps> = ({
+     }
+   }, [activeClient?.id, clients]);
+ 
+-  // Always resolve the freshest client object from clients list
+-  const activeOrSelectedClient = (selectedDetailClient
+-    ? clients.find((c) => c.id === selectedDetailClient.id) || selectedDetailClient
+-    : activeClient) || clients[0] || null;
++  // Always resolve the freshest client object from clients list; if no clients exist, resolve to null
++  const activeOrSelectedClient = (Array.isArray(clients) && clients.length > 0)
++    ? ((selectedDetailClient ? clients.find((c) => c.id === selectedDetailClient.id) || selectedDetailClient : activeClient) || clients[0] || null)
++    : null;
+ 
+   const [editingClient, setEditingClient] = useState<Client | null>(null);
+   const [deletingClientId, setDeletingClientId] = useState<string | null>(null);
+diff --git a/src/components/ErrorBoundary.tsx b/src/components/ErrorBoundary.tsx
+new file mode 100644
+index 0000000..b5c30bf
+--- /dev/null
++++ b/src/components/ErrorBoundary.tsx
+@@ -0,0 +1,82 @@
++import React, { Component, ErrorInfo, ReactNode } from 'react';
++import { AlertTriangle, RefreshCw, LayoutDashboard } from 'lucide-react';
++
++interface ErrorBoundaryProps {
++  children: ReactNode;
++  fallbackTitle?: string;
++  onReset?: () => void;
++}
++
++interface ErrorBoundaryState {
++  hasError: boolean;
++  error: Error | null;
++}
++
++export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
++  constructor(props: ErrorBoundaryProps) {
++    super(props);
++    this.state = {
++      hasError: false,
++      error: null
++    };
++  }
++
++  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
++    return {
++      hasError: true,
++      error
++    };
++  }
++
++  componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
++    console.error('ErrorBoundary caught an unhandled component error:', error, errorInfo);
++  }
++
++  handleReset = (): void => {
++    this.setState({ hasError: false, error: null });
++    if (this.props.onReset) {
++      this.props.onReset();
++    }
++  };
++
++  render(): ReactNode {
++    if (this.state.hasError) {
++      const errorMessage = this.state.error?.message || 'An unexpected rendering error occurred.';
++      const title = this.props.fallbackTitle || 'Component Error';
++
++      return (
++        <div className="p-6 my-4 max-w-2xl mx-auto bg-white rounded-2xl border border-red-200 shadow-sm text-center">
++          <div className="w-12 h-12 bg-red-50 text-red-600 rounded-2xl flex items-center justify-center mx-auto mb-3">
++            <AlertTriangle className="w-6 h-6" />
++          </div>
++          <h3 className="text-base font-bold text-gray-900">{title}</h3>
++          <p className="text-xs text-red-700 bg-red-50 border border-red-100 p-3 rounded-xl mt-2 mb-4 font-mono text-left break-all">
++            {errorMessage}
++          </p>
++          <div className="flex items-center justify-center gap-3">
++            <button
++              onClick={this.handleReset}
++              className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl transition-colors shadow-xs cursor-pointer"
++            >
++              <RefreshCw className="w-3.5 h-3.5" /> Retry View
++            </button>
++            <button
++              onClick={() => {
++                this.handleReset();
++                if (typeof window !== 'undefined') {
++                  window.location.hash = '';
++                  window.location.pathname = '/';
++                }
++              }}
++              className="inline-flex items-center gap-1.5 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
++            >
++              <LayoutDashboard className="w-3.5 h-3.5" /> Return to Dashboard
++            </button>
++          </div>
++        </div>
++      );
++    }
++
++    return this.props.children;
++  }
++}
+diff --git a/tests/ClientViewAndProviderErrorRegression.test.ts b/tests/ClientViewAndProviderErrorRegression.test.ts
+new file mode 100644
+index 0000000..c8680a5
+--- /dev/null
++++ b/tests/ClientViewAndProviderErrorRegression.test.ts
+@@ -0,0 +1,61 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import fs from 'node:fs';
++import path from 'node:path';
++import { apiUrl } from '../src/services/apiClient';
++import { ErrorBoundary } from '../src/components/ErrorBoundary';
++
++test('1. App.tsx correctly imports apiUrl and has no unimported free apiUrl calls', () => {
++  const appPath = path.resolve(process.cwd(), 'src/App.tsx');
++  const content = fs.readFileSync(appPath, 'utf-8');
++
++  // Must import apiUrl
++  assert.ok(
++    content.includes("import { apiUrl } from './services/apiClient';"),
++    'App.tsx must import apiUrl from ./services/apiClient'
++  );
++
++  // Must import ErrorBoundary
++  assert.ok(
++    content.includes("import { ErrorBoundary } from './components/ErrorBoundary';"),
++    'App.tsx must import ErrorBoundary'
++  );
++
++  // Must wrap ClientManagementView in ErrorBoundary
++  assert.ok(
++    content.includes('<ErrorBoundary') && content.includes('<ClientManagementView'),
++    'ClientManagementView must be wrapped in ErrorBoundary'
++  );
++});
++
++test('2. ClientManagementView declares isCreateModalOpen and does not throw ReferenceError', () => {
++  const clientViewPath = path.resolve(process.cwd(), 'src/components/ClientManagementView.tsx');
++  const content = fs.readFileSync(clientViewPath, 'utf-8');
++
++  // Must declare isCreateModalOpen
++  assert.ok(
++    content.includes('const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);') ||
++    content.includes('const [isCreateModalOpen, setIsCreateModalOpen] = useState<boolean>(false);'),
++    'ClientManagementView must declare isCreateModalOpen state variable'
++  );
++
++  // Must safely guard activeOrSelectedClient when clients array is empty
++  assert.ok(
++    content.includes('Array.isArray(clients) && clients.length > 0'),
++    'ClientManagementView must guard activeOrSelectedClient against empty client lists'
++  );
++});
++
++test('3. apiUrl utility formats relative endpoints safely with base fallback', () => {
++  const url1 = apiUrl('/api/provider-status');
++  assert.ok(url1.includes('/api/provider-status'), 'apiUrl must format provider-status path');
++
++  const url2 = apiUrl('/api/workspaces/ws-test-123/clients');
++  assert.ok(url2.includes('/api/workspaces/ws-test-123/clients'), 'apiUrl must format workspace clients path');
++});
++
++test('4. ErrorBoundary component correctly handles lifecycle error state without throwing', () => {
++  const state = ErrorBoundary.getDerivedStateFromError(new Error('Simulated child render failure'));
++  assert.equal(state.hasError, true);
++  assert.equal(state.error?.message, 'Simulated child render failure');
++});
+-- 
+2.34.1
+
