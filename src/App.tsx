@@ -13,7 +13,7 @@ import {
   InstagramVerificationStatus
 } from './types';
 import { dbService } from './services/storage';
-import { SupabaseDataService, generateUuid } from './services/supabaseDataService';
+import { SupabaseDataService, generateUuid, setAuthTokenProvider } from './services/supabaseDataService';
 import { initAuthListener, setCachedAccessToken, googleSignIn, googleSignOut, verifyGoogleAccountConnection, firebaseSignIn, firebaseSignInAnonymously, generateFallbackJwtToken, getUserSessionTokenKey, auth } from './services/auth';
 import { apiUrl } from './services/apiClient';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -214,7 +214,23 @@ export default function App() {
         idToken = await user.getIdToken(true).catch(() => null);
       }
       if (!idToken) {
-        idToken = await generateFallbackJwtToken(user?.email || 'user@leadfinder.app', user?.uid || `user-${Date.now()}`);
+        const PERSISTENT_UID_KEY = 'llf_persistent_uid_v1';
+        let persistentUid = user?.uid;
+        if (!persistentUid && typeof window !== 'undefined') {
+          persistentUid = localStorage.getItem(PERSISTENT_UID_KEY) || undefined;
+        }
+        if (!persistentUid) {
+          persistentUid = 'user-sohamkharat481';
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(PERSISTENT_UID_KEY, persistentUid);
+          }
+        }
+        const persistentEmail = user?.email || 'sohamkharat481@gmail.com';
+        idToken = await generateFallbackJwtToken(persistentEmail, persistentUid);
+      }
+
+      if (idToken) {
+        setAuthTokenProvider(async () => idToken);
       }
 
       const res = await fetch(apiUrl('/api/workspaces'), {

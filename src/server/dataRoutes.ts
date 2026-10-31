@@ -844,11 +844,14 @@ dataRouter.get('/workspaces/:workspaceId/leads', async (req: Request, res: Respo
               continue;
             }
 
+            const localMatch = dbService.getAllLeads(workspaceId).find((l) => l.id === item.id || (l.profileUrl && item.profile_url && l.profileUrl.toLowerCase() === item.profile_url.toLowerCase()));
+            const resolvedClientId = junction?.client_id || localMatch?.clientId || clientId || '';
+
             records.push({
               id: item.id,
               workspaceId: item.workspace_id,
-              clientId: junction?.client_id || clientId || '',
-              searchId: junction?.search_id || undefined,
+              clientId: resolvedClientId,
+              searchId: junction?.search_id || localMatch?.searchId || undefined,
               fullName: item.full_name || 'N/A',
               headline: item.headline || '',
               currentJobTitle: item.current_job_title || 'N/A',
