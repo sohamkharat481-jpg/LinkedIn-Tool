@@ -27,8 +27,14 @@ export const getSupabaseAnonKey = (): string => {
 };
 
 export const getSupabaseServiceRoleKey = (): string => {
-  if (typeof process !== 'undefined' && process.env && process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    return process.env.SUPABASE_SERVICE_ROLE_KEY.trim();
+  if (typeof process !== 'undefined' && process.env) {
+    const key =
+      process.env.SUPABASE_SERVICE_ROLE_KEY ||
+      process.env.VITE_SUPABASE_SERVICE_ROLE_KEY ||
+      process.env.SUPABASE_SERVICE_KEY ||
+      process.env.SERVICE_ROLE_KEY ||
+      '';
+    return key.trim();
   }
   return '';
 };
@@ -64,6 +70,9 @@ export const isSupabaseConfigured = Boolean(
   !isPlaceholderKey(supabaseAnonKey)
 );
 
+let cachedClient: SupabaseClient | null = null;
+let cachedKeyUsed: string = '';
+
 export function getSupabaseClient(): SupabaseClient | null {
   const url = getSupabaseUrl();
   if (!url || isPlaceholderUrl(url)) return null;
@@ -71,13 +80,20 @@ export function getSupabaseClient(): SupabaseClient | null {
   const serviceKey = isServer ? getSupabaseServiceRoleKey() : '';
   const key = serviceKey || getSupabaseAnonKey();
   if (!key || isPlaceholderKey(key)) return null;
+
+  if (cachedClient && cachedKeyUsed === key) {
+    return cachedClient;
+  }
+
   try {
-    return createClient(url, key, {
+    cachedClient = createClient(url, key, {
       auth: {
         persistSession: !serviceKey,
         autoRefreshToken: !serviceKey
       }
     });
+    cachedKeyUsed = key;
+    return cachedClient;
   } catch (e) {
     console.error('Failed to create Supabase client:', e);
     return null;

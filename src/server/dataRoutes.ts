@@ -1,6 +1,6 @@
 import express, { Request, Response } from 'express';
 import crypto from 'node:crypto';
-import { supabase } from '../services/supabase';
+import { supabase, getSupabaseServiceRoleKey } from '../services/supabase';
 import { dbService } from '../services/storage';
 import { normalizeProfileUrl } from '../services/deduplication';
 import {
@@ -415,6 +415,8 @@ dataRouter.post('/workspaces/:workspaceId/clients', async (req: Request, res: Re
 
   try {
     if (supabase) {
+      const serviceRoleActive = Boolean(getSupabaseServiceRoleKey());
+      console.log(`[Diagnostic] Client Write Key Type: ${serviceRoleActive ? 'PRIVILEGED_SERVICE_ROLE' : 'PUBLISHABLE_ANON'}`);
       const { data, error } = await supabase
         .from('clients')
         .insert([
@@ -943,6 +945,8 @@ dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Resp
     const localResult = dbService.saveLeadsForClient(workspaceId, clientId, leads);
 
     if (supabase && leads.length > 0) {
+      const serviceRoleActive = Boolean(getSupabaseServiceRoleKey());
+      console.log(`[Diagnostic] Lead Persistence DB Write Key Type: ${serviceRoleActive ? 'PRIVILEGED_SERVICE_ROLE' : 'PUBLISHABLE_ANON'}, Input Count: ${leads.length}`);
       const now = new Date().toISOString();
       const leadRows = leads.map((l: LeadRecord) => ({
         id: l.id && UUID_REGEX.test(l.id) ? l.id : generateUuid(),
