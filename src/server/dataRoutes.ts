@@ -1108,16 +1108,20 @@ dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Resp
         .eq('workspace_id', workspaceId);
 
       const urlToId = new Map<string, string>();
+
+      // 1. Map from leadRows (exact primary keys assigned for insert)
+      leadRows.forEach((row) => {
+        if (row.id) urlToId.set(row.id, row.id);
+        if (row.profile_url) {
+          urlToId.set(row.profile_url.toLowerCase(), row.id);
+          urlToId.set(normalizeProfileUrl(row.profile_url).toLowerCase(), row.id);
+        }
+      });
+
+      // 2. Map from existingLeads in database
       if (Array.isArray(existingLeads)) {
         existingLeads.forEach((el: any) => {
-          if (el.profile_url) {
-            urlToId.set(normalizeProfileUrl(el.profile_url).toLowerCase(), el.id);
-            urlToId.set(el.profile_url.toLowerCase(), el.id);
-          }
-        });
-      }
-      if (Array.isArray(upsertedLeads)) {
-        upsertedLeads.forEach((el: any) => {
+          if (el.id) urlToId.set(el.id, el.id);
           if (el.profile_url) {
             urlToId.set(normalizeProfileUrl(el.profile_url).toLowerCase(), el.id);
             urlToId.set(el.profile_url.toLowerCase(), el.id);
@@ -1125,23 +1129,44 @@ dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Resp
         });
       }
 
-      const clientLeadRows = leads.map((l: LeadRecord) => {
-        const canonicalUrl = getCanonicalProfileUrl(l, workspaceId).toLowerCase();
-        const normUrl = normalizeProfileUrl(l.profileUrl).toLowerCase();
+      // 3. Map from upsertedLeads returned by Supabase
+      if (Array.isArray(upsertedLeads)) {
+        upsertedLeads.forEach((el: any) => {
+          if (el.id) urlToId.set(el.id, el.id);
+          if (el.profile_url) {
+            urlToId.set(normalizeProfileUrl(el.profile_url).toLowerCase(), el.id);
+            urlToId.set(el.profile_url.toLowerCase(), el.id);
+          }
+        });
+      }
+
+      const clientLeadRows = leads.map((l: LeadRecord, idx: number) => {
+        const rowObj = leadRows[idx];
+        const canonicalUrl = rowObj?.profile_url ? rowObj.profile_url.toLowerCase() : getCanonicalProfileUrl(l, workspaceId).toLowerCase();
+        const normUrl = normalizeProfileUrl(l.profileUrl || '').toLowerCase();
         const rawUrl = (l.profileUrl || '').toLowerCase();
-        const leadId = urlToId.get(canonicalUrl) || urlToId.get(normUrl) || urlToId.get(rawUrl) || (l.id && UUID_REGEX.test(l.id) ? l.id : generateUuid());
+
+        const verifiedLeadId =
+          (rowObj && rowObj.id ? urlToId.get(rowObj.id) : undefined) ||
+          urlToId.get(canonicalUrl) ||
+          urlToId.get(normUrl) ||
+          urlToId.get(rawUrl) ||
+          (l.id && UUID_REGEX.test(l.id) ? urlToId.get(l.id) : undefined) ||
+          rowObj?.id ||
+          (l.id && UUID_REGEX.test(l.id) ? l.id : undefined);
+
         return {
           id: generateUuid(),
           workspace_id: workspaceId,
           client_id: clientId,
-          lead_id: leadId,
+          lead_id: verifiedLeadId,
           search_id: (searchId && UUID_REGEX.test(searchId)) ? searchId : null,
           status: l.status || 'Not Contacted',
           notes: l.notes || '',
           created_at: now,
           updated_at: now
         };
-      });
+      }).filter((row) => Boolean(row.lead_id));
 
       const { error: linkErr } = await supabase.from('client_leads').upsert(clientLeadRows, {
         onConflict: 'client_id,lead_id',
