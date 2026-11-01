@@ -28,16 +28,49 @@ export const getSupabaseAnonKey = (): string => {
 
 export const getSupabaseServiceRoleKey = (): string => {
   if (typeof process !== 'undefined' && process.env) {
-    const key =
+    const raw =
       process.env.SUPABASE_SERVICE_ROLE_KEY ||
       process.env.VITE_SUPABASE_SERVICE_ROLE_KEY ||
       process.env.SUPABASE_SERVICE_KEY ||
       process.env.SERVICE_ROLE_KEY ||
       '';
-    return key.trim();
+    return (raw || '').trim().replace(/^["']|["']$/g, '');
   }
   return '';
 };
+
+export function detectKeyType(key: string): {
+  type: 'SERVICE_ROLE' | 'ANON' | 'PUBLISHABLE' | 'UNKNOWN' | 'NONE';
+  length: number;
+  roleClaim?: string;
+  isServiceRole: boolean;
+} {
+  if (!key) return { type: 'NONE', length: 0, isServiceRole: false };
+  const trimmed = key.trim().replace(/^["']|["']$/g, '');
+  if (trimmed.startsWith('sb_publishable_')) {
+    return { type: 'PUBLISHABLE', length: trimmed.length, roleClaim: 'publishable', isServiceRole: false };
+  }
+  if (trimmed.startsWith('sb_secret_')) {
+    return { type: 'SERVICE_ROLE', length: trimmed.length, roleClaim: 'service_role', isServiceRole: true };
+  }
+  const parts = trimmed.split('.');
+  if (parts.length === 3) {
+    try {
+      const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+      const role = payload.role || payload.iss || 'unknown';
+      const isService = role === 'service_role';
+      return {
+        type: isService ? 'SERVICE_ROLE' : 'ANON',
+        length: trimmed.length,
+        roleClaim: role,
+        isServiceRole: isService
+      };
+    } catch {
+      // ignore
+    }
+  }
+  return { type: 'UNKNOWN', length: trimmed.length, isServiceRole: false };
+}
 
 export function isPlaceholderUrl(url: string): boolean {
   if (!url) return true;
@@ -70,6 +103,30 @@ export const isSupabaseConfigured = Boolean(
   !isPlaceholderKey(supabaseAnonKey)
 );
 
+export function getSupabaseServerClient(): SupabaseClient | null {
+  const url = getSupabaseUrl();
+  if (!url || isPlaceholderUrl(url)) return null;
+
+  const serviceKey = getSupabaseServiceRoleKey();
+  const anonKey = getSupabaseAnonKey();
+  const key = serviceKey || anonKey;
+  if (!key || isPlaceholderKey(key)) return null;
+
+  return createClient(url, key, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false
+    },
+    global: {
+      headers: {
+        apikey: key,
+        Authorization: `Bearer ${key}`
+      }
+    }
+  });
+}
+
 let cachedClient: SupabaseClient | null = null;
 let cachedKeyUsed: string = '';
 
@@ -77,8 +134,11 @@ export function getSupabaseClient(): SupabaseClient | null {
   const url = getSupabaseUrl();
   if (!url || isPlaceholderUrl(url)) return null;
   const isServer = typeof window === 'undefined' && typeof process !== 'undefined';
-  const serviceKey = isServer ? getSupabaseServiceRoleKey() : '';
-  const key = serviceKey || getSupabaseAnonKey();
+  if (isServer) {
+    return getSupabaseServerClient();
+  }
+
+  const key = getSupabaseAnonKey();
   if (!key || isPlaceholderKey(key)) return null;
 
   if (cachedClient && cachedKeyUsed === key) {
@@ -88,8 +148,8 @@ export function getSupabaseClient(): SupabaseClient | null {
   try {
     cachedClient = createClient(url, key, {
       auth: {
-        persistSession: !serviceKey,
-        autoRefreshToken: !serviceKey
+        persistSession: true,
+        autoRefreshToken: true
       }
     });
     cachedKeyUsed = key;

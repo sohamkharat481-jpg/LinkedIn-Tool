@@ -1,6 +1,6 @@
 import express, { Request, Response } from 'express';
 import crypto from 'node:crypto';
-import { supabase, getSupabaseServiceRoleKey } from '../services/supabase';
+import { supabase, getSupabaseServiceRoleKey, detectKeyType, getSupabaseUrl } from '../services/supabase';
 import { dbService } from '../services/storage';
 import { normalizeProfileUrl } from '../services/deduplication';
 import {
@@ -415,8 +415,12 @@ dataRouter.post('/workspaces/:workspaceId/clients', async (req: Request, res: Re
 
   try {
     if (supabase) {
-      const serviceRoleActive = Boolean(getSupabaseServiceRoleKey());
-      console.log(`[Diagnostic] Client Write Key Type: ${serviceRoleActive ? 'PRIVILEGED_SERVICE_ROLE' : 'PUBLISHABLE_ANON'}`);
+      const sRoleKey = getSupabaseServiceRoleKey();
+      const activeKeyInfo = detectKeyType(sRoleKey || 'anon');
+      console.log(
+        `[Diagnostic Evidence] Route: POST /clients | WorkspaceId: ${workspaceId} | ServiceRoleEnvVarPresent: ${Boolean(sRoleKey)} | SelectedKeyType: ${activeKeyInfo.type} | IsServiceRole: ${activeKeyInfo.isServiceRole} | RoleClaim: ${activeKeyInfo.roleClaim || 'none'} | SupabaseUrl: ${getSupabaseUrl()}`
+      );
+
       const { data, error } = await supabase
         .from('clients')
         .insert([
@@ -433,8 +437,22 @@ dataRouter.post('/workspaces/:workspaceId/clients', async (req: Request, res: Re
         .select();
 
       if (error) {
-        console.error('Supabase server createClient error:', error.message);
-        throw new Error(`Database rejected client creation: ${error.message}`);
+        console.error(
+          `[Diagnostic Error] POST /clients DB Insert Failed | WorkspaceId: ${workspaceId} | Code: ${error.code} | Message: ${error.message} | Details: ${error.details || 'none'} | KeyType: ${activeKeyInfo.type} | IsServiceRole: ${activeKeyInfo.isServiceRole}`
+        );
+        res.status(500).json({
+          error: `Database rejected client creation: ${error.message}`,
+          diagnostic: {
+            code: error.code,
+            message: error.message,
+            details: error.details || null,
+            keyType: activeKeyInfo.type,
+            isServiceRole: activeKeyInfo.isServiceRole,
+            serviceRoleEnvVarPresent: Boolean(sRoleKey),
+            workspaceId
+          }
+        });
+        return;
       }
 
       if (!data || data.length === 0) {
@@ -945,8 +963,11 @@ dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Resp
     const localResult = dbService.saveLeadsForClient(workspaceId, clientId, leads);
 
     if (supabase && leads.length > 0) {
-      const serviceRoleActive = Boolean(getSupabaseServiceRoleKey());
-      console.log(`[Diagnostic] Lead Persistence DB Write Key Type: ${serviceRoleActive ? 'PRIVILEGED_SERVICE_ROLE' : 'PUBLISHABLE_ANON'}, Input Count: ${leads.length}`);
+      const sRoleKey = getSupabaseServiceRoleKey();
+      const activeKeyInfo = detectKeyType(sRoleKey || 'anon');
+      console.log(
+        `[Diagnostic Evidence] Route: POST /leads | WorkspaceId: ${workspaceId} | ServiceRoleEnvVarPresent: ${Boolean(sRoleKey)} | SelectedKeyType: ${activeKeyInfo.type} | IsServiceRole: ${activeKeyInfo.isServiceRole} | RoleClaim: ${activeKeyInfo.roleClaim || 'none'} | LeadsCount: ${leads.length} | SupabaseUrl: ${getSupabaseUrl()}`
+      );
       const now = new Date().toISOString();
       const leadRows = leads.map((l: LeadRecord) => ({
         id: l.id && UUID_REGEX.test(l.id) ? l.id : generateUuid(),

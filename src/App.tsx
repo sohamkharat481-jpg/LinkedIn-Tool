@@ -13,7 +13,7 @@ import {
   InstagramVerificationStatus
 } from './types';
 import { dbService } from './services/storage';
-import { SupabaseDataService, generateUuid, setAuthTokenProvider } from './services/supabaseDataService';
+import { SupabaseDataService, generateUuid, setAuthTokenProvider, LeadPersistenceStatus } from './services/supabaseDataService';
 import { initAuthListener, setCachedAccessToken, googleSignIn, googleSignOut, verifyGoogleAccountConnection, firebaseSignIn, firebaseSignInAnonymously, generateFallbackJwtToken, getUserSessionTokenKey, auth } from './services/auth';
 import { apiUrl } from './services/apiClient';
 import { ErrorBoundary } from './components/ErrorBoundary';

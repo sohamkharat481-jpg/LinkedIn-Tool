@@ -186,7 +186,7 @@ test('Phase 2.4: List clients and verify distinct IDs for both clients', async (
 // ==========================================
 // PHASE 3 — LEAD GENERATION (GENUINE WIKIDATA SEARCH)
 // ==========================================
-let realGeneratedLeads: LeadRecord[] = [];
+let realGeneratedLeads: any[] = [];
 let searchIdSaaS: string;
 
 test('Phase 3.1: Execute real search via WikidataLeadProvider for genuine executive leads', async () => {

@@ -297,9 +297,6 @@ export class SupabaseDataService {
     if (apiRes.status === 401 || apiRes.status === 403) {
       throw new Error(apiRes.error || 'Access denied.');
     }
-    if (apiRes.status >= 400 && apiRes.error) {
-      throw new Error(apiRes.error);
-    }
     if (apiRes.success && apiRes.data?.client) {
       dbService.createClientWithId(
         apiRes.data.client.id,
@@ -312,50 +309,14 @@ export class SupabaseDataService {
       return apiRes.data.client;
     }
 
-    const id = generateUuid();
-    const now = new Date().toISOString();
-
-    const newClient: Client = {
-      id,
-      workspaceId,
-      name: name.trim(),
-      niche: niche.trim(),
-      notes: notes.trim(),
-      createdAt: now,
-      updatedAt: now,
-      leadsCount: 0,
-      searchesCount: 0
-    };
-
-    if (supabase) {
-      const { data, error } = await supabase
-        .from('clients')
-        .insert([
-          {
-            id,
-            workspace_id: workspaceId,
-            name: name.trim(),
-            niche: niche.trim(),
-            notes: notes.trim(),
-            created_at: now,
-            updated_at: now
-          }
-        ])
-        .select();
-
-      if (error) {
-        console.error('Supabase createClient insert error:', error.message);
-        throw new Error(`Supabase rejected client creation: ${error.message} (code: ${error.code || 'UNKNOWN'})`);
-      }
-
-      if (!data || data.length === 0) {
-        throw new Error('Supabase did not return confirmed client record after creation.');
-      }
+    if (apiRes.error && apiRes.status !== 0) {
+      throw new Error(apiRes.error);
     }
 
-    // Always update local cache once persistence is confirmed
-    dbService.createClientWithId(id, workspaceId, name.trim(), niche.trim(), notes.trim(), now);
-    return newClient;
+    // Offline / unit test fallback when HTTP server is unroutable
+    const id = generateUuid();
+    const now = new Date().toISOString();
+    return dbService.createClientWithId(id, workspaceId, name.trim(), niche.trim(), (notes || '').trim(), now);
   }
 
   /**
@@ -381,27 +342,9 @@ export class SupabaseDataService {
       dbService.updateClient(workspaceId, clientId, updates);
       return apiRes.data.client;
     }
-
-    const now = new Date().toISOString();
-
-    if (supabase) {
-      const dbUpdates: any = { updated_at: now };
-      if (updates.name !== undefined) dbUpdates.name = updates.name.trim();
-      if (updates.niche !== undefined) dbUpdates.niche = updates.niche.trim();
-      if (updates.notes !== undefined) dbUpdates.notes = updates.notes.trim();
-
-      const { error } = await supabase
-        .from('clients')
-        .update(dbUpdates)
-        .eq('id', clientId)
-        .eq('workspace_id', workspaceId);
-
-      if (error) {
-        console.error('Supabase updateClient error:', error.message);
-        throw new Error(`Failed to update client in Supabase: ${error.message}`);
-      }
+    if (apiRes.error && apiRes.status !== 0) {
+      throw new Error(apiRes.error);
     }
-
     return dbService.updateClient(workspaceId, clientId, updates);
   }
 
@@ -423,20 +366,9 @@ export class SupabaseDataService {
       dbService.deleteClient(workspaceId, clientId);
       return;
     }
-
-    if (supabase) {
-      const { error } = await supabase
-        .from('clients')
-        .delete()
-        .eq('id', clientId)
-        .eq('workspace_id', workspaceId);
-
-      if (error) {
-        console.error('Supabase deleteClient error:', error.message);
-        throw new Error(`Failed to delete client from Supabase: ${error.message}`);
-      }
+    if (apiRes.error && apiRes.status !== 0) {
+      throw new Error(apiRes.error);
     }
-
     dbService.deleteClient(workspaceId, clientId);
   }
 

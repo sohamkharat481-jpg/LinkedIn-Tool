@@ -103,8 +103,8 @@ test('5. Multi-user OAuth session key isolates tokens by user UID', () => {
   const user1 = { uid: 'firebase-user-soham-101', email: 'soham@saas.com' };
   const user2 = { uid: 'firebase-user-other-202', email: 'other@dental.com' };
 
-  const key1 = getUserSessionTokenKey(user1);
-  const key2 = getUserSessionTokenKey(user2);
+  const key1 = getUserSessionTokenKey(user1 as any);
+  const key2 = getUserSessionTokenKey(user2 as any);
 
   assert.equal(key1, '__g_oauth_session_token_firebase-user-soham-101');
   assert.equal(key2, '__g_oauth_session_token_firebase-user-other-202');
@@ -153,7 +153,7 @@ test('8. Scenario D: Refresh restoration preserves client selection, lead counts
 
   // Simulate user OAuth restoration
   const currentUser = { uid: 'user-auth-uid-789', email: 'sohamkharat481@gmail.com' };
-  const userTokenKey = getUserSessionTokenKey(currentUser);
+  const userTokenKey = getUserSessionTokenKey(currentUser as any);
   mockStorage[userTokenKey] = 'ya29.sample-authorized-token';
 
   assert.equal(mockStorage[userTokenKey], 'ya29.sample-authorized-token');
