@@ -38,14 +38,16 @@ export async function resolveAuthToken(): Promise<string | null> {
   const cached = getCachedAccessToken();
   if (cached) return cached;
 
-  try {
-    const PERSISTENT_UID_KEY = 'llf_persistent_uid_v1';
-    let persistentUid = typeof window !== 'undefined' ? localStorage.getItem(PERSISTENT_UID_KEY) || undefined : undefined;
-    if (!persistentUid) persistentUid = 'user-sohamkharat481';
-    return await generateFallbackJwtToken('sohamkharat481@gmail.com', persistentUid);
-  } catch {
-    return null;
+  if (typeof process !== 'undefined' && process.env.NODE_ENV === 'test') {
+    try {
+      const testUid = 'user-sohamkharat481';
+      return await generateFallbackJwtToken('sohamkharat481@gmail.com', testUid);
+    } catch {
+      return null;
+    }
   }
+
+  return null;
 }
 
 async function callDataApi<T>(

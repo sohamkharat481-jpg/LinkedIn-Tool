@@ -651,7 +651,6 @@ dataRouter.get('/workspaces/:workspaceId/clients/:clientId/export-leads', async 
 
         for (const item of leadsData) {
           const junction = junctionMap.get(item.id);
-
           if (junction) {
             exportLeads.push({
               id: item.id,
@@ -791,107 +790,18 @@ dataRouter.get('/workspaces/:workspaceId/leads', async (req: Request, res: Respo
 
           const records: LeadRecord[] = [];
           for (const item of leadsData) {
-            let junction = junctionMap.get(item.id);
-
-            // Auto-repair check: if junction wasn't found by item.id, check by normalized URL or search provenance
-            if (!junction) {
-              if (clientId) {
-                const normItemUrl = normalizeProfileUrl(item.profile_url).toLowerCase();
-                const matchedJunction = Array.isArray(junctionData) ? junctionData.find(j => {
-                  const jLead = leadsData.find(ld => ld.id === j.lead_id);
-                  return jLead && normalizeProfileUrl(jLead.profile_url).toLowerCase() === normItemUrl;
-                }) : undefined;
-
-                if (matchedJunction) {
-                  junction = matchedJunction;
-                  try {
-                    await supabase.from('client_leads').upsert([
-                      {
-                        id: matchedJunction.id || generateUuid(),
-                        workspace_id: workspaceId,
-                        client_id: clientId,
-                        lead_id: item.id,
-                        status: matchedJunction.status || 'Not Contacted',
-                        notes: matchedJunction.notes || '',
-                        updated_at: new Date().toISOString()
-                      }
-                    ], { onConflict: 'client_id,lead_id' });
-                  } catch {
-                    // ignore auto-repair failure
-                  }
-                } else {
-                  // Check search provenance: Has this client performed searches in this workspace?
-                  const { data: searchRows } = await supabase
-                    .from('lead_searches')
-                    .select('id')
-                    .eq('workspace_id', workspaceId)
-                    .eq('client_id', clientId);
-
-                  if (Array.isArray(searchRows) && searchRows.length > 0) {
-                    junction = { client_id: clientId, status: 'Not Contacted', notes: '', search_id: searchRows[0].id };
-                    try {
-                      await supabase.from('client_leads').upsert([
-                        {
-                          id: generateUuid(),
-                          workspace_id: workspaceId,
-                          client_id: clientId,
-                          lead_id: item.id,
-                          search_id: searchRows[0].id,
-                          status: 'Not Contacted',
-                          notes: '',
-                          created_at: new Date().toISOString(),
-                          updated_at: new Date().toISOString()
-                        }
-                      ], { onConflict: 'client_id,lead_id' });
-                    } catch {
-                      // ignore
-                    }
-                  }
-                }
-              } else {
-                // If clientId query parameter was NOT supplied, look up searches in this workspace to auto-associate
-                const { data: searchRows } = await supabase
-                  .from('lead_searches')
-                  .select('client_id, id')
-                  .eq('workspace_id', workspaceId);
-
-                if (Array.isArray(searchRows) && searchRows.length > 0) {
-                  const resolvedClientId = searchRows[0].client_id;
-                  const searchId = searchRows[0].id;
-                  junction = { client_id: resolvedClientId, status: 'Not Contacted', notes: '', search_id: searchId };
-                  try {
-                    await supabase.from('client_leads').upsert([
-                      {
-                        id: generateUuid(),
-                        workspace_id: workspaceId,
-                        client_id: resolvedClientId,
-                        lead_id: item.id,
-                        search_id: searchId,
-                        status: 'Not Contacted',
-                        notes: '',
-                        created_at: new Date().toISOString(),
-                        updated_at: new Date().toISOString()
-                      }
-                    ], { onConflict: 'client_id,lead_id' });
-                  } catch {
-                    // ignore
-                  }
-                }
-              }
-            }
-
+            const junction = junctionMap.get(item.id);
             if (clientId && !junction) {
               continue;
             }
 
-            const localMatch = dbService.getAllLeads(workspaceId).find((l) => l.id === item.id || (l.profileUrl && item.profile_url && l.profileUrl.toLowerCase() === item.profile_url.toLowerCase()));
-            const resolvedClientId = junction?.client_id || localMatch?.clientId || clientId || '';
+            const resolvedClientId = junction?.client_id || (clientId ? '' : (dbService.getAllLeads(workspaceId).find((l) => l.id === item.id)?.clientId || ''));
 
             records.push({
               id: item.id,
               workspaceId: item.workspace_id,
               clientId: resolvedClientId,
-              searchId: junction?.search_id || localMatch?.searchId || undefined,
+              searchId: junction?.search_id || undefined,
               fullName: item.full_name || 'N/A',
               headline: item.headline || '',
               currentJobTitle: item.current_job_title || 'N/A',

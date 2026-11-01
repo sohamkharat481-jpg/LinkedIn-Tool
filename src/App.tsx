@@ -208,30 +208,32 @@ export default function App() {
   };
 
   const loadUserWorkspaces = async (user: FirebaseUser | null) => {
+    if (!user) {
+      setWorkspaces([]);
+      setActiveWorkspace(null);
+      setClients([]);
+      setActiveClient(null);
+      setAllLeads([]);
+      setAllSearches([]);
+      return;
+    }
+
     try {
       let idToken: string | null = null;
-      if (user && user.getIdToken) {
+      if (user.getIdToken) {
         idToken = await user.getIdToken(true).catch(() => null);
       }
-      if (!idToken) {
-        const PERSISTENT_UID_KEY = 'llf_persistent_uid_v1';
-        let persistentUid = user?.uid;
-        if (!persistentUid && typeof window !== 'undefined') {
-          persistentUid = localStorage.getItem(PERSISTENT_UID_KEY) || undefined;
-        }
-        if (!persistentUid) {
-          persistentUid = 'user-sohamkharat481';
-          if (typeof window !== 'undefined') {
-            localStorage.setItem(PERSISTENT_UID_KEY, persistentUid);
-          }
-        }
-        const persistentEmail = user?.email || 'sohamkharat481@gmail.com';
-        idToken = await generateFallbackJwtToken(persistentEmail, persistentUid);
+      if (!idToken && typeof process !== 'undefined' && process.env.NODE_ENV === 'test') {
+        const testEmail = user.email || 'sohamkharat481@gmail.com';
+        idToken = await generateFallbackJwtToken(testEmail, user.uid || 'user-sohamkharat481');
       }
 
-      if (idToken) {
-        setAuthTokenProvider(async () => idToken);
+      if (!idToken) {
+        console.warn('Unable to obtain valid Firebase ID token for workspace retrieval.');
+        return;
       }
+
+      setAuthTokenProvider(async () => idToken);
 
       const res = await fetch(apiUrl('/api/workspaces'), {
         headers: {
@@ -301,12 +303,28 @@ export default function App() {
                 setIsGoogleConnected(false);
               });
           }
+        } else {
+          setWorkspaces([]);
+          setActiveWorkspace(null);
+          setClients([]);
+          setActiveClient(null);
+          setAllLeads([]);
+          setAllSearches([]);
+          dbService.clearUserWorkspaceSession();
+          setAuthTokenProvider(null);
         }
         setIsAuthLoading(false);
       },
-      async () => {
+      () => {
         setFirebaseUser(null);
-        await loadUserWorkspaces(null);
+        setWorkspaces([]);
+        setActiveWorkspace(null);
+        setClients([]);
+        setActiveClient(null);
+        setAllLeads([]);
+        setAllSearches([]);
+        dbService.clearUserWorkspaceSession();
+        setAuthTokenProvider(null);
         setIsAuthLoading(false);
       }
     );
@@ -680,6 +698,11 @@ export default function App() {
     setFirebaseUser(null);
     setWorkspaces([]);
     setActiveWorkspace(null);
+    setClients([]);
+    setActiveClient(null);
+    setAllLeads([]);
+    setAllSearches([]);
+    setAuthTokenProvider(null);
   };
 
   const handleStartLeadSearchFromDashboard = () => {
