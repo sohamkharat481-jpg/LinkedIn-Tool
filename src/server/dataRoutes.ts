@@ -21,8 +21,42 @@ import {
   GoogleIntegration,
   ExportHistoryRecord
 } from '../types';
-
 export const dataRouter = express.Router();
+
+dataRouter.get('/audit-counts', async (req: Request, res: Response) => {
+  const { workspaceId } = req.query;
+  if (!workspaceId || typeof workspaceId !== 'string') {
+    return res.status(400).json({ error: 'workspaceId required' });
+  }
+
+  const access = await verifyWorkspaceAccess(req, workspaceId);
+  if (!access.authorized) {
+    return res.status(access.status).json({ error: access.error });
+  }
+
+  try {
+    const supabase = getSupabaseServerClient();
+    if (!supabase) throw new Error('Supabase client unavailable');
+
+    const { count: leadCount } = await supabase
+      .from('leads')
+      .select('*', { count: 'exact', head: true })
+      .eq('workspace_id', workspaceId);
+
+    const { count: clCount } = await supabase
+      .from('client_leads')
+      .select('*', { count: 'exact', head: true })
+      .eq('workspace_id', workspaceId);
+
+    res.json({
+      workspaceId,
+      leadsCount: leadCount || 0,
+      clientLeadsCount: clCount || 0
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
