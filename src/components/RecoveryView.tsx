@@ -1,15 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { SupabaseDataService } from '../services/supabaseDataService';
-import { LeadRecord } from '../types';
-import { Download, Search, RefreshCw, Database, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { LeadRecord, Client } from '../types';
+import { Download, Search, RefreshCw, Database, AlertCircle, CheckCircle2, UserPlus } from 'lucide-react';
 
 interface RecoveryProps {
   workspaceId: string;
   clientId: string;
+  activeClient?: Client | null;
   onClose: () => void;
 }
 
-export const RecoveryView: React.FC<RecoveryProps> = ({ workspaceId, clientId, onClose }) => {
+export const RecoveryView: React.FC<RecoveryProps> = ({ workspaceId, clientId, activeClient, onClose }) => {
   const [status, setStatus] = useState<string>('Ready to scan');
   const [leadsToMigrate, setLeadsToMigrate] = useState<LeadRecord[]>([]);
   const [diagnostics, setDiagnostics] = useState<string>('');
@@ -17,6 +18,7 @@ export const RecoveryView: React.FC<RecoveryProps> = ({ workspaceId, clientId, o
   const [isScanning, setIsScanning] = useState(false);
   const [isMigrating, setIsMigrating] = useState(false);
   const [stats, setStats] = useState<{total: number, sourceWs: number, currentWs: number, otherWs: number} | null>(null);
+  const [useActiveClient, setUseActiveClient] = useState(true);
 
   const scanLocalStorage = () => {
     setIsScanning(true);
@@ -27,7 +29,6 @@ export const RecoveryView: React.FC<RecoveryProps> = ({ workspaceId, clientId, o
     setTimeout(() => {
       try {
         const leadsJson = localStorage.getItem('llf_leads_v1');
-        const clientLeadsJson = localStorage.getItem('llf_client_leads_v1');
         
         if (!leadsJson) {
           setStatus('No legacy leads found in LocalStorage (llf_leads_v1 missing).');
@@ -36,7 +37,6 @@ export const RecoveryView: React.FC<RecoveryProps> = ({ workspaceId, clientId, o
         }
 
         const allLeads: any[] = JSON.parse(leadsJson);
-        const clientLeads: any[] = clientLeadsJson ? JSON.parse(clientLeadsJson) : [];
         
         if (!Array.isArray(allLeads)) {
           setStatus('Error: Invalid data format in LocalStorage.');
@@ -55,14 +55,16 @@ export const RecoveryView: React.FC<RecoveryProps> = ({ workspaceId, clientId, o
           otherWs: otherWsLeads.length
         });
 
-        // For migration, we preserve original IDs as required by the safety audit
         const relevantLeads = sourceWsLeads.map(l => ({
           ...l
         })) as LeadRecord[];
 
         setLeadsToMigrate(relevantLeads);
         setStatus(`Scan complete. Found ${sourceWsLeads.length} leads in source workspace.`);
-        setDiagnostics(`Total: ${allLeads.length} | Source WS: ${sourceWsLeads.length} | Current WS: ${currentWsLeads.length} | Others: ${otherWsLeads.length}`);
+        
+        // Count unique client IDs in source leads
+        const clientIds = new Set(sourceWsLeads.map(l => l.clientId).filter(Boolean));
+        setDiagnostics(`Total: ${allLeads.length} | Source WS: ${sourceWsLeads.length} | Unique Client IDs: ${clientIds.size}`);
       } catch (e: any) {
         setStatus(`Scan error: ${e.message}`);
         console.error('Recovery scan error:', e);
@@ -85,22 +87,32 @@ export const RecoveryView: React.FC<RecoveryProps> = ({ workspaceId, clientId, o
     setStatus('Migrating to Supabase...');
     
     try {
-        // Group leads by original clientId to preserve associations
-        const leadsByClient = leadsToMigrate.reduce((acc, lead) => {
-            if (!acc[lead.clientId]) acc[lead.clientId] = [];
-            acc[lead.clientId].push(lead);
-            return acc;
-        }, {} as Record<string, LeadRecord[]>);
-
         let totalAdded = 0;
-        for (const [cId, leads] of Object.entries(leadsByClient)) {
-            // Restore to the ORIGINAL workspace using the API endpoint for that workspace
-            const result = await SupabaseDataService.saveLeadsForClient(sourceWorkspaceId, cId, leads);
-            totalAdded += result.added;
+        
+        if (useActiveClient && clientId) {
+            // Map ALL found leads to the currently active client
+            setStatus(`Mapping ${leadsToMigrate.length} leads to client ${activeClient?.name || clientId}...`);
+            const result = await SupabaseDataService.saveLeadsForClient(workspaceId, clientId, leadsToMigrate);
+            totalAdded = result.added;
+        } else {
+            // Group leads by original clientId to preserve associations
+            const leadsByClient = leadsToMigrate.reduce((acc, lead) => {
+                const cId = lead.clientId || 'unknown-client';
+                if (!acc[cId]) acc[cId] = [];
+                acc[cId].push(lead);
+                return acc;
+            }, {} as Record<string, LeadRecord[]>);
+
+            for (const [cId, leads] of Object.entries(leadsByClient)) {
+                setStatus(`Migrating group for client ${cId}...`);
+                const result = await SupabaseDataService.saveLeadsForClient(workspaceId, cId, leads);
+                totalAdded += result.added;
+            }
         }
         
-        setStatus(`Migration successful: ${totalAdded} leads restored to original workspace ${sourceWorkspaceId}.`);
+        setStatus(`Migration successful: ${totalAdded} leads restored to workspace ${workspaceId}.`);
         setLeadsToMigrate([]); 
+        setStats(null);
     } catch (e: any) {
         setStatus(`Migration failed: ${e.message}`);
         console.error('Migration error:', e);
@@ -205,6 +217,29 @@ export const RecoveryView: React.FC<RecoveryProps> = ({ workspaceId, clientId, o
             </div>
           )}
         </div>
+
+        {/* Target Mapping Option */}
+        {leadsToMigrate.length > 0 && activeClient && (
+          <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <UserPlus className="w-4 h-4 text-blue-600" />
+                <p className="text-sm font-bold text-blue-900">Target Client Mapping</p>
+              </div>
+              <input 
+                type="checkbox" 
+                checked={useActiveClient}
+                onChange={(e) => setUseActiveClient(e.target.checked)}
+                className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+              />
+            </div>
+            <p className="text-xs text-blue-700 leading-relaxed">
+              {useActiveClient 
+                ? `All ${leadsToMigrate.length} leads will be associated with "${activeClient.name}". This is recommended if orphaned leads belong to this client.` 
+                : "Preserve original client associations from localStorage. Use this only if you are certain the original client IDs exist in Supabase."}
+            </p>
+          </div>
+        )}
 
         {/* Diagnostics */}
         {diagnostics && (

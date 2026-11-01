@@ -151,7 +151,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
           {showRecovery && activeClient && (
             <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-              <RecoveryView workspaceId={activeClient.workspaceId} clientId={activeClient.id} onClose={() => setShowRecovery(false)} />
+              <RecoveryView 
+                workspaceId={activeClient.workspaceId} 
+                clientId={activeClient.id} 
+                activeClient={activeClient}
+                onClose={() => setShowRecovery(false)} 
+              />
             </div>
           )}
           <p className="text-slate-300 text-sm leading-relaxed">
