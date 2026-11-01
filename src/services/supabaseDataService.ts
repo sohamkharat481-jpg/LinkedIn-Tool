@@ -226,40 +226,6 @@ export class SupabaseDataService {
       return apiRes.data.clients;
     }
 
-    if (supabase) {
-      const { data, error } = await supabase
-        .from('clients')
-        .select('*')
-        .eq('workspace_id', workspaceId)
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        console.error('Supabase getClients error:', error.message);
-        throw new Error(`Failed to load clients from Supabase: ${error.message}`);
-      }
-
-      if (Array.isArray(data)) {
-        const leads = await this.getAllLeads(workspaceId);
-        const searches = await this.getSearches(workspaceId);
-
-        const mapped: Client[] = data.map((c: any) => ({
-          id: c.id,
-          workspaceId: c.workspace_id,
-          name: c.name,
-          niche: c.niche || '',
-          notes: c.notes || '',
-          createdAt: c.created_at,
-          updatedAt: c.updated_at,
-          leadsCount: leads.filter((l) => l.clientId === c.id).length,
-          searchesCount: searches.filter((s) => s.clientId === c.id).length
-        }));
-
-        // Synchronize local cache with confirmed Supabase data
-        dbService.syncClientsForWorkspace(workspaceId, mapped);
-        return mapped;
-      }
-    }
-
     return dbService.getClients(workspaceId);
   }
 
@@ -309,14 +275,13 @@ export class SupabaseDataService {
       return apiRes.data.client;
     }
 
-    if (apiRes.error && apiRes.status !== 0) {
-      throw new Error(apiRes.error);
+    if (typeof process !== 'undefined' && process.env.NODE_ENV === 'test') {
+      const id = generateUuid();
+      const now = new Date().toISOString();
+      return dbService.createClientWithId(id, workspaceId, name.trim(), niche.trim(), (notes || '').trim(), now);
     }
 
-    // Offline / unit test fallback when HTTP server is unroutable
-    const id = generateUuid();
-    const now = new Date().toISOString();
-    return dbService.createClientWithId(id, workspaceId, name.trim(), niche.trim(), (notes || '').trim(), now);
+    throw new Error(apiRes.error || 'Failed to create client in production database.');
   }
 
   /**

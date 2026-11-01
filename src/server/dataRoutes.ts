@@ -127,24 +127,35 @@ dataRouter.get('/workspaces', async (req: Request, res: Response) => {
           dbUsers.forEach((u: any) => u.workspace_id && linkedWsIds.add(u.workspace_id));
         }
 
-        const { data: dbWorkspaces } = await supabase
+        const targetIds = Array.from(linkedWsIds).filter(Boolean);
+        if (!targetIds.includes(deterministicWsId)) {
+          targetIds.push(deterministicWsId);
+        }
+
+        let wsQuery = supabase
           .from('workspaces')
           .select('id, name, description, owner_id');
 
+        if (targetIds.length > 0) {
+          wsQuery = wsQuery.or(`owner_id.eq.${auth.user.userId},id.in.(${targetIds.join(',')})`);
+        } else {
+          wsQuery = wsQuery.eq('owner_id', auth.user.userId);
+        }
+
+        const { data: dbWorkspaces } = await wsQuery;
+
         if (Array.isArray(dbWorkspaces)) {
           for (const ws of dbWorkspaces) {
-            if (ws.id === deterministicWsId || linkedWsIds.has(ws.id) || ws.owner_id === auth.user.userId || await isUserAuthorizedForWorkspace(auth.user.userId, ws.id, auth.user.email)) {
-              registerWorkspaceAuthorization(auth.user.userId, ws.id);
-              const formattedWs: Workspace = {
-                id: ws.id,
-                name: ws.name,
-                description: ws.description || ''
-              };
-              dbService.addOrUpdateWorkspace(formattedWs);
-              if (!seenWsIds.has(ws.id)) {
-                seenWsIds.add(ws.id);
-                authorizedList.push(formattedWs);
-              }
+            registerWorkspaceAuthorization(auth.user.userId, ws.id);
+            const formattedWs: Workspace = {
+              id: ws.id,
+              name: ws.name,
+              description: ws.description || ''
+            };
+            dbService.addOrUpdateWorkspace(formattedWs);
+            if (!seenWsIds.has(ws.id)) {
+              seenWsIds.add(ws.id);
+              authorizedList.push(formattedWs);
             }
           }
         }
@@ -314,35 +325,6 @@ dataRouter.get('/workspaces/:workspaceId/clients', async (req: Request, res: Res
             }
           }
 
-          // Auto-repair missing client_leads associations if client performed searches in workspace
-          for (const c of data) {
-            const currentCnt = leadCountsByClient.get(c.id) || 0;
-            const searchCnt = searchCountsByClient.get(c.id) || 0;
-            if (currentCnt === 0 && searchCnt > 0) {
-              const { data: wsLeads } = await supabase
-                .from('leads')
-                .select('id')
-                .eq('workspace_id', workspaceId);
-              if (Array.isArray(wsLeads) && wsLeads.length > 0) {
-                const repairRows = wsLeads.map((wl: any) => ({
-                  id: generateUuid(),
-                  workspace_id: workspaceId,
-                  client_id: c.id,
-                  lead_id: wl.id,
-                  status: 'Not Contacted',
-                  notes: '',
-                  created_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString()
-                }));
-                try {
-                  await supabase.from('client_leads').upsert(repairRows, { onConflict: 'client_id,lead_id' });
-                  leadCountsByClient.set(c.id, wsLeads.length);
-                } catch {
-                  leadCountsByClient.set(c.id, wsLeads.length);
-                }
-              }
-            }
-          }
         } catch (cntErr) {
           console.warn('Failed to fetch counts from Supabase:', cntErr);
         }
@@ -668,30 +650,7 @@ dataRouter.get('/workspaces/:workspaceId/clients/:clientId/export-leads', async 
         const defaultSearchId = hasSearchesForClient ? searchRows[0].id : null;
 
         for (const item of leadsData) {
-          let junction = junctionMap.get(item.id);
-
-          // Safe auto-repair: If client_leads association was missing due to URL lookup mismatch or FK issue,
-          // but lead_searches recorded search for this client and workspace has leads, re-associate.
-          if (!junction && hasSearchesForClient) {
-            junction = { client_id: clientId, status: 'Not Contacted', notes: '', search_id: defaultSearchId };
-            try {
-              await supabase.from('client_leads').upsert([
-                {
-                  id: generateUuid(),
-                  workspace_id: workspaceId,
-                  client_id: clientId,
-                  lead_id: item.id,
-                  search_id: defaultSearchId,
-                  status: 'Not Contacted',
-                  notes: '',
-                  created_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString()
-                }
-              ], { onConflict: 'client_id,lead_id' });
-            } catch {
-              // ignore auto-repair failure
-            }
-          }
+          const junction = junctionMap.get(item.id);
 
           if (junction) {
             exportLeads.push({

@@ -304,10 +304,9 @@ export default function App() {
         }
         setIsAuthLoading(false);
       },
-      () => {
+      async () => {
         setFirebaseUser(null);
-        setWorkspaces([]);
-        setActiveWorkspace(null);
+        await loadUserWorkspaces(null);
         setIsAuthLoading(false);
       }
     );
