@@ -16,7 +16,6 @@ export const RecoveryView: React.FC<RecoveryProps> = ({ workspaceId, clientId, o
   const scanLocalStorage = () => {
     setStatus('Scan initiated...');
     setDiagnostics('');
-    console.log('Scan initiated for', { workspaceId, clientId });
     
     try {
       const leadsJson = localStorage.getItem('llf_leads_v1');
@@ -24,32 +23,32 @@ export const RecoveryView: React.FC<RecoveryProps> = ({ workspaceId, clientId, o
       
       const diag = `Keys exist: leads=${!!leadsJson}, clientLeads=${!!clientLeadsJson}.`;
       setDiagnostics(diag);
-      console.log(diag);
 
-      if (!leadsJson || !clientLeadsJson) {
-        setStatus('Error: Required LocalStorage keys missing.');
+      if (!leadsJson) {
+        setStatus('Error: Required LocalStorage key llf_leads_v1 missing.');
         return;
       }
 
       const allLeads: LeadRecord[] = JSON.parse(leadsJson);
-      const clientLeads: { lead_id: string; client_id: string }[] = JSON.parse(clientLeadsJson);
+      const clientLeads: { lead_id: string; client_id: string }[] = clientLeadsJson ? JSON.parse(clientLeadsJson) : [];
       
-      const diagData = `Parsed: leadsCount=${allLeads?.length || 0}, clientLeadsCount=${clientLeads?.length || 0}.`;
-      setDiagnostics(prev => prev + ' ' + diagData);
-      console.log(diagData);
-      
-      if (!Array.isArray(allLeads) || !Array.isArray(clientLeads)) {
-        setStatus('Error: Invalid data format.');
+      if (!Array.isArray(allLeads)) {
+        setStatus('Error: Invalid leads data format.');
         return;
       }
       
-      const relevantLeads = allLeads.filter(l => 
-          l.workspaceId === workspaceId && 
-          clientLeads.some(cl => cl.lead_id === l.id && cl.client_id === clientId)
-      );
+      const relevantLeads = allLeads.filter(l => {
+          const hasClientLeadsKey = !!clientLeadsJson;
+          const workspaceMatch = l.workspaceId === workspaceId;
+          const clientMatch = hasClientLeadsKey 
+              ? clientLeads.some(cl => cl.lead_id === l.id && cl.client_id === clientId)
+              : (l.clientId === clientId);
+          return workspaceMatch && clientMatch;
+      });
 
       setLeadsToMigrate(relevantLeads);
-      setStatus(`Scan complete. Found ${relevantLeads.length} eligible leads.`);
+      setStatus(`Scan complete. Found ${relevantLeads.length} leads in workspace ${workspaceId} for client ${clientId}.`);
+      setDiagnostics(prev => prev + ` Parsed: leadsCount=${allLeads.length}, clientLeadsCount=${clientLeads.length}.`);
     } catch (e: any) {
       setStatus(`Scan error: ${e.message}`);
       console.error('Recovery scan error:', e);
