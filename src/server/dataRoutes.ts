@@ -58,6 +58,81 @@ dataRouter.get('/audit-counts', async (req: Request, res: Response) => {
   }
 });
 
+dataRouter.get('/production-audit', async (req: Request, res: Response) => {
+  const { workspaceId, clientId, leadIds } = req.query;
+  
+  if (!workspaceId || typeof workspaceId !== 'string') {
+    return res.status(400).json({ error: 'workspaceId required' });
+  }
+
+  const auth = await verifyServerAuthToken(req);
+  if (auth.status !== 200 || !auth.user) {
+    return res.status(auth.status).json({ error: auth.error });
+  }
+
+  try {
+    const supabase = getSupabaseServerClient();
+    if (!supabase) throw new Error('Supabase client unavailable');
+
+    // 1. Total leads for workspace
+    const { count: wsLeadCount } = await supabase
+      .from('leads')
+      .select('*', { count: 'exact', head: true })
+      .eq('workspace_id', workspaceId);
+
+    // 2. Total associations for client
+    let clientAssocCount = 0;
+    if (clientId && typeof clientId === 'string') {
+      const { count } = await supabase
+        .from('client_leads')
+        .select('*', { count: 'exact', head: true })
+        .eq('client_id', clientId);
+      clientAssocCount = count || 0;
+    }
+
+    // 3. Verify specific lead IDs if provided
+    let leadVerification: any = null;
+    if (leadIds && typeof leadIds === 'string') {
+      const idList = leadIds.split(',').map(id => id.trim());
+      const { data: foundLeads } = await supabase
+        .from('leads')
+        .select('id, workspace_id, profile_url')
+        .in('id', idList);
+      
+      const { data: foundJunctions } = await supabase
+        .from('client_leads')
+        .select('lead_id, client_id, workspace_id')
+        .in('lead_id', idList);
+
+      leadVerification = {
+        requestedCount: idList.length,
+        foundInLeads: foundLeads?.length || 0,
+        foundInJunctions: foundJunctions?.length || 0,
+        junctionDetails: foundJunctions?.slice(0, 5) // Sample
+      };
+    }
+
+    // 4. Sample leads from workspace to check normalization
+    const { data: sampleLeads } = await supabase
+      .from('leads')
+      .select('id, profile_url, created_at')
+      .eq('workspace_id', workspaceId)
+      .limit(5);
+
+    res.json({
+      timestamp: new Date().toISOString(),
+      workspaceId,
+      clientId,
+      wsLeadCount: wsLeadCount || 0,
+      clientAssocCount,
+      leadVerification,
+      sampleLeads
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function generateUuid(): string {
@@ -926,7 +1001,7 @@ dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Resp
 
     const supabase = getSupabaseServerClient();
     if (supabase && leads.length > 0) {
-      // 1. Upsert Leads
+      // 1. Upsert Leads - Using DO UPDATE to ensure we get IDs back for ALL records (inserted or existing)
       const leadRows = leads.map((l: any) => ({
         id: l.id || generateUuid(),
         workspace_id: workspaceId,
@@ -971,10 +1046,11 @@ dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Resp
         updated_at: new Date().toISOString()
       }));
 
-      const { error: leadErr } = await supabase.from('leads').upsert(leadRows, {
+      // We use 'updated_at' update to trigger a return of the record ID even if it was a duplicate
+      const { data: upsertedData, error: leadErr } = await supabase.from('leads').upsert(leadRows, {
         onConflict: 'workspace_id,profile_url',
-        ignoreDuplicates: true
-      });
+        ignoreDuplicates: false // Set to false so we can update a field to get the row back
+      }).select('id, profile_url');
 
       if (leadErr) {
         console.error('Supabase leads upsert error:', leadErr.message);
@@ -983,14 +1059,30 @@ dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Resp
         }
       }
 
-      // 2. Fetch IDs of persisted leads to create client links
-      const { data: persistedLeads } = await supabase
-        .from('leads')
-        .select('id, profile_url')
-        .eq('workspace_id', workspaceId)
-        .in('profile_url', leadRows.map(r => r.profile_url));
+      // 2. Fetch IDs of persisted leads to create client links (Fallbacks for safety)
+      const persistedLeads = upsertedData || [];
+      const foundIds = new Set(persistedLeads.map(l => l.id));
+      
+      // If some records weren't returned by upsert (e.g. strict RLS or other reason), 
+      // try a secondary lookup by both ID and Profile URL to be absolutely sure.
+      if (persistedLeads.length < leadRows.length) {
+          const { data: secondaryLeads } = await supabase
+            .from('leads')
+            .select('id, profile_url')
+            .eq('workspace_id', workspaceId)
+            .or(`id.in.(${leadRows.map(r => r.id).filter(id => UUID_REGEX.test(id)).join(',')}),profile_url.in.(${leadRows.map(r => `'${r.profile_url.replace(/'/g, "''")}'`).join(',')})`);
+          
+          if (Array.isArray(secondaryLeads)) {
+              for (const sl of secondaryLeads) {
+                  if (!foundIds.has(sl.id)) {
+                      persistedLeads.push(sl);
+                      foundIds.add(sl.id);
+                  }
+              }
+          }
+      }
 
-      if (persistedLeads && persistedLeads.length > 0) {
+      if (persistedLeads.length > 0) {
         const clientLeadRows = persistedLeads.map((pl: any) => ({
           id: generateUuid(),
           workspace_id: workspaceId,
@@ -1013,7 +1105,6 @@ dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Resp
           if (process.env.NODE_ENV !== 'test') {
             throw new Error(`Database rejected client links: ${linkErr.message}`);
           }
-          console.warn('Database rejected client links (Test Mode - OK):', linkErr.message);
         }
       }
     } else if (process.env.NODE_ENV === 'test' || process.env.VITE_API_BASE_URL) {

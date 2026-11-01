@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Client, LeadRecord, SearchHistoryRecord, InstagramVerificationStatus } from '../types';
 import { Plus, Edit2, Trash2, FolderOpen, Users, Search, FileText, X, Check, FileSpreadsheet, AlertCircle, Building2, CheckCircle2 } from 'lucide-react';
 import { LeadsTableView } from './LeadsTableView';
+import { resolveAuthToken } from '../services/supabaseDataService';
 
 interface ClientManagementViewProps {
   clients: Client[];
@@ -169,13 +170,37 @@ export const ClientManagementView: React.FC<ClientManagementViewProps> = ({
             Manage agency clients. Lead data and search history are completely isolated per client.
           </p>
         </div>
-        <button
-          onClick={handleOpenCreateModal}
-          disabled={!activeWorkspaceId}
-          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition-all shadow-xs"
-        >
-          <Plus className="w-4 h-4" /> Create New Client
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={async () => {
+              if (!activeWorkspaceId) return;
+              try {
+                const token = await resolveAuthToken();
+                const url = `/api/production-audit?workspaceId=${activeWorkspaceId}${activeOrSelectedClient ? `&clientId=${activeOrSelectedClient.id}` : ''}`;
+                const res = await fetch(url, {
+                  headers: {
+                    'Authorization': `Bearer ${token || ''}`
+                  }
+                });
+                const data = await res.json();
+                console.log('[PROD DIAGNOSTIC]', data);
+                alert('Diagnostic Result:\n' + JSON.stringify(data, null, 2));
+              } catch (e: any) {
+                alert('Diagnostic Failed: ' + e.message);
+              }
+            }}
+            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition-all shadow-xs"
+          >
+            <Search className="w-4 h-4" /> Run Production Diagnostic
+          </button>
+          <button
+            onClick={handleOpenCreateModal}
+            disabled={!activeWorkspaceId}
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition-all shadow-xs"
+          >
+            <Plus className="w-4 h-4" /> Create New Client
+          </button>
+        </div>
       </div>
 
       {/* Workspace warning if no active workspace */}
