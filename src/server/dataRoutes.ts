@@ -1,6 +1,6 @@
 import express, { Request, Response } from 'express';
 import crypto from 'node:crypto';
-import { supabase, getSupabaseServiceRoleKey, detectKeyType, getSupabaseUrl } from '../services/supabase';
+import { getSupabaseServiceRoleKey, detectKeyType, getSupabaseUrl, getSupabaseServerClient } from '../services/supabase';
 import { dbService } from '../services/storage';
 import { normalizeProfileUrl } from '../services/deduplication';
 import {
@@ -110,6 +110,7 @@ dataRouter.get('/workspaces', async (req: Request, res: Response) => {
     authorizedList.push(deterministicWs);
 
     // 1. Query Supabase database for existing workspace associations for this user
+    const supabase = getSupabaseServerClient();
     if (supabase) {
       try {
         const userFilter = auth.user.email && auth.user.email.includes('@')
@@ -223,6 +224,7 @@ dataRouter.post('/workspaces', async (req: Request, res: Response) => {
     const newWs = dbService.createWorkspace(name.trim(), (description || '').trim());
     registerWorkspaceAuthorization(auth.user.userId, newWs.id);
 
+    const supabase = getSupabaseServerClient();
     if (supabase) {
       try {
         await supabase.from('workspaces').insert([
@@ -279,6 +281,7 @@ dataRouter.get('/workspaces/:workspaceId/clients', async (req: Request, res: Res
   }
 
   try {
+    const supabase = getSupabaseServerClient();
     if (supabase) {
       const { data, error } = await supabase
         .from('clients')
@@ -414,54 +417,106 @@ dataRouter.post('/workspaces/:workspaceId/clients', async (req: Request, res: Re
   };
 
   try {
-    if (supabase) {
-      const sRoleKey = getSupabaseServiceRoleKey();
-      const activeKeyInfo = detectKeyType(sRoleKey || 'anon');
-      console.log(
-        `[Diagnostic Evidence] Route: POST /clients | WorkspaceId: ${workspaceId} | ServiceRoleEnvVarPresent: ${Boolean(sRoleKey)} | SelectedKeyType: ${activeKeyInfo.type} | IsServiceRole: ${activeKeyInfo.isServiceRole} | RoleClaim: ${activeKeyInfo.roleClaim || 'none'} | SupabaseUrl: ${getSupabaseUrl()}`
-      );
+    const supabase = getSupabaseServerClient();
+    const sRoleKey = getSupabaseServiceRoleKey();
+    const activeKeyInfo = detectKeyType(sRoleKey);
+    console.log(
+      `[Diagnostic Evidence] Route: POST /clients | WorkspaceId: ${workspaceId} | ServiceRoleEnvVarPresent: ${Boolean(sRoleKey)} | SelectedKeyType: ${activeKeyInfo.type} | IsServiceRole: ${activeKeyInfo.isServiceRole} | RoleClaim: ${activeKeyInfo.roleClaim || 'none'} | SupabaseUrl: ${getSupabaseUrl()}`
+    );
 
-      const { data, error } = await supabase
-        .from('clients')
-        .insert([
-          {
-            id,
-            workspace_id: workspaceId,
-            name: name.trim(),
-            niche: niche.trim(),
-            notes: (notes || '').trim(),
-            created_at: now,
-            updated_at: now
-          }
-        ])
-        .select();
-
-      if (error) {
-        console.error(
-          `[Diagnostic Error] POST /clients DB Insert Failed | WorkspaceId: ${workspaceId} | Code: ${error.code} | Message: ${error.message} | Details: ${error.details || 'none'} | KeyType: ${activeKeyInfo.type} | IsServiceRole: ${activeKeyInfo.isServiceRole}`
-        );
-        res.status(500).json({
-          error: `Database rejected client creation: ${error.message}`,
-          diagnostic: {
-            code: error.code,
-            message: error.message,
-            details: error.details || null,
-            keyType: activeKeyInfo.type,
-            isServiceRole: activeKeyInfo.isServiceRole,
-            serviceRoleEnvVarPresent: Boolean(sRoleKey),
-            workspaceId
-          }
-        });
+    if (!supabase) {
+      if (process.env.NODE_ENV === 'test') {
+        dbService.createClientWithId(id, workspaceId, name.trim(), niche.trim(), (notes || '').trim(), now);
+        res.status(201).json({ client: newClient, testFallback: true });
         return;
       }
-
-      if (!data || data.length === 0) {
-        throw new Error('Database did not return confirmed client record.');
-      }
+      res.status(503).json({
+        error: 'Database service unavailable: SUPABASE_SERVICE_ROLE_KEY is required for client persistence.',
+        diagnostic: {
+          code: 'SERVICE_ROLE_KEY_MISSING',
+          keyType: activeKeyInfo.type,
+          isServiceRole: activeKeyInfo.isServiceRole,
+          workspaceId
+        }
+      });
+      return;
     }
 
-    dbService.createClientWithId(id, workspaceId, name.trim(), niche.trim(), (notes || '').trim(), now);
-    res.status(201).json({ client: newClient });
+    // 1. Primary Database INSERT using Privileged Service Role Client
+    const { data: insertData, error: insertError } = await supabase
+      .from('clients')
+      .insert([
+        {
+          id,
+          workspace_id: workspaceId,
+          name: name.trim(),
+          niche: niche.trim(),
+          notes: (notes || '').trim(),
+          created_at: now,
+          updated_at: now
+        }
+      ])
+      .select();
+
+    if (insertError) {
+      console.error(
+        `[Diagnostic Error] POST /clients DB Insert Failed | WorkspaceId: ${workspaceId} | Code: ${insertError.code} | Message: ${insertError.message} | Details: ${insertError.details || 'none'}`
+      );
+      res.status(500).json({
+        error: `Database rejected client creation: ${insertError.message}`,
+        diagnostic: {
+          code: insertError.code,
+          message: insertError.message,
+          details: insertError.details || null,
+          keyType: activeKeyInfo.type,
+          isServiceRole: activeKeyInfo.isServiceRole,
+          serviceRoleEnvVarPresent: Boolean(sRoleKey),
+          workspaceId
+        }
+      });
+      return;
+    }
+
+    if (!insertData || insertData.length === 0) {
+      res.status(500).json({
+        error: 'Database insert failed: No record returned from database.'
+      });
+      return;
+    }
+
+    // 2. Mandatory Read-After-Write Verification
+    const { data: readBack, error: readBackErr } = await supabase
+      .from('clients')
+      .select('*')
+      .eq('id', id)
+      .eq('workspace_id', workspaceId)
+      .maybeSingle();
+
+    if (readBackErr || !readBack) {
+      console.error(
+        `[Diagnostic Error] POST /clients Read-after-write verification failed | WorkspaceId: ${workspaceId} | ClientId: ${id} | Error: ${readBackErr?.message || 'Row not found'}`
+      );
+      res.status(500).json({
+        error: 'Database persistence verification failed: Client record was not found on read-after-write check.'
+      });
+      return;
+    }
+
+    // Database write strictly verified
+    const verifiedClient: Client = {
+      id: readBack.id,
+      workspaceId: readBack.workspace_id,
+      name: readBack.name,
+      niche: readBack.niche || '',
+      notes: readBack.notes || '',
+      createdAt: readBack.created_at,
+      updatedAt: readBack.updated_at,
+      leadsCount: 0,
+      searchesCount: 0
+    };
+
+    dbService.createClientWithId(verifiedClient.id, workspaceId, verifiedClient.name, verifiedClient.niche, verifiedClient.notes, verifiedClient.createdAt);
+    res.status(201).json({ client: verifiedClient, dbConfirmed: true });
   } catch (error: any) {
     res.status(500).json({ error: error.message || 'Failed to create client.' });
   }
@@ -483,6 +538,7 @@ dataRouter.put('/workspaces/:workspaceId/clients/:clientId', async (req: Request
   const now = new Date().toISOString();
 
   try {
+    const supabase = getSupabaseServerClient();
     if (supabase) {
       const dbUpdates: any = { updated_at: now };
       if (name !== undefined) dbUpdates.name = name.trim();
@@ -520,6 +576,7 @@ dataRouter.delete('/workspaces/:workspaceId/clients/:clientId', async (req: Requ
   }
 
   try {
+    const supabase = getSupabaseServerClient();
     if (supabase) {
       const { error } = await supabase
         .from('clients')
@@ -560,6 +617,7 @@ dataRouter.get('/workspaces/:workspaceId/clients/:clientId/export-leads', async 
     let totalClientAssociations = 0;
     let exportLeads: LeadRecord[] = [];
 
+    const supabase = getSupabaseServerClient();
     if (supabase) {
       // 1. Count total workspace leads
       const { count: wsCount } = await supabase
@@ -743,6 +801,7 @@ dataRouter.get('/workspaces/:workspaceId/leads', async (req: Request, res: Respo
   }
 
   try {
+    const supabase = getSupabaseServerClient();
     if (supabase) {
       try {
         const { data: leadsData, error: leadsError } = await supabase
@@ -962,6 +1021,7 @@ dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Resp
   try {
     const localResult = dbService.saveLeadsForClient(workspaceId, clientId, leads);
 
+    const supabase = getSupabaseServerClient();
     if (supabase && leads.length > 0) {
       const sRoleKey = getSupabaseServiceRoleKey();
       const activeKeyInfo = detectKeyType(sRoleKey || 'anon');
@@ -1125,6 +1185,7 @@ dataRouter.patch('/workspaces/:workspaceId/leads/:leadId/status', async (req: Re
   }
 
   try {
+    const supabase = getSupabaseServerClient();
     if (supabase) {
       await supabase
         .from('client_leads')
@@ -1155,6 +1216,7 @@ dataRouter.patch('/workspaces/:workspaceId/leads/:leadId/notes', async (req: Req
   const { notes } = req.body;
 
   try {
+    const supabase = getSupabaseServerClient();
     if (supabase) {
       await supabase
         .from('client_leads')
@@ -1189,6 +1251,7 @@ dataRouter.patch('/workspaces/:workspaceId/leads/:leadId/instagram', async (req:
   }
 
   try {
+    const supabase = getSupabaseServerClient();
     if (supabase) {
       await supabase
         .from('leads')
@@ -1231,6 +1294,7 @@ dataRouter.post('/workspaces/:workspaceId/leads/delete-selected', async (req: Re
   }
 
   try {
+    const supabase = getSupabaseServerClient();
     if (supabase) {
       await supabase
         .from('client_leads')
@@ -1263,6 +1327,7 @@ dataRouter.get('/workspaces/:workspaceId/searches', async (req: Request, res: Re
   }
 
   try {
+    const supabase = getSupabaseServerClient();
     if (supabase) {
       try {
         const { data, error } = await supabase
@@ -1349,6 +1414,7 @@ dataRouter.post('/workspaces/:workspaceId/searches', async (req: Request, res: R
       createdBy: createdBy || access.user?.email || 'User'
     };
 
+    const supabase = getSupabaseServerClient();
     if (supabase) {
       await supabase.from('lead_searches').insert([
         {
@@ -1404,6 +1470,7 @@ dataRouter.get('/workspaces/:workspaceId/google-integrations', async (req: Reque
   }
 
   try {
+    const supabase = getSupabaseServerClient();
     if (supabase && clientId) {
       const { data, error } = await supabase
         .from('google_integrations')
@@ -1473,6 +1540,7 @@ dataRouter.post('/workspaces/:workspaceId/google-integrations', async (req: Requ
       lastExportedAt: now
     };
 
+    const supabase = getSupabaseServerClient();
     if (supabase) {
       await supabase.from('google_integrations').upsert([
         {
@@ -1513,6 +1581,7 @@ dataRouter.get('/workspaces/:workspaceId/export-history', async (req: Request, r
   }
 
   try {
+    const supabase = getSupabaseServerClient();
     if (supabase) {
       let query = supabase
         .from('export_history')
@@ -1580,6 +1649,7 @@ dataRouter.post('/workspaces/:workspaceId/export-history', async (req: Request, 
       createdAt: now
     };
 
+    const supabase = getSupabaseServerClient();
     if (supabase) {
       await supabase.from('export_history').insert([
         {

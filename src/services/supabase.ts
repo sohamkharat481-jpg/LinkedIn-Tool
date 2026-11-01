@@ -108,11 +108,12 @@ export function getSupabaseServerClient(): SupabaseClient | null {
   if (!url || isPlaceholderUrl(url)) return null;
 
   const serviceKey = getSupabaseServiceRoleKey();
-  const anonKey = getSupabaseAnonKey();
-  const key = serviceKey || anonKey;
-  if (!key || isPlaceholderKey(key)) return null;
+  if (!serviceKey || isPlaceholderKey(serviceKey)) {
+    // Explicitly fail if service role credential is not provided; never fallback to anon key for server writes
+    return null;
+  }
 
-  return createClient(url, key, {
+  return createClient(url, serviceKey, {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
@@ -120,8 +121,8 @@ export function getSupabaseServerClient(): SupabaseClient | null {
     },
     global: {
       headers: {
-        apikey: key,
-        Authorization: `Bearer ${key}`
+        apikey: serviceKey,
+        Authorization: `Bearer ${serviceKey}`
       }
     }
   });
