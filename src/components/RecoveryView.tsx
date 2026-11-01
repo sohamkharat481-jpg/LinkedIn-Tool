@@ -13,35 +13,51 @@ export const RecoveryView: React.FC<RecoveryProps> = ({ workspaceId, clientId, o
   const [leadsToMigrate, setLeadsToMigrate] = useState<LeadRecord[]>([]);
 
   const scanLocalStorage = () => {
-    const leadsJson = localStorage.getItem('llf_leads_v1');
-    const clientLeadsJson = localStorage.getItem('llf_client_leads_v1');
-    
-    if (!leadsJson || !clientLeadsJson) {
-      setStatus('LocalStorage keys missing or empty.');
-      return;
+    try {
+      setStatus('Scanning...');
+      const leadsJson = localStorage.getItem('llf_leads_v1');
+      const clientLeadsJson = localStorage.getItem('llf_client_leads_v1');
+      
+      if (!leadsJson || !clientLeadsJson) {
+        setStatus('LocalStorage keys (llf_leads_v1 or llf_client_leads_v1) missing.');
+        return;
+      }
+
+      const allLeads: LeadRecord[] = JSON.parse(leadsJson);
+      const clientLeads: { lead_id: string; client_id: string }[] = JSON.parse(clientLeadsJson);
+      
+      if (!Array.isArray(allLeads) || !Array.isArray(clientLeads)) {
+        setStatus('Invalid data format in LocalStorage.');
+        return;
+      }
+      
+      const relevantLeads = allLeads.filter(l => 
+          l.workspaceId === workspaceId && 
+          clientLeads.some(cl => cl.lead_id === l.id && cl.client_id === clientId)
+      );
+
+      if (relevantLeads.length === 0) {
+        setStatus('No eligible leads found for this workspace/client combination.');
+      } else {
+        setLeadsToMigrate(relevantLeads);
+        setStatus(`Found ${relevantLeads.length} leads eligible for migration.`);
+      }
+    } catch (e: any) {
+      setStatus(`Scan error: ${e.message}`);
+      console.error('Recovery scan error:', e);
     }
-
-    const allLeads: LeadRecord[] = JSON.parse(leadsJson);
-    const clientLeads: { lead_id: string; client_id: string }[] = JSON.parse(clientLeadsJson);
-    
-    const relevantLeads = allLeads.filter(l => 
-        l.workspaceId === workspaceId && 
-        clientLeads.some(cl => cl.lead_id === l.id && cl.client_id === clientId)
-    );
-
-    setLeadsToMigrate(relevantLeads);
-    setStatus(`Found ${relevantLeads.length} leads eligible for migration.`);
   };
 
   const migrate = async () => {
     if (leadsToMigrate.length === 0) return;
-    setStatus('Migrating...');
+    setStatus('Migrating... please wait...');
     try {
-        await SupabaseDataService.saveLeadsForClient(workspaceId, clientId, leadsToMigrate);
-        setStatus('Migration complete! Refreshing workspace.');
-        window.location.reload();
+        const result = await SupabaseDataService.saveLeadsForClient(workspaceId, clientId, leadsToMigrate);
+        setStatus(`Migration complete: ${result.added} leads migrated successfully.`);
+        // Don't auto-reload, allow user to verify
     } catch (e: any) {
         setStatus(`Migration failed: ${e.message}`);
+        console.error('Migration error:', e);
     }
   };
 
