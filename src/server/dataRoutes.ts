@@ -431,11 +431,13 @@ dataRouter.post('/workspaces/:workspaceId/clients', async (req: Request, res: Re
         return;
       }
       res.status(503).json({
-        error: 'Database service unavailable: SUPABASE_SERVICE_ROLE_KEY is required for client persistence.',
+        error: `Database service unavailable: SUPABASE_SERVICE_ROLE_KEY must be a valid service_role secret key (Detected KeyType: ${activeKeyInfo.type}, RoleClaim: ${activeKeyInfo.roleClaim || 'none'}). Please verify SUPABASE_SERVICE_ROLE_KEY in Vercel environment variables.`,
         diagnostic: {
-          code: 'SERVICE_ROLE_KEY_MISSING',
+          code: 'SERVICE_ROLE_KEY_INVALID_OR_MISSING',
           keyType: activeKeyInfo.type,
+          roleClaim: activeKeyInfo.roleClaim || null,
           isServiceRole: activeKeyInfo.isServiceRole,
+          serviceRoleEnvVarPresent: Boolean(sRoleKey),
           workspaceId
         }
       });

@@ -113,6 +113,12 @@ export function getSupabaseServerClient(): SupabaseClient | null {
     return null;
   }
 
+  const keyInfo = detectKeyType(serviceKey);
+  if (keyInfo.type === 'PUBLISHABLE' || keyInfo.roleClaim === 'anon') {
+    console.warn(`[Supabase Server Client Error] Configured SUPABASE_SERVICE_ROLE_KEY is an ANON/PUBLISHABLE key (type: ${keyInfo.type}, role: ${keyInfo.roleClaim}). Refusing unprivileged server client creation.`);
+    return null;
+  }
+
   return createClient(url, serviceKey, {
     auth: {
       persistSession: false,
