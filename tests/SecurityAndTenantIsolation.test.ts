@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { beforeEach } from 'node:test';
 import fs from 'node:fs';
 import path from 'node:path';
+
+beforeEach(() => {
+  dbService.clearAllData();
+});
 import {
   createSignedTestToken,
   verifyServerAuthToken,

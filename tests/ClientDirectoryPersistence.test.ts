@@ -3,7 +3,11 @@ import test from 'node:test';
 import { dbService } from '../src/services/storage';
 import { SupabaseDataService } from '../src/services/supabaseDataService';
 import { Client } from '../src/types';
+import { beforeEach } from 'node:test';
 
+beforeEach(() => {
+  dbService.clearAllData();
+});
 test('1. Client creation validates required parameters and throws on empty input', async () => {
   await assert.rejects(
     async () => {

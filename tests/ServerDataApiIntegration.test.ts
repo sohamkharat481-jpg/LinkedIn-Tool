@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test, { after, before } from 'node:test';
+import test, { after, before, beforeEach } from 'node:test';
 import http from 'node:http';
 import express from 'express';
 import { apiRouter } from '../src/server/apiHandler';
@@ -27,6 +27,10 @@ before(async () => {
       resolve();
     });
   });
+});
+
+beforeEach(() => {
+  dbService.clearAllData();
 });
 
 after(() => {

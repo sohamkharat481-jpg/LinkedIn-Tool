@@ -10,7 +10,7 @@ import {
   InstagramVerificationStatus
 } from '../types';
 
-const STORAGE_KEYS = {
+const BASE_STORAGE_KEYS = {
   WORKSPACES: 'llf_workspaces_v1',
   ACTIVE_WORKSPACE_ID: 'llf_active_workspace_id_v1',
   CLIENTS: 'llf_clients_v1',
@@ -21,108 +21,15 @@ const STORAGE_KEYS = {
   SUPABASE_CONFIG: 'llf_supabase_config_v1'
 };
 
-const DEFAULT_WORKSPACE_UUID = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
-
-const DEFAULT_WORKSPACE: Workspace = {
-  id: '',
-  name: '',
-  description: ''
-};
+const getScopedKey = (keyBase: string, workspaceId: string) => `${keyBase}_${workspaceId}`;
 
 const SEED_CLIENTS: Client[] = [];
-
 const SEED_LEADS: LeadRecord[] = [];
-
 const SEED_SEARCHES: SearchHistoryRecord[] = [];
 
 // In-Memory Storage & LocalStorage Synchronization
 class StorageService {
-  constructor() {
-    this.migrateLocalStorageIfNeeded();
-  }
-
-  private migrateLocalStorageIfNeeded(): void {
-    try {
-      if (typeof window === 'undefined') return;
-      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-      const workspacesRaw = localStorage.getItem(STORAGE_KEYS.WORKSPACES);
-      if (!workspacesRaw) return;
-      const workspaces: Workspace[] = JSON.parse(workspacesRaw);
-      let needsMigration = false;
-      const idMapping = new Map<string, string>();
-
-      const migratedWorkspaces = workspaces.map(ws => {
-        if (!uuidRegex.test(ws.id)) {
-          needsMigration = true;
-          const newId = ws.id === 'ws-default-01' 
-            ? DEFAULT_WORKSPACE_UUID
-            : (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : 'b1eebc99-9c0b-4ef8-bb6d-6bb9bd380a12');
-          idMapping.set(ws.id, newId);
-          return { ...ws, id: newId };
-        }
-        return ws;
-      });
-
-      if (needsMigration) {
-        localStorage.setItem(STORAGE_KEYS.WORKSPACES, JSON.stringify(migratedWorkspaces));
-
-        const activeId = localStorage.getItem(STORAGE_KEYS.ACTIVE_WORKSPACE_ID);
-        if (activeId && idMapping.has(activeId)) {
-          localStorage.setItem(STORAGE_KEYS.ACTIVE_WORKSPACE_ID, idMapping.get(activeId)!);
-        }
-
-        const clientsRaw = localStorage.getItem(STORAGE_KEYS.CLIENTS);
-        if (clientsRaw) {
-          const clients: Client[] = JSON.parse(clientsRaw);
-          const migratedClients = clients.map(c => {
-            if (idMapping.has(c.workspaceId)) {
-              return { ...c, workspaceId: idMapping.get(c.workspaceId)! };
-            }
-            return c;
-          });
-          localStorage.setItem(STORAGE_KEYS.CLIENTS, JSON.stringify(migratedClients));
-        }
-
-        const leadsRaw = localStorage.getItem(STORAGE_KEYS.LEADS);
-        if (leadsRaw) {
-          const leads: LeadRecord[] = JSON.parse(leadsRaw);
-          const migratedLeads = leads.map(l => {
-            if (idMapping.has(l.workspaceId)) {
-              return { ...l, workspaceId: idMapping.get(l.workspaceId)! };
-            }
-            return l;
-          });
-          localStorage.setItem(STORAGE_KEYS.LEADS, JSON.stringify(migratedLeads));
-        }
-
-        const searchesRaw = localStorage.getItem(STORAGE_KEYS.SEARCHES);
-        if (searchesRaw) {
-          const searches: SearchHistoryRecord[] = JSON.parse(searchesRaw);
-          const migratedSearches = searches.map(s => {
-            if (idMapping.has(s.workspaceId)) {
-              return { ...s, workspaceId: idMapping.get(s.workspaceId)! };
-            }
-            return s;
-          });
-          localStorage.setItem(STORAGE_KEYS.SEARCHES, JSON.stringify(migratedSearches));
-        }
-
-        const giRaw = localStorage.getItem(STORAGE_KEYS.GOOGLE_INTEGRATIONS);
-        if (giRaw) {
-          const gi: GoogleIntegration[] = JSON.parse(giRaw);
-          const migratedGi = gi.map(g => {
-            if (idMapping.has(g.workspaceId)) {
-              return { ...g, workspaceId: idMapping.get(g.workspaceId)! };
-            }
-            return g;
-          });
-          localStorage.setItem(STORAGE_KEYS.GOOGLE_INTEGRATIONS, JSON.stringify(migratedGi));
-        }
-      }
-    } catch (e) {
-      console.warn('LocalStorage migration error:', e);
-    }
-  }
+  constructor() {}
 
   private memoryStore = new Map<string, string>();
 
@@ -151,43 +58,13 @@ class StorageService {
     }
   }
 
-  // Cleanup
-  cleanUpDemoData(): void {
-    const ACME_ID = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
-    
-    // Remove Acme workspace
-    const workspaces = this.getItem<Workspace[]>(STORAGE_KEYS.WORKSPACES, []);
-    const filteredWorkspaces = workspaces.filter((w) => w.id !== ACME_ID);
-    this.setItem(STORAGE_KEYS.WORKSPACES, filteredWorkspaces);
-    
-    // Remove Acme clients, leads, searches
-    const clients = this.getItem<Client[]>(STORAGE_KEYS.CLIENTS, []);
-    this.setItem(STORAGE_KEYS.CLIENTS, clients.filter(c => c.workspaceId !== ACME_ID));
-    
-    const leads = this.getItem<LeadRecord[]>(STORAGE_KEYS.LEADS, []);
-    this.setItem(STORAGE_KEYS.LEADS, leads.filter(l => l.workspaceId !== ACME_ID));
-    
-    const searches = this.getItem<SearchHistoryRecord[]>(STORAGE_KEYS.SEARCHES, []);
-    this.setItem(STORAGE_KEYS.SEARCHES, searches.filter(s => s.workspaceId !== ACME_ID));
-  }
-
-  // Workspaces
+  // Workspaces (Global)
   getWorkspaces(): Workspace[] {
-    const list = this.getItem<Workspace[]>(STORAGE_KEYS.WORKSPACES, []);
-    return list;
+    return this.getItem<Workspace[]>(BASE_STORAGE_KEYS.WORKSPACES, []);
   }
 
   syncWorkspaces(syncedWorkspaces: Workspace[]): void {
-    this.setItem(STORAGE_KEYS.WORKSPACES, syncedWorkspaces);
-    if (syncedWorkspaces.length > 0) {
-      const activeId = this.getItem<string>(STORAGE_KEYS.ACTIVE_WORKSPACE_ID, '');
-      const activeExists = syncedWorkspaces.some((w) => w.id === activeId);
-      if (!activeExists) {
-        this.setActiveWorkspaceId(syncedWorkspaces[0].id);
-      }
-    } else {
-      this.setItem(STORAGE_KEYS.ACTIVE_WORKSPACE_ID, '');
-    }
+    this.setItem(BASE_STORAGE_KEYS.WORKSPACES, syncedWorkspaces);
   }
 
   addOrUpdateWorkspace(ws: Workspace): void {
@@ -198,204 +75,123 @@ class StorageService {
     } else {
       list.push(ws);
     }
-    this.setItem(STORAGE_KEYS.WORKSPACES, list);
-  }
-
-  clearUserWorkspaceSession(): void {
-    try {
-      this.setItem(STORAGE_KEYS.WORKSPACES, []);
-      this.setItem(STORAGE_KEYS.ACTIVE_WORKSPACE_ID, '');
-    } catch (e) {
-      console.warn('Error clearing workspace session:', e);
-    }
+    this.setItem(BASE_STORAGE_KEYS.WORKSPACES, list);
   }
 
   getActiveWorkspaceId(): string {
-    const list = this.getWorkspaces();
-    const activeId = this.getItem<string>(STORAGE_KEYS.ACTIVE_WORKSPACE_ID, '');
-    const exists = list.some((w) => w.id === activeId);
-    if (!exists) {
-      const fallbackId = list.length > 0 ? list[0].id : '';
-      this.setItem(STORAGE_KEYS.ACTIVE_WORKSPACE_ID, fallbackId);
-      return fallbackId;
-    }
-    return activeId;
+    return this.getItem<string>(BASE_STORAGE_KEYS.ACTIVE_WORKSPACE_ID, '');
   }
 
   setActiveWorkspaceId(id: string): void {
-    this.setItem(STORAGE_KEYS.ACTIVE_WORKSPACE_ID, id);
+    this.setItem(BASE_STORAGE_KEYS.ACTIVE_WORKSPACE_ID, id);
   }
 
   createWorkspace(name: string, description: string): Workspace {
-    const id = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' 
-      ? crypto.randomUUID() 
-      : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-          const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
-          return v.toString(16);
-        });
-    const newWs: Workspace = {
-      id,
-      name,
-      description
-    };
+    const id = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `ws-${Date.now()}`;
+    const newWs: Workspace = { id, name, description };
     const list = this.getWorkspaces();
     list.push(newWs);
-    this.setItem(STORAGE_KEYS.WORKSPACES, list);
+    this.setItem(BASE_STORAGE_KEYS.WORKSPACES, list);
     this.setActiveWorkspaceId(newWs.id);
     return newWs;
   }
 
+  clearUserWorkspaceSession(): void {
+    this.setItem(BASE_STORAGE_KEYS.WORKSPACES, []);
+    this.setItem(BASE_STORAGE_KEYS.ACTIVE_WORKSPACE_ID, '');
+  }
+
   // Clients (Isolated per Workspace)
   getClients(workspaceId: string): Client[] {
-    const clients = this.getItem<Client[]>(STORAGE_KEYS.CLIENTS, SEED_CLIENTS);
-    if (!clients || clients.length === 0) {
-      this.setItem(STORAGE_KEYS.CLIENTS, SEED_CLIENTS);
-      return SEED_CLIENTS.filter((c) => c.workspaceId === workspaceId);
-    }
-
-    const wsClients = clients.filter((c) => c.workspaceId === workspaceId);
-    const leads = this.getAllLeads(workspaceId);
-    const searches = this.getSearches(workspaceId);
-
-    return wsClients.map((c) => {
-      const clientLeads = leads.filter((l) => l.clientId === c.id);
-      const clientSearches = searches.filter((s) => s.clientId === c.id);
-      return {
-        ...c,
-        leadsCount: clientLeads.length,
-        searchesCount: clientSearches.length
-      };
-    });
-  }
-
-  getClientById(workspaceId: string, clientId: string): Client | undefined {
-    return this.getClients(workspaceId).find((c) => c.id === clientId);
-  }
-
-  createClient(workspaceId: string, name: string, niche: string, notes: string): Client {
-    const id = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `client-${Date.now()}`;
-    return this.createClientWithId(id, workspaceId, name, niche, notes);
-  }
-
-  createClientWithId(id: string, workspaceId: string, name: string, niche: string, notes: string, createdAt?: string): Client {
-    const newClient: Client = {
-      id,
-      workspaceId,
-      name,
-      niche,
-      notes,
-      createdAt: createdAt || new Date().toISOString(),
-      updatedAt: createdAt || new Date().toISOString(),
-      leadsCount: 0,
-      searchesCount: 0
-    };
-
-    const clients = this.getItem<Client[]>(STORAGE_KEYS.CLIENTS, SEED_CLIENTS);
-    clients.unshift(newClient);
-    this.setItem(STORAGE_KEYS.CLIENTS, clients);
-    return newClient;
+    const key = getScopedKey(BASE_STORAGE_KEYS.CLIENTS, workspaceId);
+    const clients = this.getItem<Client[]>(key, SEED_CLIENTS) || [];
+    const allLeads = this.getAllLeads(workspaceId);
+    const allSearches = this.getSearches(workspaceId);
+    
+    return clients.map(c => ({
+      ...c,
+      leadsCount: allLeads.filter(l => l.clientId === c.id).length,
+      searchesCount: allSearches.filter(s => s.clientId === c.id).length
+    }));
   }
 
   syncClientsForWorkspace(workspaceId: string, syncedClients: Client[]): void {
-    const clients = this.getItem<Client[]>(STORAGE_KEYS.CLIENTS, SEED_CLIENTS);
-    const otherClients = clients.filter((c) => c.workspaceId !== workspaceId);
-    this.setItem(STORAGE_KEYS.CLIENTS, [...syncedClients, ...otherClients]);
+    const key = getScopedKey(BASE_STORAGE_KEYS.CLIENTS, workspaceId);
+    this.setItem(key, syncedClients);
+  }
+
+  createClientWithId(id: string, workspaceId: string, name: string, niche: string, notes: string, createdAt?: string): Client {
+    const key = getScopedKey(BASE_STORAGE_KEYS.CLIENTS, workspaceId);
+    const newClient: Client = {
+      id, workspaceId, name, niche, notes, 
+      createdAt: createdAt || new Date().toISOString(),
+      updatedAt: createdAt || new Date().toISOString(),
+      leadsCount: 0, searchesCount: 0
+    };
+    const clients = this.getClients(workspaceId);
+    clients.unshift(newClient);
+    this.setItem(key, clients);
+    return newClient;
   }
 
   updateClient(workspaceId: string, clientId: string, updates: { name?: string; niche?: string; notes?: string }): Client {
-    const clients = this.getItem<Client[]>(STORAGE_KEYS.CLIENTS, SEED_CLIENTS);
-    const index = clients.findIndex((c) => c.id === clientId && c.workspaceId === workspaceId);
+    const key = getScopedKey(BASE_STORAGE_KEYS.CLIENTS, workspaceId);
+    const clients = this.getClients(workspaceId);
+    const index = clients.findIndex((c) => c.id === clientId);
     if (index === -1) throw new Error('Client not found or access denied.');
-
-    const updated = {
-      ...clients[index],
-      ...updates,
-      updatedAt: new Date().toISOString()
-    };
-    clients[index] = updated;
-    this.setItem(STORAGE_KEYS.CLIENTS, clients);
-    return updated;
+    clients[index] = { ...clients[index], ...updates, updatedAt: new Date().toISOString() };
+    this.setItem(key, clients);
+    return clients[index];
   }
 
   deleteClient(workspaceId: string, clientId: string): void {
-    const clients = this.getItem<Client[]>(STORAGE_KEYS.CLIENTS, SEED_CLIENTS);
-    const filtered = clients.filter((c) => !(c.id === clientId && c.workspaceId === workspaceId));
-    this.setItem(STORAGE_KEYS.CLIENTS, filtered);
-
-    // Also remove associated client leads and searches
+    const key = getScopedKey(BASE_STORAGE_KEYS.CLIENTS, workspaceId);
+    const clients = this.getClients(workspaceId);
+    this.setItem(key, clients.filter(c => c.id !== clientId));
     this.deleteLeadsForClient(workspaceId, clientId);
     this.deleteSearchesForClient(workspaceId, clientId);
   }
 
   // Searches
   getSearches(workspaceId: string): SearchHistoryRecord[] {
-    const searches = this.getItem<SearchHistoryRecord[]>(STORAGE_KEYS.SEARCHES, SEED_SEARCHES);
-    return searches.filter((s) => s.workspaceId === workspaceId);
+    const key = getScopedKey(BASE_STORAGE_KEYS.SEARCHES, workspaceId);
+    return this.getItem<SearchHistoryRecord[]>(key, SEED_SEARCHES) || [];
   }
 
   syncSearchesForWorkspace(workspaceId: string, syncedSearches: SearchHistoryRecord[]): void {
-    const searches = this.getItem<SearchHistoryRecord[]>(STORAGE_KEYS.SEARCHES, SEED_SEARCHES);
-    const otherSearches = searches.filter((s) => s.workspaceId !== workspaceId);
-    this.setItem(STORAGE_KEYS.SEARCHES, [...syncedSearches, ...otherSearches]);
-  }
-
-  getSearchById(workspaceId: string, searchId: string): SearchHistoryRecord | undefined {
-    return this.getSearches(workspaceId).find((s) => s.id === searchId);
-  }
-
-  saveSearchRecord(
-    workspaceId: string,
-    clientId: string,
-    clientName: string,
-    filters: LeadFilter,
-    candidatesFound: number,
-    validLeads: number,
-    duplicatesRemoved: number,
-    finalLeadCount: number,
-    createdBy: string,
-    searchId?: string
-  ): SearchHistoryRecord {
-    const newSearch: SearchHistoryRecord = {
-      id: searchId || (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `search-${Date.now()}`),
-
-      workspaceId,
-      clientId,
-      clientName,
-      searchDate: new Date().toISOString(),
-      filters,
-      candidatesFound,
-      validLeads,
-      duplicatesRemoved,
-      finalLeadCount,
-      createdBy
-    };
-
-    const searches = this.getItem<SearchHistoryRecord[]>(STORAGE_KEYS.SEARCHES, SEED_SEARCHES);
-    searches.unshift(newSearch);
-    this.setItem(STORAGE_KEYS.SEARCHES, searches);
-    return newSearch;
+    const key = getScopedKey(BASE_STORAGE_KEYS.SEARCHES, workspaceId);
+    this.setItem(key, syncedSearches);
   }
 
   deleteSearchesForClient(workspaceId: string, clientId: string): void {
-    const searches = this.getItem<SearchHistoryRecord[]>(STORAGE_KEYS.SEARCHES, SEED_SEARCHES);
-    const filtered = searches.filter((s) => !(s.clientId === clientId && s.workspaceId === workspaceId));
-    this.setItem(STORAGE_KEYS.SEARCHES, filtered);
+    const key = getScopedKey(BASE_STORAGE_KEYS.SEARCHES, workspaceId);
+    const searches = this.getSearches(workspaceId);
+    this.setItem(key, searches.filter(s => s.clientId !== clientId));
   }
 
-  // Leads & Client Leads (ISOLATED BY CLIENT & WORKSPACE)
+  saveSearchRecord(workspaceId: string, clientId: string, clientName: string, filters: LeadFilter, candidatesFound: number, validLeads: number, duplicatesRemoved: number, finalLeadCount: number, createdBy: string, searchId?: string): SearchHistoryRecord {
+    const key = getScopedKey(BASE_STORAGE_KEYS.SEARCHES, workspaceId);
+    const newSearch: SearchHistoryRecord = {
+      id: searchId || `search-${Date.now()}`,
+      workspaceId, clientId, clientName, searchDate: new Date().toISOString(),
+      filters, candidatesFound, validLeads, duplicatesRemoved, finalLeadCount, createdBy
+    };
+    const searches = this.getSearches(workspaceId);
+    searches.unshift(newSearch);
+    this.setItem(key, searches);
+    return newSearch;
+  }
+
+  // Leads
   getAllLeads(workspaceId: string): LeadRecord[] {
-    const leads = this.getItem<LeadRecord[]>(STORAGE_KEYS.LEADS, SEED_LEADS);
-    return leads.filter((l) => l.workspaceId === workspaceId);
-  }
-
-  getLeadsForClient(workspaceId: string, clientId: string): LeadRecord[] {
-    return this.getAllLeads(workspaceId).filter((l) => l.clientId === clientId);
+    const key = getScopedKey(BASE_STORAGE_KEYS.LEADS, workspaceId);
+    return this.getItem<LeadRecord[]>(key, SEED_LEADS) || [];
   }
 
   saveLeadsForClient(workspaceId: string, clientId: string, newLeads: LeadRecord[]): { added: number; duplicatesSkipped: number } {
-    const allLeads = this.getItem<LeadRecord[]>(STORAGE_KEYS.LEADS, SEED_LEADS);
-    const existingClientLeads = allLeads.filter((l) => l.workspaceId === workspaceId && l.clientId === clientId);
-    
+    const key = getScopedKey(BASE_STORAGE_KEYS.LEADS, workspaceId);
+    const allLeads = this.getAllLeads(workspaceId);
+    const existingClientLeads = allLeads.filter((l) => l.clientId === clientId);
     const existingUrls = new Set(existingClientLeads.map((l) => l.profileUrl.toLowerCase()));
 
     let added = 0;
@@ -405,111 +201,114 @@ class StorageService {
       if (existingUrls.has(lead.profileUrl.toLowerCase())) {
         duplicatesSkipped++;
       } else {
-        allLeads.unshift({
-          ...lead,
-          id: lead.id || `lead-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-          workspaceId,
-          clientId
-        });
+        allLeads.unshift({ ...lead, id: lead.id || `lead-${Date.now()}`, workspaceId, clientId });
         existingUrls.add(lead.profileUrl.toLowerCase());
         added++;
       }
     }
-
-    this.setItem(STORAGE_KEYS.LEADS, allLeads);
+    this.setItem(key, allLeads);
     return { added, duplicatesSkipped };
   }
 
   updateLeadStatus(workspaceId: string, leadId: string, newStatus: LeadStatus): void {
-    const allLeads = this.getItem<LeadRecord[]>(STORAGE_KEYS.LEADS, SEED_LEADS);
-    const index = allLeads.findIndex((l) => l.id === leadId && l.workspaceId === workspaceId);
+    const key = getScopedKey(BASE_STORAGE_KEYS.LEADS, workspaceId);
+    const allLeads = this.getAllLeads(workspaceId);
+    const index = allLeads.findIndex((l) => l.id === leadId);
     if (index !== -1) {
       allLeads[index].status = newStatus;
-      this.setItem(STORAGE_KEYS.LEADS, allLeads);
+      this.setItem(key, allLeads);
     }
   }
 
   updateLeadNotes(workspaceId: string, leadId: string, notes: string): void {
-    const allLeads = this.getItem<LeadRecord[]>(STORAGE_KEYS.LEADS, SEED_LEADS);
-    const index = allLeads.findIndex((l) => l.id === leadId && l.workspaceId === workspaceId);
+    const key = getScopedKey(BASE_STORAGE_KEYS.LEADS, workspaceId);
+    const allLeads = this.getAllLeads(workspaceId);
+    const index = allLeads.findIndex((l) => l.id === leadId);
     if (index !== -1) {
       allLeads[index].notes = notes;
-      this.setItem(STORAGE_KEYS.LEADS, allLeads);
+      this.setItem(key, allLeads);
     }
+  }
+
+  getLeadsForClient(workspaceId: string, clientId: string): LeadRecord[] {
+    const allLeads = this.getAllLeads(workspaceId);
+    return allLeads.filter((l) => l.clientId === clientId);
+  }
+  
+  deleteLeadsForClient(workspaceId: string, clientId: string): void {
+    const key = getScopedKey(BASE_STORAGE_KEYS.LEADS, workspaceId);
+    const allLeads = this.getAllLeads(workspaceId);
+    this.setItem(key, allLeads.filter((l) => l.clientId !== clientId));
+  }
+  
+  syncLeadsForWorkspace(workspaceId: string, syncedLeads: LeadRecord[]): void {
+    const key = getScopedKey(BASE_STORAGE_KEYS.LEADS, workspaceId);
+    this.setItem(key, syncedLeads);
+  }
+
+  deleteSelectedLeads(workspaceId: string, leadIds: string[]): void {
+    const key = getScopedKey(BASE_STORAGE_KEYS.LEADS, workspaceId);
+    const idSet = new Set(leadIds);
+    const allLeads = this.getAllLeads(workspaceId);
+    this.setItem(key, allLeads.filter((l) => !idSet.has(l.id)));
   }
 
   updateLeadInstagram(
     workspaceId: string,
     leadId: string,
-    instagramData: {
-      instagramUsername?: string;
-      instagramProfileUrl?: string;
-      instagramVerificationStatus?: InstagramVerificationStatus;
-      instagramVerificationEvidence?: string;
-      instagramDiscoverySource?: string;
-      instagramLastCheckedAt?: string;
-    }
+    instagramData: any
   ): LeadRecord | undefined {
-    const allLeads = this.getItem<LeadRecord[]>(STORAGE_KEYS.LEADS, SEED_LEADS);
-    const index = allLeads.findIndex((l) => l.id === leadId && l.workspaceId === workspaceId);
+    const key = getScopedKey(BASE_STORAGE_KEYS.LEADS, workspaceId);
+    const allLeads = this.getAllLeads(workspaceId);
+    const index = allLeads.findIndex((l) => l.id === leadId);
     if (index !== -1) {
-      allLeads[index] = {
-        ...allLeads[index],
-        ...instagramData
-      };
-      this.setItem(STORAGE_KEYS.LEADS, allLeads);
+      allLeads[index] = { ...allLeads[index], ...instagramData };
+      this.setItem(key, allLeads);
       return allLeads[index];
     }
     return undefined;
   }
 
-  deleteLeadsForClient(workspaceId: string, clientId: string): void {
-    const allLeads = this.getItem<LeadRecord[]>(STORAGE_KEYS.LEADS, SEED_LEADS);
-    const filtered = allLeads.filter((l) => !(l.clientId === clientId && l.workspaceId === workspaceId));
-    this.setItem(STORAGE_KEYS.LEADS, filtered);
+  cleanUpDemoData(): void {
+    // No-op: legacy demo data cleanup is no longer required in workspace-scoped storage.
   }
 
-  deleteSelectedLeads(workspaceId: string, leadIds: string[]): void {
-    const idSet = new Set(leadIds);
-    const allLeads = this.getItem<LeadRecord[]>(STORAGE_KEYS.LEADS, SEED_LEADS);
-    const filtered = allLeads.filter((l) => !(l.workspaceId === workspaceId && idSet.has(l.id)));
-    this.setItem(STORAGE_KEYS.LEADS, filtered);
+  clearAllData(): void {
+    this.memoryStore.clear();
+    if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
+      localStorage.clear();
+    }
   }
 
-  syncLeadsForWorkspace(workspaceId: string, syncedLeads: LeadRecord[]): void {
-    const allLeads = this.getItem<LeadRecord[]>(STORAGE_KEYS.LEADS, SEED_LEADS);
-    const otherLeads = allLeads.filter((l) => l.workspaceId !== workspaceId);
-    this.setItem(STORAGE_KEYS.LEADS, [...syncedLeads, ...otherLeads]);
-  }
-
-  // Google Integration & Export History
   getGoogleIntegration(workspaceId: string, clientId: string): GoogleIntegration | undefined {
-    const list = this.getItem<GoogleIntegration[]>(STORAGE_KEYS.GOOGLE_INTEGRATIONS, []);
-    return list.find((g) => g.workspaceId === workspaceId && g.clientId === clientId);
+    const key = getScopedKey(BASE_STORAGE_KEYS.GOOGLE_INTEGRATIONS, workspaceId);
+    const list = this.getItem<GoogleIntegration[]>(key, []) || [];
+    return list.find((g) => g.clientId === clientId);
   }
 
   saveGoogleIntegration(integration: GoogleIntegration): void {
-    const list = this.getItem<GoogleIntegration[]>(STORAGE_KEYS.GOOGLE_INTEGRATIONS, []);
-    const index = list.findIndex(
-      (g) => g.workspaceId === integration.workspaceId && g.clientId === integration.clientId
-    );
+    const key = getScopedKey(BASE_STORAGE_KEYS.GOOGLE_INTEGRATIONS, integration.workspaceId);
+    const list = this.getItem<GoogleIntegration[]>(key, []) || [];
+    const index = list.findIndex((g) => g.clientId === integration.clientId);
     if (index !== -1) {
       list[index] = integration;
     } else {
       list.push(integration);
     }
-    this.setItem(STORAGE_KEYS.GOOGLE_INTEGRATIONS, list);
+    this.setItem(key, list);
   }
 
   getExportHistory(workspaceId: string, clientId?: string): ExportHistoryRecord[] {
-    const list = this.getItem<ExportHistoryRecord[]>(STORAGE_KEYS.EXPORT_HISTORY, []);
-    return list.filter((e) => e.workspaceId === workspaceId && (!clientId || e.clientId === clientId));
+    const key = getScopedKey(BASE_STORAGE_KEYS.EXPORT_HISTORY, workspaceId);
+    const list = this.getItem<ExportHistoryRecord[]>(key, []) || [];
+    return clientId ? list.filter((e) => e.clientId === clientId) : list;
   }
 
   saveExportHistory(record: ExportHistoryRecord): void {
-    const list = this.getItem<ExportHistoryRecord[]>(STORAGE_KEYS.EXPORT_HISTORY, []);
+    const key = getScopedKey(BASE_STORAGE_KEYS.EXPORT_HISTORY, record.workspaceId);
+    const list = this.getItem<ExportHistoryRecord[]>(key, []) || [];
     list.unshift(record);
-    this.setItem(STORAGE_KEYS.EXPORT_HISTORY, list);
+    this.setItem(key, list);
   }
 }
 
