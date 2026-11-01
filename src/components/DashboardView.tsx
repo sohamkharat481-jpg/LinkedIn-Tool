@@ -17,9 +17,11 @@ import {
   User,
   PlusCircle,
   Database,
-  CheckCircle2
+  CheckCircle2,
+  AlertTriangle
 } from 'lucide-react';
 import { NavTab } from './Sidebar';
+import { RecoveryView } from './RecoveryView';
 
 interface DashboardViewProps {
   clients: Client[];
@@ -70,6 +72,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 }) => {
   const [clientSelectionError, setClientSelectionError] = useState<string | null>(null);
   const [scopeMode, setScopeMode] = useState<'workspace' | 'client'>('workspace');
+  const [showRecovery, setShowRecovery] = useState(false);
 
   // Filter leads based on selected scope
   const targetLeads =
@@ -142,7 +145,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <span className="text-[10px] uppercase font-semibold bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded-full border border-blue-500/30">
               Agency Suite
             </span>
+            <button onClick={() => setShowRecovery(true)} className="ml-2 flex items-center text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 hover:bg-amber-500/30">
+                <AlertTriangle className="w-3 h-3 mr-1" /> Recover Leads
+            </button>
           </div>
+          {showRecovery && activeClient && (
+            <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+              <RecoveryView workspaceId={activeClient.workspaceId} clientId={activeClient.id} onClose={() => setShowRecovery(false)} />
+            </div>
+          )}
           <p className="text-slate-300 text-sm leading-relaxed">
             Discover real B2B leads via Wikidata SPARQL Query Service, maintain strict client isolation, apply automated deduplication, and export directly to Google Sheets.
           </p>

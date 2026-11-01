@@ -1046,16 +1046,16 @@ dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Resp
         console.error('Supabase client_leads upsert error:', linkErr.message);
         throw new Error(`Database rejected client links: ${linkErr.message}`);
       }
+    } else {
+      throw new Error('Database unavailable for lead persistence.');
     }
 
     res.json({
       success: true,
       added: localResult.added,
       duplicatesSkipped: localResult.duplicatesSkipped,
-      persistenceStatus: supabase ? 'confirmed' : 'local_only',
-      persistenceMessage: supabase
-        ? 'Leads persisted securely to workspace database.'
-        : 'Leads saved in local workspace cache.'
+      persistenceStatus: 'confirmed',
+      persistenceMessage: 'Leads persisted securely to workspace database.'
     });
   } catch (error: any) {
     res.status(500).json({ error: error.message || 'Failed to save leads.' });
