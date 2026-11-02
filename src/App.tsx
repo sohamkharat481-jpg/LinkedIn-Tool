@@ -53,10 +53,14 @@ export default function App() {
 
   if (startup.state === 'ERROR') {
       return (
-        <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white space-y-4 font-sans">
-          <p className="text-xl font-bold">Startup Error</p>
-          <p className="text-sm text-slate-400">{startup.error}</p>
-          <button className="bg-blue-600 px-4 py-2 rounded" onClick={() => window.location.reload()}>Retry</button>
+        <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white p-8 font-sans text-center">
+          <p className="text-xl font-bold mb-2">Startup Error</p>
+          <div className="bg-slate-800 p-4 rounded text-sm text-left font-mono w-full max-w-md mb-4">
+              <p>Failed phase: {startup.failedPhase || 'Unknown'}</p>
+              <p>Error: {startup.error}</p>
+              <p>Duration: {startup.phaseDuration}ms</p>
+          </div>
+          <button className="bg-blue-600 px-6 py-2 rounded" onClick={() => window.location.reload()}>Retry</button>
         </div>
       );
   }
