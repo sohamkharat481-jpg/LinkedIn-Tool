@@ -4,8 +4,10 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 export const getSupabaseUrl = (): string => {
   let url = '';
   
+
   // Try Vite-specific environment access first (replaced at build time for client)
   try {
+
     // @ts-ignore
     if (typeof import.meta !== 'undefined' && import.meta.env) {
       // @ts-ignore

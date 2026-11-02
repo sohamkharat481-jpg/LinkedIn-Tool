@@ -59,6 +59,18 @@ apiRouter.get('/supabase-status', async (_req: Request, res: Response) => {
   }
 });
 
+apiRouter.get('/env-diagnostic', async (_req: Request, res: Response) => {
+  // Only return existence/format, never values!
+  res.json({
+    hasSupabaseUrl: !!process.env.SUPABASE_URL,
+    hasSupabaseAnonKey: !!process.env.SUPABASE_ANON_KEY,
+    hasViteSupabaseUrl: !!process.env.VITE_SUPABASE_URL,
+    hasViteSupabaseAnonKey: !!process.env.VITE_SUPABASE_ANON_KEY,
+    nodeEnv: process.env.NODE_ENV,
+    urlFormat: process.env.SUPABASE_URL ? (process.env.SUPABASE_URL.startsWith('http') ? 'valid' : 'invalid') : 'missing'
+  });
+});
+
 apiRouter.get('/diagnostics', async (_req: Request, res: Response) => {
   try {
     const providerDiag = ServerLeadProviderService.getDiagnostics();

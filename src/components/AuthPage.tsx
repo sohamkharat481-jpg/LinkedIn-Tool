@@ -11,6 +11,15 @@ interface AuthPageProps {
 export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess }) => {
   const [view, setView] = useState<'sign_in' | 'sign_up'>('sign_in');
 
+  // Diagnostic
+  React.useEffect(() => {
+    console.log('[Diagnostic] Env vars detected in browser:', {
+      hasViteSupabaseUrl: !!import.meta.env.VITE_SUPABASE_URL,
+      hasViteSupabaseAnonKey: !!import.meta.env.VITE_SUPABASE_ANON_KEY,
+      allEnvKeys: Object.keys(import.meta.env || {}),
+    });
+  }, []);
+
   return (
     <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4 font-sans">
       <div className="max-w-6xl w-full flex flex-col lg:flex-row bg-white rounded-3xl shadow-2xl overflow-hidden min-h-[600px]">
