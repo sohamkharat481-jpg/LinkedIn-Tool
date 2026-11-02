@@ -16,6 +16,7 @@ import {
     supabaseGoogleSignIn
 } from './services/auth';
 import { RefreshCw } from 'lucide-react';
+import { supabase } from './services/supabase';
 
 import { TopBar } from './components/TopBar';
 import { Sidebar, NavTab } from './components/Sidebar';
@@ -100,6 +101,12 @@ export default function App() {
 
   // 1. Auth & Onboarding Lifecycle
   useEffect(() => {
+    if (!supabase) {
+      console.error('[App Error] Supabase client is null. Cannot initialize Auth.');
+      setIsAuthLoading(false);
+      return;
+    }
+
     const unsubscribe = initAuthListener(async (sessionUser) => {
       setUser(sessionUser);
       if (sessionUser) {

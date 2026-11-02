@@ -184,21 +184,31 @@ export function getSupabaseClient(): SupabaseClient | null {
   }
 
   try {
-    cachedClient = createClient(url, key, {
+    const client = createClient(url, key, {
       auth: {
         persistSession: true,
         autoRefreshToken: true
       }
     });
+    cachedClient = client;
     cachedKeyUsed = key;
-    return cachedClient;
+    return client;
   } catch (e) {
-    console.error('Failed to create Supabase client:', e);
+    console.error('[Supabase Error] Failed to create Supabase client:', e);
     return null;
   }
 }
 
+// Cached client accessor
 export const supabase: SupabaseClient | null = getSupabaseClient();
+
+if (!supabase) {
+  console.error('[Supabase Error] supabase client is null at initialization.', {
+      url: getSupabaseUrl(),
+      hasKey: !!getSupabaseAnonKey(),
+  });
+}
+
 
 export interface SupabaseDiagnosticStatus {
   SUPABASE_URL: 'CONFIGURED' | 'MISSING' | 'PLACEHOLDER' | 'MALFORMED';
