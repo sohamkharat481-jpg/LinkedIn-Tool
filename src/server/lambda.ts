@@ -5,7 +5,7 @@ const app = express();
 
 app.set('trust proxy', 1);
 
-app.use(express.json());
+app.use(express.json({ limit: '5mb' }));
 
 // CORS Middleware for Vercel serverless environment
 app.use((req, res, next) => {

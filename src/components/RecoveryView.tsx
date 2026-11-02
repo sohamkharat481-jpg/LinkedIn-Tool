@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { SupabaseDataService } from '../services/supabaseDataService';
+import { SupabaseDataService, resolveAuthToken } from '../services/supabaseDataService';
 import { LeadRecord, Client } from '../types';
 import { Download, Search, RefreshCw, Database, AlertCircle, CheckCircle2, UserPlus } from 'lucide-react';
 
@@ -76,6 +76,38 @@ export const RecoveryView: React.FC<RecoveryProps> = ({ workspaceId, clientId, a
 
   const [backupDownloaded, setBackupDownloaded] = useState(false);
 
+  const [progress, setProgress] = useState<{current: number, total: number, failed: number, batch: number} | null>(null);
+  const [processedIds, setProcessedIds] = useState<Set<string>>(new Set());
+
+  // Load progress from localStorage on mount or when leads change
+  useEffect(() => {
+    const saved = localStorage.getItem('llf_recovery_progress_ids');
+    if (saved) {
+      try {
+        const ids = JSON.parse(saved);
+        if (Array.isArray(ids)) {
+          setProcessedIds(new Set(ids));
+        }
+      } catch (e) {
+        console.error('Failed to parse recovery progress:', e);
+      }
+    }
+  }, []);
+
+  // Update localStorage when processedIds changes
+  useEffect(() => {
+    if (processedIds.size > 0) {
+      localStorage.setItem('llf_recovery_progress_ids', JSON.stringify(Array.from(processedIds)));
+    }
+  }, [processedIds]);
+
+  const clearProgress = () => {
+    localStorage.removeItem('llf_recovery_progress_ids');
+    setProcessedIds(new Set());
+    setProgress(null);
+    setStatus('Recovery progress cleared. Ready for fresh scan.');
+  };
+
   const migrate = async () => {
     if (leadsToMigrate.length === 0) return;
     if (!backupDownloaded) {
@@ -84,42 +116,115 @@ export const RecoveryView: React.FC<RecoveryProps> = ({ workspaceId, clientId, a
     }
     
     setIsMigrating(true);
-    setStatus('Migrating to Supabase...');
+    setStatus('Initializing batch migration...');
     
-    try {
-        let totalAdded = 0;
-        let finalStatusMessage = '';
-        
-        if (useActiveClient && clientId) {
-            // Map ALL found leads to the currently active client
-            setStatus(`Mapping ${leadsToMigrate.length} leads to client ${activeClient?.name || clientId}...`);
-            const result = await SupabaseDataService.saveLeadsForClient(workspaceId, clientId, leadsToMigrate);
-            totalAdded = result.added;
-            finalStatusMessage = result.persistenceMessage;
-        } else {
-            // Group leads by original clientId to preserve associations
-            const leadsByClient = leadsToMigrate.reduce((acc, lead) => {
-                const cId = lead.clientId || 'unknown-client';
-                if (!acc[cId]) acc[cId] = [];
-                acc[cId].push(lead);
-                return acc;
-            }, {} as Record<string, LeadRecord[]>);
+    // Filter out already processed leads to support resumption
+    const remainingLeads = leadsToMigrate.filter(l => !processedIds.has(l.id));
+    const totalToMigrate = leadsToMigrate.length;
+    let successfulCount = processedIds.size;
+    let failedCount = 0;
+    
+    if (remainingLeads.length === 0 && totalToMigrate > 0) {
+      setStatus(`All ${totalToMigrate} leads have already been migrated.`);
+      setIsMigrating(false);
+      return;
+    }
 
-            for (const [cId, leads] of Object.entries(leadsByClient)) {
-                setStatus(`Migrating group for client ${cId}...`);
-                const result = await SupabaseDataService.saveLeadsForClient(workspaceId, cId, leads);
-                totalAdded += result.added;
-                finalStatusMessage = result.persistenceMessage;
+    const BATCH_SIZE = 20;
+    const totalBatches = Math.ceil(remainingLeads.length / BATCH_SIZE);
+    
+    setProgress({
+      current: successfulCount,
+      total: totalToMigrate,
+      failed: 0,
+      batch: 1
+    });
+
+    try {
+        for (let i = 0; i < remainingLeads.length; i += BATCH_SIZE) {
+            const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+            const batch = remainingLeads.slice(i, i + BATCH_SIZE);
+            const batchIds = batch.map(l => l.id);
+            
+            setStatus(`Processing Batch ${batchNum}/${totalBatches} (${batch.length} leads)...`);
+            setProgress(prev => prev ? { ...prev, batch: batchNum } : null);
+
+            try {
+                let batchResult;
+                if (useActiveClient && clientId) {
+                    batchResult = await SupabaseDataService.saveLeadsForClient(workspaceId, clientId, batch);
+                } else {
+                    // Group leads by original clientId to preserve associations if needed
+                    const leadsByClient = batch.reduce((acc, lead) => {
+                        const cId = lead.clientId || 'unknown-client';
+                        if (!acc[cId]) acc[cId] = [];
+                        acc[cId].push(lead);
+                        return acc;
+                    }, {} as Record<string, LeadRecord[]>);
+
+                    let subTotal = 0;
+                    for (const [cId, leads] of Object.entries(leadsByClient)) {
+                        const res = await SupabaseDataService.saveLeadsForClient(workspaceId, cId, leads);
+                        subTotal += res.added;
+                    }
+                    batchResult = { added: subTotal, persistenceMessage: 'Batch partial groups completed' };
+                }
+
+                // Update processed state for resumption
+                batchIds.forEach(id => processedIds.add(id));
+                setProcessedIds(new Set(processedIds));
+                
+                successfulCount += batch.length;
+                setProgress(prev => prev ? { ...prev, current: successfulCount } : null);
+                
+            } catch (batchErr: any) {
+                console.error(`Batch ${batchNum} failed:`, batchErr);
+                failedCount += batch.length;
+                setProgress(prev => prev ? { ...prev, failed: failedCount } : null);
+                
+                const proceed = confirm(`Batch ${batchNum} failed: ${batchErr.message}. \n\nSuccessfully migrated so far: ${successfulCount}/${totalToMigrate}. \n\nDo you want to continue with the next batch?`);
+                if (!proceed) {
+                    setStatus(`Migration paused at batch ${batchNum}. ${successfulCount} leads migrated, ${failedCount} failed in current session.`);
+                    setIsMigrating(false);
+                    return;
+                }
             }
         }
         
-        setStatus(`Migration successful: ${totalAdded} leads confirmed in cloud database. ${finalStatusMessage}`);
-        setLeadsToMigrate([]); 
-        setStats(null);
-        // Alert user to refresh page to see new data in the UI
-        alert('Migration Confirmed!\n\n' + finalStatusMessage + '\n\nPlease refresh your browser to see the restored leads in your Client Directory.');
+        const finalMsg = failedCount > 0 
+          ? `Migration completed with issues. ${successfulCount} leads verified in cloud, ${failedCount} leads failed.`
+          : `Migration successful: All ${totalToMigrate} leads verified in cloud database.`;
+          
+        setStatus('Verifying final database state...');
+        
+        // Perform a final audit call to get the authoritative count
+        try {
+            const token = await resolveAuthToken();
+            const auditRes = await fetch(`/api/production-audit?workspaceId=${workspaceId}&clientId=${clientId}`, {
+                headers: { 'Authorization': `Bearer ${token || ''}` }
+            });
+            const auditData = await auditRes.json();
+            if (auditData.clientAssocCount !== undefined) {
+                setStatus(`${finalMsg} Authoritative database count: ${auditData.clientAssocCount} leads.`);
+            } else {
+                setStatus(finalMsg);
+            }
+        } catch (auditErr) {
+            console.warn('Final audit failed:', auditErr);
+            setStatus(finalMsg);
+        }
+        
+        if (failedCount === 0) {
+          localStorage.removeItem('llf_recovery_progress_ids');
+          setProcessedIds(new Set());
+          setLeadsToMigrate([]); 
+          setStats(null);
+          setProgress(null);
+        }
+
+        alert('Migration Complete!\n\n' + finalMsg + '\n\nPlease refresh your browser to see the restored leads.');
     } catch (e: any) {
-        setStatus(`Migration failed: ${e.message}`);
+        setStatus(`Migration encountered a fatal error: ${e.message}`);
         console.error('Migration error:', e);
         alert('Migration Failed: ' + e.message);
     } finally {
@@ -201,24 +306,62 @@ export const RecoveryView: React.FC<RecoveryProps> = ({ workspaceId, clientId, a
         {/* Status & Stats */}
         <div className="bg-slate-50 rounded-2xl border border-slate-100 p-4 space-y-4">
           <div className="flex items-start gap-3">
-            <div className={`mt-0.5 p-1 rounded-full ${status.includes('Error') || status.includes('failed') ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}`}>
+            <div className={`mt-0.5 p-1 rounded-full ${status.includes('Error') || status.includes('failed') || status.includes('fatal') ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}`}>
               <AlertCircle className="w-4 h-4" />
             </div>
-            <div>
+            <div className="flex-1">
               <p className="text-xs font-bold text-slate-500 uppercase tracking-tighter">Current Status</p>
               <p className="text-sm font-medium text-slate-800 mt-1">{status}</p>
             </div>
+            {processedIds.size > 0 && !isMigrating && (
+              <button 
+                onClick={clearProgress}
+                className="text-[10px] font-bold text-red-500 hover:text-red-700 uppercase tracking-widest border border-red-200 px-2 py-1 rounded-lg"
+              >
+                Clear Progress
+              </button>
+            )}
           </div>
 
-          {stats && (
+          {progress && (
+            <div className="space-y-2 pt-2">
+              <div className="flex items-center justify-between text-[10px] font-bold uppercase text-slate-400">
+                <span>Migration Progress</span>
+                <span>{Math.round((progress.current / progress.total) * 100)}%</span>
+              </div>
+              <div className="h-2 bg-slate-200 rounded-full overflow-hidden flex">
+                 <div 
+                   className="h-full bg-green-500 transition-all duration-500" 
+                   style={{ width: `${(progress.current / progress.total) * 100}%` }}
+                 />
+                 <div 
+                   className="h-full bg-red-500 transition-all duration-500" 
+                   style={{ width: `${(progress.failed / progress.total) * 100}%` }}
+                 />
+              </div>
+              <div className="flex justify-between text-[10px] font-medium text-slate-500">
+                 <span>Migrated: {progress.current}</span>
+                 <span>Batch: {progress.batch}</span>
+                 {progress.failed > 0 && <span className="text-red-500">Failed: {progress.failed}</span>}
+                 <span>Total: {progress.total}</span>
+              </div>
+            </div>
+          )}
+
+          {stats && !progress && (
             <div className="grid grid-cols-2 gap-3 pt-3 border-t border-slate-200">
               <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-sm">
                 <p className="text-[10px] font-bold text-slate-400 uppercase">Found in Source</p>
                 <p className="text-lg font-bold text-blue-600">{stats.sourceWs}</p>
               </div>
-              <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-sm">
+              <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-sm relative overflow-hidden">
                 <p className="text-[10px] font-bold text-slate-400 uppercase">Already Scoped</p>
                 <p className="text-lg font-bold text-slate-600">{stats.currentWs}</p>
+                {processedIds.size > 0 && (
+                  <div className="absolute top-0 right-0 bg-green-100 text-green-700 text-[8px] font-bold px-1.5 py-0.5 rounded-bl-lg">
+                    {processedIds.size} Recovered
+                  </div>
+                )}
               </div>
             </div>
           )}
