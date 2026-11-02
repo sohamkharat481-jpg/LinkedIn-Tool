@@ -7,11 +7,14 @@ export const getSupabaseUrl = (): string => {
 
   // Try Vite-specific environment access first (replaced at build time for client)
   try {
-
     // @ts-ignore
     if (typeof import.meta !== 'undefined' && import.meta.env) {
       // @ts-ignore
-      url = import.meta.env.VITE_SUPABASE_URL || import.meta.env.SUPABASE_URL;
+      const val = import.meta.env.VITE_SUPABASE_URL || import.meta.env.SUPABASE_URL;
+      if (val) {
+          console.log('[Supabase Debug] Found URL in import.meta.env:', val);
+          url = val;
+      }
     }
   } catch (e) {
     // ignore
@@ -19,14 +22,23 @@ export const getSupabaseUrl = (): string => {
 
   // Fallback to process.env (for server-side and dev)
   if (!url && typeof process !== 'undefined' && process.env) {
-    url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
+    const val = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
+    if (val) {
+        console.log('[Supabase Debug] Found URL in process.env:', val);
+        url = val;
+    }
   }
 
   // Last resort: check window properties (for runtime injection if any)
   if (!url && typeof window !== 'undefined') {
-    url = (window as any).__SUPABASE_URL__ || (window as any)?.__ENV__?.VITE_SUPABASE_URL || '';
+    const val = (window as any).__SUPABASE_URL__ || (window as any)?.__ENV__?.VITE_SUPABASE_URL;
+    if (val) {
+        console.log('[Supabase Debug] Found URL in window:', val);
+        url = val;
+    }
   }
 
+  console.log('[Supabase Debug] Final resolved URL:', url);
   return (url || '').trim();
 };
 

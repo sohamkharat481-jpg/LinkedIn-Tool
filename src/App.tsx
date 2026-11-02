@@ -39,6 +39,15 @@ export function normalizePath(rawPath: string): string {
 }
 
 export default function App() {
+  if (!supabase) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white space-y-4 font-sans">
+        <p className="text-xl font-bold">Database Configuration Missing</p>
+        <p className="text-sm text-slate-400">Please check your environment variables (SUPABASE_URL, SUPABASE_ANON_KEY).</p>
+      </div>
+    );
+  }
+
   const [currentPath, setCurrentPath] = useState<string>(() =>
     typeof window !== 'undefined' ? window.location.pathname + window.location.search : '/'
   );
@@ -101,32 +110,40 @@ export default function App() {
 
   // 1. Auth & Onboarding Lifecycle
   useEffect(() => {
+    console.log('[Startup] Auth lifecycle started');
     if (!supabase) {
       console.error('[App Error] Supabase client is null. Cannot initialize Auth.');
       setIsAuthLoading(false);
       return;
     }
 
+    console.log('[Startup] Initializing auth listener...');
     const unsubscribe = initAuthListener(async (sessionUser) => {
+      console.log('[Startup] Auth listener: User resolved', { email: sessionUser.email });
       setUser(sessionUser);
       if (sessionUser) {
         try {
+          console.log('[Startup] Onboarding started');
           const onboardData = await SupabaseDataService.onboardUser();
+          console.log('[Startup] Onboarding successful', { org: onboardData.organization.id });
           setOrganization(onboardData.organization);
           setWorkspaces(onboardData.workspaces);
           setOnboarded(true);
 
           if (onboardData.workspaces.length > 0) {
             const ws = onboardData.workspaces[0];
+            console.log('[Startup] Workspace resolved', { wsId: ws.id });
             setActiveWorkspace(ws);
             loadWorkspaceData(ws.id);
           }
         } catch (err) {
-          console.error('Onboarding failed:', err);
+          console.error('[Startup] Onboarding failed:', err);
         }
       }
+      console.log('[Startup] Auth lifecycle: Auth Loading set to false');
       setIsAuthLoading(false);
     }, () => {
+      console.log('[Startup] Auth listener: Signed out / Failed');
       setUser(null);
       setOrganization(null);
       setWorkspaces([]);
@@ -134,7 +151,10 @@ export default function App() {
       setOnboarded(false);
       setIsAuthLoading(false);
     });
-    return () => unsubscribe();
+    return () => {
+        console.log('[Startup] Cleaning up auth listener');
+        unsubscribe();
+    };
   }, []);
 
   const loadWorkspaceData = async (wsId: string) => {
