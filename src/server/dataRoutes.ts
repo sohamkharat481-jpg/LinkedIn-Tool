@@ -61,10 +61,6 @@ dataRouter.get('/audit-counts', async (req: Request, res: Response) => {
 dataRouter.get('/production-audit', async (req: Request, res: Response) => {
   const { workspaceId, clientId, leadIds } = req.query;
   
-  if (!workspaceId || typeof workspaceId !== 'string') {
-    return res.status(400).json({ error: 'workspaceId required' });
-  }
-
   const auth = await verifyServerAuthToken(req);
   if (auth.status !== 200 || !auth.user) {
     return res.status(auth.status).json({ error: auth.error });
@@ -72,15 +68,41 @@ dataRouter.get('/production-audit', async (req: Request, res: Response) => {
 
   try {
     const supabase = getSupabaseServerClient();
-    if (!supabase) throw new Error('Supabase client unavailable');
+    const sKey = getSupabaseServiceRoleKey();
+    const keyInfo = detectKeyType(sKey);
+    const rawUrl = getSupabaseUrl();
+    const maskedUrl = rawUrl ? `${rawUrl.substring(0, 15)}...${rawUrl.substring(rawUrl.length - 5)}` : 'MISSING';
 
-    // 1. Total leads for workspace
+    const env = {
+      NODE_ENV: process.env.NODE_ENV,
+      VITE_API_BASE_URL_SET: Boolean(process.env.VITE_API_BASE_URL),
+      SUPABASE_URL_IDENTITY: maskedUrl,
+      KEY_TYPE: keyInfo.type,
+      IS_SERVICE_ROLE: keyInfo.isServiceRole,
+      ROLE_CLAIM: keyInfo.roleClaim
+    };
+
+    if (!supabase) {
+      return res.json({
+        error: 'Supabase client could not be initialized.',
+        env
+      });
+    }
+
+    // 1. Total leads for THIS workspace
     const { count: wsLeadCount } = await supabase
       .from('leads')
       .select('*', { count: 'exact', head: true })
       .eq('workspace_id', workspaceId);
 
-    // 2. Total associations for client
+    // 2. Global Totals (Check for data in other workspaces)
+    const { count: globalLeads } = await supabase.from('leads').select('*', { count: 'exact', head: true });
+    const { count: globalJunctions } = await supabase.from('client_leads').select('*', { count: 'exact', head: true });
+
+    // 3. Transient Memory Store Check (See if data is trapped in Vercel memory)
+    const memoryLeads = dbService.getAllLeads(workspaceId as string).length;
+
+    // 4. Total associations for client
     let clientAssocCount = 0;
     if (clientId && typeof clientId === 'string') {
       const { count } = await supabase
@@ -90,7 +112,7 @@ dataRouter.get('/production-audit', async (req: Request, res: Response) => {
       clientAssocCount = count || 0;
     }
 
-    // 3. Verify specific lead IDs if provided
+    // 5. Verify specific lead IDs if provided
     let leadVerification: any = null;
     if (leadIds && typeof leadIds === 'string') {
       const idList = leadIds.split(',').map(id => id.trim());
@@ -108,28 +130,32 @@ dataRouter.get('/production-audit', async (req: Request, res: Response) => {
         requestedCount: idList.length,
         foundInLeads: foundLeads?.length || 0,
         foundInJunctions: foundJunctions?.length || 0,
-        junctionDetails: foundJunctions?.slice(0, 5) // Sample
+        junctionDetails: foundJunctions?.slice(0, 5)
       };
     }
 
-    // 4. Sample leads from workspace to check normalization
+    // 6. Sample leads from workspace
     const { data: sampleLeads } = await supabase
       .from('leads')
-      .select('id, profile_url, created_at')
+      .select('id, profile_url, workspace_id, created_at')
       .eq('workspace_id', workspaceId)
       .limit(5);
 
     res.json({
       timestamp: new Date().toISOString(),
+      env,
       workspaceId,
       clientId,
       wsLeadCount: wsLeadCount || 0,
+      globalLeads,
+      globalJunctions,
+      memoryLeads,
       clientAssocCount,
       leadVerification,
       sampleLeads
     });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message, stack: err.stack });
   }
 });
 
@@ -1107,10 +1133,10 @@ dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Resp
           }
         }
       }
-    } else if (process.env.NODE_ENV === 'test' || process.env.VITE_API_BASE_URL) {
+    } else if (process.env.NODE_ENV === 'test') {
         console.warn('Database unavailable for lead persistence (Test Mode - OK)');
     } else {
-      throw new Error('Database unavailable for lead persistence.');
+      throw new Error('Database service unavailable: Leads could not be persisted to the cloud. Please verify SUPABASE_SERVICE_ROLE_KEY.');
     }
 
     res.json({
