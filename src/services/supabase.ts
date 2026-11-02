@@ -214,8 +214,8 @@ export function getSupabaseClient(): SupabaseClient | null {
 // Cached client accessor
 export const supabase: SupabaseClient | null = getSupabaseClient();
 
-if (!supabase) {
-  console.error('[Supabase Error] supabase client is null at initialization.', {
+if (!supabase && isSupabaseConfigured) {
+  console.error('[Supabase Error] supabase client is null at initialization, but configuration appears valid.', {
       url: getSupabaseUrl(),
       hasKey: !!getSupabaseAnonKey(),
   });

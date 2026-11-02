@@ -17,6 +17,7 @@ import {
 } from './services/auth';
 import { RefreshCw } from 'lucide-react';
 import { supabase } from './services/supabase';
+import { useAuthStartup } from './hooks/useAuthStartup';
 
 import { TopBar } from './components/TopBar';
 import { Sidebar, NavTab } from './components/Sidebar';
@@ -48,6 +49,16 @@ export default function App() {
     );
   }
 
+  if (startup.state === 'ERROR') {
+      return (
+        <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white space-y-4 font-sans">
+          <p className="text-xl font-bold">Startup Error</p>
+          <p className="text-sm text-slate-400">{startup.error}</p>
+          <button className="bg-blue-600 px-4 py-2 rounded" onClick={() => window.location.reload()}>Retry</button>
+        </div>
+      );
+  }
+
   const [currentPath, setCurrentPath] = useState<string>(() =>
     typeof window !== 'undefined' ? window.location.pathname + window.location.search : '/'
   );
@@ -68,15 +79,14 @@ export default function App() {
   };
 
   // Auth State
-  const [user, setUser] = useState<User | null>(null);
-  const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
-  const [onboarded, setOnboarded] = useState<boolean>(false);
-
-  // Multi-Tenant State
-  const [organization, setOrganization] = useState<Organization | null>(null);
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
-  const [activeWorkspace, setActiveWorkspace] = useState<Workspace | null>(null);
-
+  const startup = useAuthStartup();
+  const user = startup.user;
+  const organization = startup.organization;
+  const workspaces = startup.workspaces;
+  const activeWorkspace = startup.activeWorkspace;
+  const isAuthLoading = startup.state === 'INITIALIZING' || startup.state === 'AUTHENTICATING' || startup.state === 'RESOLVING_ORGANIZATION' || startup.state === 'RESOLVING_WORKSPACE';
+  const onboarded = startup.state === 'READY';
+  
   // Data State
   const [activeTab, setActiveTab] = useState<NavTab>('finder');
   const [clients, setClients] = useState<Client[]>([]);
@@ -107,55 +117,13 @@ export default function App() {
   // Modal State
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [exportLeads, setExportLeads] = useState<LeadRecord[]>([]);
-
-  // 1. Auth & Onboarding Lifecycle
+  
+  // Load workspace data when activeWorkspace changes
   useEffect(() => {
-    console.log('[Startup] Auth lifecycle started');
-    if (!supabase) {
-      console.error('[App Error] Supabase client is null. Cannot initialize Auth.');
-      setIsAuthLoading(false);
-      return;
+    if (activeWorkspace) {
+        loadWorkspaceData(activeWorkspace.id);
     }
-
-    console.log('[Startup] Initializing auth listener...');
-    const unsubscribe = initAuthListener(async (sessionUser) => {
-      console.log('[Startup] Auth listener: User resolved', { email: sessionUser.email });
-      setUser(sessionUser);
-      if (sessionUser) {
-        try {
-          console.log('[Startup] Onboarding started');
-          const onboardData = await SupabaseDataService.onboardUser();
-          console.log('[Startup] Onboarding successful', { org: onboardData.organization.id });
-          setOrganization(onboardData.organization);
-          setWorkspaces(onboardData.workspaces);
-          setOnboarded(true);
-
-          if (onboardData.workspaces.length > 0) {
-            const ws = onboardData.workspaces[0];
-            console.log('[Startup] Workspace resolved', { wsId: ws.id });
-            setActiveWorkspace(ws);
-            loadWorkspaceData(ws.id);
-          }
-        } catch (err) {
-          console.error('[Startup] Onboarding failed:', err);
-        }
-      }
-      console.log('[Startup] Auth lifecycle: Auth Loading set to false');
-      setIsAuthLoading(false);
-    }, () => {
-      console.log('[Startup] Auth listener: Signed out / Failed');
-      setUser(null);
-      setOrganization(null);
-      setWorkspaces([]);
-      setActiveWorkspace(null);
-      setOnboarded(false);
-      setIsAuthLoading(false);
-    });
-    return () => {
-        console.log('[Startup] Cleaning up auth listener');
-        unsubscribe();
-    };
-  }, []);
+  }, [activeWorkspace?.id]);
 
   const loadWorkspaceData = async (wsId: string) => {
     setIsLoadingData(true);
