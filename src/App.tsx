@@ -40,6 +40,8 @@ export function normalizePath(rawPath: string): string {
 }
 
 export default function App() {
+  const startup = useAuthStartup();
+
   if (!supabase) {
     return (
       <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white space-y-4 font-sans">
@@ -79,7 +81,6 @@ export default function App() {
   };
 
   // Auth State
-  const startup = useAuthStartup();
   const user = startup.user;
   const organization = startup.organization;
   const workspaces = startup.workspaces;
