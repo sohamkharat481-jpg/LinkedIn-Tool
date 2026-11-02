@@ -6,12 +6,27 @@
  * In local development or same-origin mode, it falls back to relative paths ('').
  */
 export const getApiBaseUrl = (): string => {
+  // Try Vite-specific environment access first
+  try {
+    // @ts-ignore
+    if (typeof import.meta !== 'undefined' && import.meta.env) {
+      // @ts-ignore
+      const customUrl = import.meta.env.VITE_API_BASE_URL;
+      if (customUrl && typeof customUrl === 'string' && customUrl.trim().length > 0) {
+        return customUrl.trim().replace(/\/+$/, '');
+      }
+    }
+  } catch (e) {
+    // ignore
+  }
+
   if (typeof window !== 'undefined') {
     const customUrl = (window as any).__VITE_API_BASE_URL__ || (window as any)?.__ENV__?.VITE_API_BASE_URL;
     if (customUrl && typeof customUrl === 'string' && customUrl.trim().length > 0) {
       return customUrl.trim().replace(/\/+$/, '');
     }
   }
+  
   if (typeof process !== 'undefined' && process.env) {
     const customUrl = process.env.VITE_API_BASE_URL;
     if (customUrl && typeof customUrl === 'string' && customUrl.trim().length > 0) {

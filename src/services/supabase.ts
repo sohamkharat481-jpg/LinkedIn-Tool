@@ -3,26 +3,55 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 // Resolve Supabase environment variables from server or client runtime safely
 export const getSupabaseUrl = (): string => {
   let url = '';
-  if (typeof process !== 'undefined' && process.env) {
-    url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+  
+  // Try Vite-specific environment access first (replaced at build time for client)
+  try {
+    // @ts-ignore
+    if (typeof import.meta !== 'undefined' && import.meta.env) {
+      // @ts-ignore
+      url = import.meta.env.VITE_SUPABASE_URL || import.meta.env.SUPABASE_URL;
+    }
+  } catch (e) {
+    // ignore
   }
+
+  // Fallback to process.env (for server-side and dev)
+  if (!url && typeof process !== 'undefined' && process.env) {
+    url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
+  }
+
+  // Last resort: check window properties (for runtime injection if any)
   if (!url && typeof window !== 'undefined') {
     url = (window as any).__SUPABASE_URL__ || (window as any)?.__ENV__?.VITE_SUPABASE_URL || '';
   }
+
   return (url || '').trim();
 };
 
 export const getSupabaseAnonKey = (): string => {
   let key = '';
-  if (typeof process !== 'undefined' && process.env) {
-    key =
-      process.env.SUPABASE_ANON_KEY ||
-      process.env.VITE_SUPABASE_ANON_KEY ||
-      '';
+
+  // Try Vite-specific environment access first
+  try {
+    // @ts-ignore
+    if (typeof import.meta !== 'undefined' && import.meta.env) {
+      // @ts-ignore
+      key = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.SUPABASE_ANON_KEY;
+    }
+  } catch (e) {
+    // ignore
   }
+
+  // Fallback to process.env
+  if (!key && typeof process !== 'undefined' && process.env) {
+    key = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
+  }
+
+  // Last resort: check window properties
   if (!key && typeof window !== 'undefined') {
     key = (window as any).__SUPABASE_ANON_KEY || (window as any)?.__ENV__?.VITE_SUPABASE_ANON_KEY || '';
   }
+
   return (key || '').trim();
 };
 
