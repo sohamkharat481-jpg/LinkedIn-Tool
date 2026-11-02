@@ -51,7 +51,7 @@ test('App.tsx integrates unauthenticated routing and path normalization for /pri
 
   // Confirm route handling occurs before login block
   const privacyRouteIndex = appContent.indexOf("normalizedPath === '/privacy'");
-  const loginBlockIndex = appContent.indexOf('if (!firebaseUser)');
+  const loginBlockIndex = appContent.indexOf('if (!user)');
   assert.ok(privacyRouteIndex < loginBlockIndex, '/privacy route check must precede the authentication guard');
 });
 

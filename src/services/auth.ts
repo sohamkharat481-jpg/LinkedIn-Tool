@@ -47,17 +47,32 @@ export const supabaseSignUp = async (email: string, password: string, fullName: 
 
 export const supabaseGoogleSignIn = async () => {
   if (!supabase) throw new Error('Supabase client not initialized');
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://linked-in-tool-beta.vercel.app';
+  const redirectUrl = `${origin}/auth/callback`;
+  
+  console.log('[OAuth Trace] Initiating Google OAuth request:', {
+    provider: 'google',
+    redirectTo: redirectUrl,
+    timestamp: new Date().toISOString()
+  });
+
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: {
-      redirectTo: window.location.origin,
+      redirectTo: redirectUrl,
       queryParams: {
         access_type: 'offline',
         prompt: 'consent'
       }
     }
   });
-  if (error) throw error;
+  if (error) {
+    console.error('[OAuth Error] signInWithOAuth failed:', error.message);
+    if (error.message?.includes('Unsupported provider') || error.message?.includes('not enabled')) {
+      throw new Error('Google Sign-In is not enabled in your Supabase project. Please enable Google Auth in the Supabase Dashboard under Authentication -> Providers.');
+    }
+    throw error;
+  }
   return data;
 };
 

@@ -88,7 +88,8 @@ export default function App() {
   const user = startup.user;
   const organization = startup.organization;
   const workspaces = startup.workspaces;
-  const activeWorkspace = startup.activeWorkspace;
+  const [selectedWorkspace, setSelectedWorkspace] = useState<Workspace | null>(null);
+  const activeWorkspace = selectedWorkspace || startup.activeWorkspace;
   const isAuthLoading = startup.state === 'INITIALIZING' || startup.state === 'AUTHENTICATING' || startup.state === 'RESOLVING_ORGANIZATION' || startup.state === 'RESOLVING_WORKSPACE';
   const onboarded = startup.state === 'READY';
   
@@ -130,6 +131,14 @@ export default function App() {
     }
   }, [activeWorkspace?.id]);
 
+  // Clean up /auth/callback URL path after successful OAuth startup
+  useEffect(() => {
+    if (startup.state === 'READY' && typeof window !== 'undefined' && window.location.pathname.startsWith('/auth/callback')) {
+      window.history.replaceState({}, '', '/');
+      setCurrentPath('/');
+    }
+  }, [startup.state]);
+
   const loadWorkspaceData = async (wsId: string) => {
     setIsLoadingData(true);
     setDataError(null);
@@ -158,7 +167,7 @@ export default function App() {
   const handleSelectWorkspace = (wsId: string) => {
     const ws = workspaces.find(w => w.id === wsId);
     if (ws) {
-      setActiveWorkspace(ws);
+      setSelectedWorkspace(ws);
       loadWorkspaceData(wsId);
     }
   };
