@@ -2,12 +2,17 @@ import React from 'react';
 import { FileText, ArrowLeft, ShieldAlert, Mail, CheckCircle2, AlertTriangle, Scale, Lock } from 'lucide-react';
 
 interface TermsOfServiceViewProps {
+  onBack?: () => void;
   onNavigateHome?: () => void;
   onNavigateTo?: (path: string) => void;
 }
 
-export const TermsOfServiceView: React.FC<TermsOfServiceViewProps> = ({ onNavigateHome, onNavigateTo }) => {
+export const TermsOfServiceView: React.FC<TermsOfServiceViewProps> = ({ onBack, onNavigateHome, onNavigateTo }) => {
   const handleHomeClick = () => {
+    if (onBack) {
+        onBack();
+        return;
+    }
     if (onNavigateHome) {
       onNavigateHome();
     } else {

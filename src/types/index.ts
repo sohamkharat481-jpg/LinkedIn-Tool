@@ -80,6 +80,7 @@ export type InstagramVerificationStatus = 'Verified' | 'Needs Review' | 'Unverif
 
 export interface LeadRecord {
   id: string;
+  organizationId: string;
   workspaceId: string;
   clientId: string;
   searchId?: string;
@@ -129,6 +130,7 @@ export interface LeadRecord {
 
 export interface Client {
   id: string;
+  organizationId: string;
   workspaceId: string;
   name: string;
   niche: string;
@@ -141,6 +143,7 @@ export interface Client {
 
 export interface SearchHistoryRecord {
   id: string;
+  organizationId: string;
   workspaceId: string;
   clientId: string;
   clientName: string;
@@ -154,14 +157,52 @@ export interface SearchHistoryRecord {
   leads?: LeadRecord[];
 }
 
+export interface Organization {
+  id: string;
+  name: string;
+  description?: string;
+  ownerId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type TeamMemberRole = 'owner' | 'admin' | 'member';
+
+export interface TeamMember {
+  id: string;
+  organizationId: string;
+  userId: string;
+  role: TeamMemberRole;
+  email?: string;
+  fullName?: string;
+  avatarUrl?: string;
+  createdAt: string;
+}
+
+export type InvitationStatus = 'pending' | 'accepted' | 'revoked' | 'expired';
+
+export interface TeamInvitation {
+  id: string;
+  organizationId: string;
+  email: string;
+  role: TeamMemberRole;
+  invitedBy: string;
+  status: InvitationStatus;
+  token: string;
+  expiresAt: string;
+  createdAt: string;
+}
+
 export interface Workspace {
   id: string;
+  organizationId: string;
   name: string;
   description: string;
 }
 
 export interface GoogleIntegration {
   id: string;
+  organizationId: string;
   workspaceId: string;
   clientId: string;
   spreadsheetId: string;
@@ -172,6 +213,7 @@ export interface GoogleIntegration {
 
 export interface ExportHistoryRecord {
   id: string;
+  organizationId: string;
   workspaceId: string;
   clientId: string;
   spreadsheetId: string;

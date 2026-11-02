@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { User as FirebaseUser } from 'firebase/auth';
+import { User } from '@supabase/supabase-js';
 import { LeadRecord } from '../types';
 import { exportLeadsToGoogleSheet } from '../services/sheetsExport';
 import { googleSignIn, getCachedAccessToken, setCachedAccessToken } from '../services/auth';
@@ -14,8 +14,8 @@ interface GoogleSheetsExportModalProps {
   leadsToExport: LeadRecord[];
   activeWorkspaceId?: string;
   activeClientId?: string;
-  currentUser: FirebaseUser | null;
-  onGoogleAuthSuccess: (user: FirebaseUser, token: string) => void;
+  currentUser: User | null;
+  onGoogleAuthSuccess: (user: User, token: string) => void;
   existingSpreadsheetId?: string;
   onExportSuccess?: (spreadsheetId: string, spreadsheetUrl: string, addedCount: number, skippedCount: number) => void;
 }
@@ -55,15 +55,15 @@ export const GoogleSheetsExportModal: React.FC<GoogleSheetsExportModalProps> = (
 
       if (activeWorkspaceId && activeClientId) {
         setExportStepMessage('Retrieving authoritative leads for client from database...');
-        const authData = await SupabaseDataService.getExportLeads(activeWorkspaceId, activeClientId);
-        if (authData && Array.isArray(authData.leads) && authData.leads.length > 0) {
+        const leads = await SupabaseDataService.getAllLeads(activeWorkspaceId, activeClientId);
+        if (leads && leads.length > 0) {
           // If specific leads were explicitly selected, filter by selection, otherwise use all authoritative leads for client
-          if (leadsToExport.length > 0 && leadsToExport.length < authData.leads.length) {
+          if (leadsToExport.length > 0 && leadsToExport.length < leads.length) {
             const selectedSet = new Set(leadsToExport.map(l => l.id));
-            const selectedFromAuth = authData.leads.filter(l => selectedSet.has(l.id));
-            finalLeadsToExport = selectedFromAuth.length > 0 ? selectedFromAuth : authData.leads;
+            const selectedFromAuth = leads.filter(l => selectedSet.has(l.id));
+            finalLeadsToExport = selectedFromAuth.length > 0 ? selectedFromAuth : leads;
           } else {
-            finalLeadsToExport = authData.leads;
+            finalLeadsToExport = leads;
           }
         }
       }
@@ -75,11 +75,10 @@ export const GoogleSheetsExportModal: React.FC<GoogleSheetsExportModalProps> = (
       // 2. Check for OAuth Token
       let token = getCachedAccessToken();
       if (!token) {
-        setExportStepMessage('Connecting Google Account via OAuth...');
-        const authRes = await googleSignIn();
-        if (!authRes) throw new Error('Google authentication cancelled or failed.');
-        onGoogleAuthSuccess(authRes.account as any, authRes.accessToken);
-        token = authRes.accessToken;
+        setExportStepMessage('Redirecting to Google for authorization...');
+        await googleSignIn();
+        // Since googleSignIn redirects, the code below won't execute in this session
+        return;
       }
 
       setExportStepMessage('Opening Google Sheets REST API connection...');
@@ -183,7 +182,7 @@ export const GoogleSheetsExportModal: React.FC<GoogleSheetsExportModalProps> = (
                   onClick={handleStartExport}
                   className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-emerald-600/20"
                 >
-                  Export Now
+                  {getCachedAccessToken() ? 'Export Now' : 'Connect Google & Export'}
                 </button>
               </div>
             </div>

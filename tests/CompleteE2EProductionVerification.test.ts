@@ -9,7 +9,7 @@ import {
   clearWorkspaceAuthorizations,
   getDeterministicWorkspaceId
 } from '../src/server/serverAuthService';
-import { SupabaseDataService, setAuthTokenProvider } from '../src/services/supabaseDataService';
+import { SupabaseDataService } from '../src/services/supabaseDataService';
 import { dbService } from '../src/services/storage';
 import { WikidataLeadProvider } from '../src/services/leadProviders/WikidataLeadProvider';
 import { exportLeadsToGoogleSheet } from '../src/services/sheetsExport';
@@ -69,7 +69,6 @@ after(() => {
     server.close();
   }
   delete process.env.VITE_API_BASE_URL;
-  setAuthTokenProvider(null);
   clearWorkspaceAuthorizations();
 });
 
@@ -212,7 +211,7 @@ test('Phase 3.1: Execute real search via WikidataLeadProvider for genuine execut
 
   realGeneratedLeads = results.map((r) => ({
     ...r,
-    workspaceId: workspaceA,
+    organizationId: "dummy-org", workspaceId: workspaceA,
     clientId: clientSaaSId
   }));
 });

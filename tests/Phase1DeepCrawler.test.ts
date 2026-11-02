@@ -86,7 +86,7 @@ test('7. Preservation of previously verified data during failed lookup', () => {
 
   const existingLead: LeadRecord = {
     id: 'lead-p1-01',
-    workspaceId: wsId,
+    organizationId: "dummy-org", workspaceId: wsId,
     clientId: clientId,
     fullName: 'Jane Doe',
     headline: 'Consultant',
@@ -110,7 +110,7 @@ test('7. Preservation of previously verified data during failed lookup', () => {
     source: 'Wikidata'
   };
 
-  dbService.saveLeadsForClient(wsId, clientId, [existingLead]);
+  dbService.saveLeadsForClient("test-org", wsId, clientId, [existingLead]);
 
   // Simulate update where discovery fails or yields empty result
   const current = dbService.getLeadsForClient(wsId, clientId)[0];

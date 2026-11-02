@@ -6,8 +6,7 @@ import {
   Workspace,
   GoogleIntegration,
   ExportHistoryRecord,
-  LeadFilter,
-  InstagramVerificationStatus
+  LeadFilter
 } from '../types';
 
 const BASE_STORAGE_KEYS = {
@@ -22,10 +21,6 @@ const BASE_STORAGE_KEYS = {
 };
 
 const getScopedKey = (keyBase: string, workspaceId: string) => `${keyBase}_${workspaceId}`;
-
-const SEED_CLIENTS: Client[] = [];
-const SEED_LEADS: LeadRecord[] = [];
-const SEED_SEARCHES: SearchHistoryRecord[] = [];
 
 // In-Memory Storage & LocalStorage Synchronization
 class StorageService {
@@ -86,9 +81,9 @@ class StorageService {
     this.setItem(BASE_STORAGE_KEYS.ACTIVE_WORKSPACE_ID, id);
   }
 
-  createWorkspace(name: string, description: string): Workspace {
+  createWorkspace(organizationId: string, name: string, description: string): Workspace {
     const id = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `ws-${Date.now()}`;
-    const newWs: Workspace = { id, name, description };
+    const newWs: Workspace = { id, organizationId, name, description };
     const list = this.getWorkspaces();
     list.push(newWs);
     this.setItem(BASE_STORAGE_KEYS.WORKSPACES, list);
@@ -104,7 +99,7 @@ class StorageService {
   // Clients (Isolated per Workspace)
   getClients(workspaceId: string): Client[] {
     const key = getScopedKey(BASE_STORAGE_KEYS.CLIENTS, workspaceId);
-    const clients = this.getItem<Client[]>(key, SEED_CLIENTS) || [];
+    const clients = this.getItem<Client[]>(key, []) || [];
     const allLeads = this.getAllLeads(workspaceId);
     const allSearches = this.getSearches(workspaceId);
     
@@ -120,10 +115,10 @@ class StorageService {
     this.setItem(key, syncedClients);
   }
 
-  createClientWithId(id: string, workspaceId: string, name: string, niche: string, notes: string, createdAt?: string): Client {
+  createClientWithId(id: string, organizationId: string, workspaceId: string, name: string, niche: string, notes: string, createdAt?: string): Client {
     const key = getScopedKey(BASE_STORAGE_KEYS.CLIENTS, workspaceId);
     const newClient: Client = {
-      id, workspaceId, name, niche, notes, 
+      id, organizationId, workspaceId, name, niche, notes, 
       createdAt: createdAt || new Date().toISOString(),
       updatedAt: createdAt || new Date().toISOString(),
       leadsCount: 0, searchesCount: 0
@@ -155,7 +150,7 @@ class StorageService {
   // Searches
   getSearches(workspaceId: string): SearchHistoryRecord[] {
     const key = getScopedKey(BASE_STORAGE_KEYS.SEARCHES, workspaceId);
-    return this.getItem<SearchHistoryRecord[]>(key, SEED_SEARCHES) || [];
+    return this.getItem<SearchHistoryRecord[]>(key, []) || [];
   }
 
   syncSearchesForWorkspace(workspaceId: string, syncedSearches: SearchHistoryRecord[]): void {
@@ -169,11 +164,11 @@ class StorageService {
     this.setItem(key, searches.filter(s => s.clientId !== clientId));
   }
 
-  saveSearchRecord(workspaceId: string, clientId: string, clientName: string, filters: LeadFilter, candidatesFound: number, validLeads: number, duplicatesRemoved: number, finalLeadCount: number, createdBy: string, searchId?: string): SearchHistoryRecord {
+  saveSearchRecord(organizationId: string, workspaceId: string, clientId: string, clientName: string, filters: LeadFilter, candidatesFound: number, validLeads: number, duplicatesRemoved: number, finalLeadCount: number, createdBy: string, searchId?: string): SearchHistoryRecord {
     const key = getScopedKey(BASE_STORAGE_KEYS.SEARCHES, workspaceId);
     const newSearch: SearchHistoryRecord = {
       id: searchId || `search-${Date.now()}`,
-      workspaceId, clientId, clientName, searchDate: new Date().toISOString(),
+      organizationId, workspaceId, clientId, clientName, searchDate: new Date().toISOString(),
       filters, candidatesFound, validLeads, duplicatesRemoved, finalLeadCount, createdBy
     };
     const searches = this.getSearches(workspaceId);
@@ -185,10 +180,10 @@ class StorageService {
   // Leads
   getAllLeads(workspaceId: string): LeadRecord[] {
     const key = getScopedKey(BASE_STORAGE_KEYS.LEADS, workspaceId);
-    return this.getItem<LeadRecord[]>(key, SEED_LEADS) || [];
+    return this.getItem<LeadRecord[]>(key, []) || [];
   }
 
-  saveLeadsForClient(workspaceId: string, clientId: string, newLeads: LeadRecord[]): { added: number; duplicatesSkipped: number } {
+  saveLeadsForClient(organizationId: string, workspaceId: string, clientId: string, newLeads: LeadRecord[]): { added: number; duplicatesSkipped: number } {
     const key = getScopedKey(BASE_STORAGE_KEYS.LEADS, workspaceId);
     const allLeads = this.getAllLeads(workspaceId);
     const existingClientLeads = allLeads.filter((l) => l.clientId === clientId);
@@ -201,7 +196,7 @@ class StorageService {
       if (existingUrls.has(lead.profileUrl.toLowerCase())) {
         duplicatesSkipped++;
       } else {
-        allLeads.unshift({ ...lead, id: lead.id || `lead-${Date.now()}`, workspaceId, clientId });
+        allLeads.unshift({ ...lead, id: lead.id || `lead-${Date.now()}`, organizationId, workspaceId, clientId });
         existingUrls.add(lead.profileUrl.toLowerCase());
         added++;
       }
@@ -270,7 +265,7 @@ class StorageService {
   }
 
   cleanUpDemoData(): void {
-    // No-op: legacy demo data cleanup is no longer required in workspace-scoped storage.
+    // No-op
   }
 
   clearAllData(): void {

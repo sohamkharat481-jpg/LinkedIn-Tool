@@ -10,7 +10,7 @@ interface TopBarProps {
   onSelectClient: (clientId: string) => void;
   providerStatus: ProviderStatusInfo;
   onOpenCreateWorkspace?: () => void;
-  firebaseUser: any;
+  user: any;
   onSignIn: () => Promise<void>;
 }
 
@@ -23,7 +23,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   onSelectClient,
   providerStatus,
   onOpenCreateWorkspace,
-  firebaseUser,
+  user,
   onSignIn
 }) => {
   return (
@@ -80,7 +80,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         </div>
 
         {/* Auth status */}
-        {!firebaseUser && (
+        {!user && (
           <button
             onClick={onSignIn}
             className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors"

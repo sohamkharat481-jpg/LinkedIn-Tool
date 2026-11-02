@@ -51,7 +51,7 @@ test('3. Failed lookup preserves previously verified contact and Instagram detai
 
   const existingLead: LeadRecord = {
     id: 'lead-preserve-01',
-    workspaceId: wsId,
+    organizationId: "dummy-org", workspaceId: wsId,
     clientId: clientId,
     fullName: 'Verified Business Owner',
     headline: 'Consultant',
@@ -76,7 +76,7 @@ test('3. Failed lookup preserves previously verified contact and Instagram detai
     source: 'Wikidata'
   };
 
-  dbService.saveLeadsForClient(wsId, clientId, [existingLead]);
+  dbService.saveLeadsForClient("test-org", wsId, clientId, [existingLead]);
 
   // Simulate a failed re-check or update where new inspection fails or yields Lookup Failed
   // We want to ensure that a lookup failure does not overwrite existing verified contact details with undefined.

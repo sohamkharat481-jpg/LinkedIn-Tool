@@ -2,12 +2,17 @@ import React from 'react';
 import { ShieldCheck, ArrowLeft, Mail, FileText, CheckCircle2, Lock, Database, Globe } from 'lucide-react';
 
 interface PrivacyPolicyViewProps {
+  onBack?: () => void;
   onNavigateHome?: () => void;
   onNavigateTo?: (path: string) => void;
 }
 
-export const PrivacyPolicyView: React.FC<PrivacyPolicyViewProps> = ({ onNavigateHome, onNavigateTo }) => {
+export const PrivacyPolicyView: React.FC<PrivacyPolicyViewProps> = ({ onBack, onNavigateHome, onNavigateTo }) => {
   const handleHomeClick = () => {
+    if (onBack) {
+        onBack();
+        return;
+    }
     if (onNavigateHome) {
       onNavigateHome();
     } else {

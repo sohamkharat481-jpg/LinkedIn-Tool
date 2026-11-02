@@ -1,28 +1,21 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { LeadProviderConfig, Workspace, ProviderStatusInfo, Client } from '../types';
-import { User as FirebaseUser } from 'firebase/auth';
 import {
   Building2,
   Database,
-  Key,
   ShieldCheck,
-  Sparkles,
-  Download,
   CheckCircle2,
-  LogOut,
-  User,
-  RefreshCw,
-  Plus,
-  FileCode,
-  AlertCircle,
-  XCircle,
   Activity,
   Server,
   Clock,
   Zap,
-  Lock
+  Lock,
+  Plus,
+  FileCode,
+  AlertCircle,
+  RefreshCw
 } from 'lucide-react';
-import { googleSignIn, googleSignOut } from '../services/auth';
+import { googleSignIn, googleSignOut, getCachedAccessToken } from '../services/auth';
 import { SupabaseDiagnosticStatus, testSupabaseHealth } from '../services/supabase';
 import { apiUrl } from '../services/apiClient';
 
@@ -393,18 +386,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
           <button
             onClick={async () => {
-              if (currentUser) {
+              if (currentUser && isGoogleConnected) {
                 await googleSignOut();
               } else {
-                const res = await googleSignIn();
-                if (res && onGoogleAuthSuccess) {
-                  onGoogleAuthSuccess(res.account as any, res.accessToken);
-                }
+                await googleSignIn();
               }
             }}
             className="px-4 py-2 bg-white border border-gray-300 hover:bg-gray-100 text-gray-800 text-xs font-bold rounded-xl transition-colors shadow-xs"
           >
-            {currentUser ? 'Disconnect Account' : 'Connect Google Account'}
+            {isGoogleConnected ? 'Disconnect Account' : 'Connect Google Account'}
           </button>
         </div>
       </div>

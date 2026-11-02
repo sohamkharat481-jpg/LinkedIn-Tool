@@ -38,7 +38,7 @@ test('5. Save and reload persistence of enriched contact and Instagram details',
 
   const lead: LeadRecord = {
     id: 'lead-reg-01',
-    workspaceId: wsId,
+    organizationId: "dummy-org", workspaceId: wsId,
     clientId: clientId,
     fullName: 'Test Lead',
     headline: 'Consultant',
@@ -62,7 +62,7 @@ test('5. Save and reload persistence of enriched contact and Instagram details',
     source: 'Wikidata'
   };
 
-  dbService.saveLeadsForClient(wsId, clientId, [lead]);
+  dbService.saveLeadsForClient("test-org", wsId, clientId, [lead]);
   const reloaded = dbService.getLeadsForClient(wsId, clientId)[0];
 
   assert.equal(reloaded.businessEmail, 'info@example.com');

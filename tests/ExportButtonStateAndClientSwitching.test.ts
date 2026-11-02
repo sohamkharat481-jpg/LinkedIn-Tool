@@ -6,7 +6,7 @@ import { getUserSessionTokenKey } from '../src/services/auth';
 
 const CLIENT_DENTAL: Client = {
   id: 'client-dental-clinic-001',
-  workspaceId: 'ws-prod-test-01',
+  organizationId: "dummy-org", workspaceId: 'ws-prod-test-01',
   name: 'Soham Kharat (Dental Clinic)',
   niche: 'Dental Clinic',
   notes: 'Private clinic practice',
@@ -16,7 +16,7 @@ const CLIENT_DENTAL: Client = {
 
 const CLIENT_SAAS: Client = {
   id: 'client-saas-002',
-  workspaceId: 'ws-prod-test-01',
+  organizationId: "dummy-org", workspaceId: 'ws-prod-test-01',
   name: 'soham (SaaS)',
   niche: 'B2B SaaS',
   notes: 'SaaS agency client',
@@ -27,7 +27,7 @@ const CLIENT_SAAS: Client = {
 // Generate 51 synthetic leads strictly associated with CLIENT_SAAS
 const SAAS_LEADS: LeadRecord[] = Array.from({ length: 51 }, (_, i) => ({
   id: `lead-saas-${i + 1}`,
-  workspaceId: 'ws-prod-test-01',
+  organizationId: "dummy-org", workspaceId: 'ws-prod-test-01',
   clientId: CLIENT_SAAS.id,
   fullName: `Executive ${i + 1}`,
   headline: `VP of Growth ${i + 1}`,

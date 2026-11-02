@@ -31,7 +31,7 @@ test('Google Sheets export requires a valid access token', async () => {
       await exportLeadsToGoogleSheet('', 'Test Client', [
         {
           id: 'lead-1',
-          workspaceId: 'ws-1',
+          organizationId: "dummy-org", workspaceId: 'ws-1',
           clientId: 'client-1',
           fullName: 'Jane Doe',
           headline: 'VP Sales',
@@ -106,7 +106,7 @@ test('Google Sheets export verifies actual inserted row count from API response'
     const dummyLeads: any[] = [
       {
         id: 'lead-1',
-        workspaceId: 'ws-1',
+        organizationId: "dummy-org", workspaceId: 'ws-1',
         clientId: 'client-1',
         fullName: 'Jane Doe',
         headline: 'VP Sales',
@@ -123,7 +123,7 @@ test('Google Sheets export verifies actual inserted row count from API response'
       },
       {
         id: 'lead-2',
-        workspaceId: 'ws-1',
+        organizationId: "dummy-org", workspaceId: 'ws-1',
         clientId: 'client-1',
         fullName: 'John Smith',
         headline: 'CTO',

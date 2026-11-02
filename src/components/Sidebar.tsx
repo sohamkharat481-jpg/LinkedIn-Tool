@@ -2,7 +2,7 @@ import React from 'react';
 import { Search, Users, History, Settings, ShieldCheck, Sparkles, Database, AlertCircle, XCircle } from 'lucide-react';
 import { Client, ProviderStatusInfo } from '../types';
 
-export type NavTab = 'finder' | 'clients' | 'history' | 'settings';
+export type NavTab = 'finder' | 'clients' | 'history' | 'team' | 'settings';
 
 interface SidebarProps {
   activeTab: NavTab;
@@ -20,6 +20,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const navItems = [
     { id: 'finder' as NavTab, label: 'Lead Finder', icon: Search },
     { id: 'clients' as NavTab, label: 'Clients', icon: Users },
+    { id: 'team' as NavTab, label: 'Team', icon: ShieldCheck },
     { id: 'history' as NavTab, label: 'Lead History', icon: History },
     { id: 'settings' as NavTab, label: 'Settings', icon: Settings }
   ];

@@ -125,7 +125,7 @@ test('storage and SupabaseDataService persist Instagram profile updates and surv
 
   const testLead: LeadRecord = {
     id: 'lead-test-insta-01',
-    workspaceId: wsId,
+    organizationId: "dummy-org", workspaceId: wsId,
     clientId: clientId,
     fullName: 'Robert Sterling',
     headline: 'Executive Coach',
@@ -144,7 +144,7 @@ test('storage and SupabaseDataService persist Instagram profile updates and surv
   };
 
   // 1. Save lead initially
-  dbService.saveLeadsForClient(wsId, clientId, [testLead]);
+  dbService.saveLeadsForClient("test-org", wsId, clientId, [testLead]);
   const initialLeads = dbService.getLeadsForClient(wsId, clientId);
   assert.equal(initialLeads.length, 1);
   assert.equal(initialLeads[0].instagramUsername, undefined);

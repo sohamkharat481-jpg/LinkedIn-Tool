@@ -8,7 +8,7 @@ import {
   registerWorkspaceAuthorization,
   clearWorkspaceAuthorizations
 } from '../src/server/serverAuthService';
-import { SupabaseDataService, setAuthTokenProvider } from '../src/services/supabaseDataService';
+import { SupabaseDataService } from '../src/services/supabaseDataService';
 import { dbService } from '../src/services/storage';
 
 let server: http.Server;
@@ -38,7 +38,6 @@ after(() => {
     server.close();
   }
   delete process.env.VITE_API_BASE_URL;
-  setAuthTokenProvider(null);
   clearWorkspaceAuthorizations();
 });
 
@@ -177,7 +176,6 @@ test('4. Frontend SupabaseDataService seamlessly routes operations through authe
   registerWorkspaceAuthorization(serviceUser, serviceWs);
 
   const token = createSignedTestToken({ userId: serviceUser, email: 'service@leadfinder.app' });
-  setAuthTokenProvider(() => token);
 
   // Create client via SupabaseDataService (routes through API)
   const client = await SupabaseDataService.createClient(
@@ -423,7 +421,6 @@ test('8. Export leads endpoint returns authoritative leads and diagnostics for s
 
   registerWorkspaceAuthorization(userTenant, tenantWs);
   const token = createSignedTestToken({ userId: userTenant, email: 'owner@tenant-export.com' });
-  setAuthTokenProvider(async () => token);
 
   // 1. Create client
   const clientRes = await fetch(`${baseUrl}/api/workspaces/${tenantWs}/clients`, {
@@ -484,10 +481,10 @@ test('8. Export leads endpoint returns authoritative leads and diagnostics for s
   assert.equal(expLeadsData.leads.length, 2);
   assert.equal(expLeadsData.diagnostics.exportQueryReturnedCount, 2);
 
-  // 4. Test SupabaseDataService.getExportLeads method
-  const exportedResultFromService = await SupabaseDataService.getExportLeads(tenantWs, clientId);
-  assert.ok(exportedResultFromService.leads && Array.isArray(exportedResultFromService.leads));
-  assert.equal(exportedResultFromService.leads.length, 2);
-  assert.ok(exportedResultFromService.leads.some((l) => l.fullName === 'Sundar Pichai'));
-  assert.ok(exportedResultFromService.leads.some((l) => l.fullName === 'Satya Nadella'));
+  // 4. Test SupabaseDataService.getAllLeads method
+  const exportedResultFromService = await SupabaseDataService.getAllLeads(tenantWs, clientId);
+  assert.ok(exportedResultFromService && Array.isArray(exportedResultFromService));
+  assert.equal(exportedResultFromService.length, 2);
+  assert.ok(exportedResultFromService.some((l) => l.fullName === 'Sundar Pichai'));
+  assert.ok(exportedResultFromService.some((l) => l.fullName === 'Satya Nadella'));
 });
