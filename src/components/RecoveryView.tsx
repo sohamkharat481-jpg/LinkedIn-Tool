@@ -88,12 +88,14 @@ export const RecoveryView: React.FC<RecoveryProps> = ({ workspaceId, clientId, a
     
     try {
         let totalAdded = 0;
+        let finalStatusMessage = '';
         
         if (useActiveClient && clientId) {
             // Map ALL found leads to the currently active client
             setStatus(`Mapping ${leadsToMigrate.length} leads to client ${activeClient?.name || clientId}...`);
             const result = await SupabaseDataService.saveLeadsForClient(workspaceId, clientId, leadsToMigrate);
             totalAdded = result.added;
+            finalStatusMessage = result.persistenceMessage;
         } else {
             // Group leads by original clientId to preserve associations
             const leadsByClient = leadsToMigrate.reduce((acc, lead) => {
@@ -107,15 +109,19 @@ export const RecoveryView: React.FC<RecoveryProps> = ({ workspaceId, clientId, a
                 setStatus(`Migrating group for client ${cId}...`);
                 const result = await SupabaseDataService.saveLeadsForClient(workspaceId, cId, leads);
                 totalAdded += result.added;
+                finalStatusMessage = result.persistenceMessage;
             }
         }
         
-        setStatus(`Migration successful: ${totalAdded} leads restored to workspace ${workspaceId}.`);
+        setStatus(`Migration successful: ${totalAdded} leads confirmed in cloud database. ${finalStatusMessage}`);
         setLeadsToMigrate([]); 
         setStats(null);
+        // Alert user to refresh page to see new data in the UI
+        alert('Migration Confirmed!\n\n' + finalStatusMessage + '\n\nPlease refresh your browser to see the restored leads in your Client Directory.');
     } catch (e: any) {
         setStatus(`Migration failed: ${e.message}`);
         console.error('Migration error:', e);
+        alert('Migration Failed: ' + e.message);
     } finally {
         setIsMigrating(false);
     }

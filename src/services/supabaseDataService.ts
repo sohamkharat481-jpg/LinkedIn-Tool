@@ -461,7 +461,7 @@ export class SupabaseDataService {
     const apiRes = await callDataApi<{
       success: boolean;
       added: number;
-      duplicatesSkipped: number;
+      totalClientLeads: number;
       persistenceStatus: LeadPersistenceStatus;
       persistenceMessage: string;
     }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/leads`, {
@@ -469,120 +469,24 @@ export class SupabaseDataService {
       body: JSON.stringify({ clientId, leads: newLeads, searchId })
     });
 
-    if (apiRes.status === 401 || apiRes.status === 403) {
-      throw new Error(apiRes.error || 'Access denied.');
+    if (!apiRes.success) {
+       throw new Error(apiRes.error || 'Failed to save leads to cloud database.');
     }
-    if (apiRes.success && apiRes.data) {
-      const result = {
-        added: apiRes.data.added ?? localResult.added,
-        duplicatesSkipped: apiRes.data.duplicatesSkipped ?? localResult.duplicatesSkipped,
+
+    if (apiRes.data) {
+      return {
+        added: apiRes.data.added,
+        duplicatesSkipped: localResult.duplicatesSkipped,
         persistenceStatus: apiRes.data.persistenceStatus,
         persistenceMessage: apiRes.data.persistenceMessage
       };
-      console.log(`[Diagnostic] Database Persistence: Input Leads: ${newLeads.length}, Persisted: ${result.added}, Skipped Duplicates: ${result.duplicatesSkipped}`);
-      return result;
     }
 
-    if (supabase && newLeads.length > 0) {
-      const client = supabase;
-      const leadRows = newLeads.map((l) => ({
-        id: l.id && UUID_REGEX.test(l.id) ? l.id : generateUuid(),
-        workspace_id: workspaceId,
-        full_name: l.fullName,
-        headline: l.headline,
-        current_job_title: l.currentJobTitle,
-        company_name: l.companyName,
-        location: l.location,
-        profile_url: l.profileUrl,
-        connections_or_followers: l.connectionsOrFollowers,
-        last_activity_date: l.lastActivityDate,
-        source: l.source || 'Wikidata SPARQL Query Service',
-        lead_type: l.leadType || null,
-        business_category: l.businessCategory || null,
-        business_website: l.businessWebsite || null,
-        business_phone: l.businessPhone || null,
-        business_address: l.businessAddress || null,
-        business_city: l.businessCity || null,
-        business_country: l.businessCountry || null,
-        latitude: l.latitude ?? null,
-        longitude: l.longitude ?? null,
-        business_email: l.businessEmail || null,
-        linkedin_profile_url: l.linkedInProfileUrl || null,
-        contact_source: l.contactSource || null,
-        contact_verification_status: l.contactVerificationStatus || null,
-        instagram_username: l.instagramUsername || null,
-        instagram_profile_url: l.instagramProfileUrl || null,
-        instagram_verification_status: l.instagramVerificationStatus || null,
-        instagram_verification_evidence: l.instagramVerificationEvidence || null,
-        instagram_discovery_source: l.instagramDiscoverySource || null,
-        instagram_last_checked_at: l.instagramLastCheckedAt || null,
-        relevance_score: l.relevanceScore ?? null,
-        relevance_explanation: l.relevanceExplanation || null,
-        relevance_breakdown: l.relevanceBreakdown || null,
-        b2b_classification: l.b2bClassification || null,
-        is_deceased: l.isDeceased ?? null,
-        date_of_death: l.dateOfDeath || null,
-        date_of_birth: l.dateOfBirth || null,
-        entity_period: l.entityPeriod || null,
-        active_evidence: l.activeEvidence || null,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      }));
-
-      const persistenceWriter: LeadPersistenceWriter = {
-        async upsertLeads() {
-          const { error: upsertError } = await client
-            .from('leads')
-            .upsert(leadRows, {
-              onConflict: 'workspace_id,profile_url',
-              ignoreDuplicates: true
-            });
-          if (upsertError) return { data: null, error: upsertError };
-
-          const { data, error } = await client
-            .from('leads')
-            .select('id, profile_url')
-            .eq('workspace_id', workspaceId)
-            .in('profile_url', leadRows.map((lead) => lead.profile_url));
-          return { data, error };
-        },
-        async upsertClientLinks(persistedLeads) {
-          const clientLeadRows = persistedLeads.map((lead) => ({
-            id: generateUuid(),
-            workspace_id: workspaceId,
-            client_id: clientId,
-            lead_id: lead.id,
-            search_id: searchId || null,
-            status: 'Not Contacted',
-            notes: '',
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          }));
-
-          const { error } = await client
-            .from('client_leads')
-            .upsert(clientLeadRows, {
-              onConflict: 'client_id,lead_id',
-              ignoreDuplicates: true
-            });
-          if (error) return { confirmedCount: 0, error };
-
-          const { data, error: verificationError } = await client
-            .from('client_leads')
-            .select('lead_id')
-            .eq('workspace_id', workspaceId)
-            .eq('client_id', clientId)
-            .in('lead_id', persistedLeads.map((lead) => lead.id));
-          return {
-            confirmedCount: Array.isArray(data) ? data.length : 0,
-            error: verificationError
-          };
-        }
-      };
-      return persistLeadsAndLinks(localResult, newLeads.length, persistenceWriter);
-    }
-
-    return persistLeadsAndLinks(localResult, newLeads.length);
+    return {
+      ...localResult,
+      persistenceStatus: 'local_only',
+      persistenceMessage: 'Leads saved locally but cloud persistence was not confirmed.'
+    };
   }
 
   /**

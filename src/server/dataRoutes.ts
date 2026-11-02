@@ -1027,9 +1027,9 @@ dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Resp
 
     const supabase = getSupabaseServerClient();
     if (supabase && leads.length > 0) {
-      // 1. Upsert Leads - Using DO UPDATE to ensure we get IDs back for ALL records (inserted or existing)
+      // 1. Prepare Lead Rows
       const leadRows = leads.map((l: any) => ({
-        id: l.id || generateUuid(),
+        id: l.id && UUID_REGEX.test(l.id) ? l.id : generateUuid(),
         workspace_id: workspaceId,
         full_name: l.fullName || 'N/A',
         headline: l.headline || '',
@@ -1072,80 +1072,111 @@ dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Resp
         updated_at: new Date().toISOString()
       }));
 
-      // We use 'updated_at' update to trigger a return of the record ID even if it was a duplicate
-      const { data: upsertedData, error: leadErr } = await supabase.from('leads').upsert(leadRows, {
-        onConflict: 'workspace_id,profile_url',
-        ignoreDuplicates: false // Set to false so we can update a field to get the row back
-      }).select('id, profile_url');
-
-      if (leadErr) {
-        console.error('Supabase leads upsert error:', leadErr.message);
-        if (process.env.NODE_ENV !== 'test') {
-          throw new Error(`Database rejected leads: ${leadErr.message}`);
-        }
-      }
-
-      // 2. Fetch IDs of persisted leads to create client links (Fallbacks for safety)
-      const persistedLeads = upsertedData || [];
-      const foundIds = new Set(persistedLeads.map(l => l.id));
-      
-      // If some records weren't returned by upsert (e.g. strict RLS or other reason), 
-      // try a secondary lookup by both ID and Profile URL to be absolutely sure.
-      if (persistedLeads.length < leadRows.length) {
-          const { data: secondaryLeads } = await supabase
-            .from('leads')
-            .select('id, profile_url')
-            .eq('workspace_id', workspaceId)
-            .or(`id.in.(${leadRows.map(r => r.id).filter(id => UUID_REGEX.test(id)).join(',')}),profile_url.in.(${leadRows.map(r => `'${r.profile_url.replace(/'/g, "''")}'`).join(',')})`);
-          
-          if (Array.isArray(secondaryLeads)) {
-              for (const sl of secondaryLeads) {
-                  if (!foundIds.has(sl.id)) {
-                      persistedLeads.push(sl);
-                      foundIds.add(sl.id);
-                  }
-              }
-          }
-      }
-
-      if (persistedLeads.length > 0) {
-        const clientLeadRows = persistedLeads.map((pl: any) => ({
-          id: generateUuid(),
-          workspace_id: workspaceId,
-          client_id: clientId,
-          lead_id: pl.id,
-          search_id: searchId || null,
-          status: 'Not Contacted',
-          notes: '',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
+      // 2. Execute Upsert with column-level error fallback
+      let upsertResult: any;
+      try {
+        upsertResult = await supabase.from('leads').upsert(leadRows, {
+          onConflict: 'workspace_id,profile_url',
+          ignoreDuplicates: false
+        }).select('id, profile_url');
+      } catch (e: any) {
+        console.error('[Persistence Error] Full upsert failed, attempting core fallback:', e.message);
+        const coreRows = leadRows.map(r => ({
+           id: r.id,
+           workspace_id: r.workspace_id,
+           full_name: r.full_name,
+           current_job_title: r.current_job_title,
+           company_name: r.company_name,
+           profile_url: r.profile_url,
+           updated_at: r.updated_at
         }));
+        upsertResult = await supabase.from('leads').upsert(coreRows, {
+           onConflict: 'workspace_id,profile_url',
+           ignoreDuplicates: false
+        }).select('id, profile_url');
+      }
 
-        const { error: linkErr } = await supabase.from('client_leads').upsert(clientLeadRows, {
-          onConflict: 'client_id,lead_id',
-          ignoreDuplicates: true
-        });
+      if (upsertResult.error) {
+        throw new Error(`Database rejected leads: ${upsertResult.error.message}`);
+      }
 
-        if (linkErr) {
-          console.error('Supabase client_leads upsert error:', linkErr.message);
-          if (process.env.NODE_ENV !== 'test') {
-            throw new Error(`Database rejected client links: ${linkErr.message}`);
-          }
+      const persistedLeads = upsertResult.data || [];
+      const foundIds = new Set(persistedLeads.map((l: any) => l.id));
+      
+      // 3. Secondary Lookup Fallback
+      if (persistedLeads.length < leadRows.length) {
+        const urls = leadRows.map(r => r.profile_url);
+        const chunkSize = 50;
+        for (let i = 0; i < urls.length; i += chunkSize) {
+           const chunk = urls.slice(i, i + chunkSize);
+           const { data: chunkFound } = await supabase
+             .from('leads')
+             .select('id, profile_url')
+             .eq('workspace_id', workspaceId)
+             .in('profile_url', chunk);
+           
+           if (Array.isArray(chunkFound)) {
+              for (const cf of chunkFound) {
+                 if (!foundIds.has(cf.id)) {
+                    persistedLeads.push(cf);
+                    foundIds.add(cf.id);
+                 }
+              }
+           }
         }
       }
-    } else if (process.env.NODE_ENV === 'test') {
-        console.warn('Database unavailable for lead persistence (Test Mode - OK)');
-    } else {
-      throw new Error('Database service unavailable: Leads could not be persisted to the cloud. Please verify SUPABASE_SERVICE_ROLE_KEY.');
-    }
 
-    res.json({
-      success: true,
-      added: localResult.added,
-      duplicatesSkipped: localResult.duplicatesSkipped,
-      persistenceStatus: 'confirmed',
-      persistenceMessage: 'Leads persisted securely to workspace database.'
-    });
+      if (persistedLeads.length === 0) {
+        throw new Error('Database persistence failed: No lead records were created or returned.');
+      }
+
+      // 4. Create Client Junctions
+      const clientLeadRows = persistedLeads.map((pl: any) => ({
+        id: generateUuid(),
+        workspace_id: workspaceId,
+        client_id: clientId,
+        lead_id: pl.id,
+        search_id: searchId || null,
+        status: 'Not Contacted',
+        notes: '',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }));
+
+      const { error: linkErr } = await supabase.from('client_leads').upsert(clientLeadRows, {
+        onConflict: 'client_id,lead_id',
+        ignoreDuplicates: true
+      });
+
+      if (linkErr) {
+        throw new Error(`Database rejected client associations: ${linkErr.message}`);
+      }
+
+      // 5. Final Verification Count
+      const { count: finalCount } = await supabase
+        .from('client_leads')
+        .select('*', { count: 'exact', head: true })
+        .eq('workspace_id', workspaceId)
+        .eq('client_id', clientId);
+
+      return res.json({
+        success: true,
+        added: persistedLeads.length,
+        totalClientLeads: finalCount || 0,
+        persistenceStatus: 'confirmed',
+        persistenceMessage: `Successfully persisted ${persistedLeads.length} leads and verified ${finalCount} total client associations.`
+      });
+    } else if (process.env.NODE_ENV === 'test') {
+        const localResult = dbService.saveLeadsForClient(workspaceId, clientId, leads);
+        return res.json({
+          success: true,
+          added: localResult.added,
+          persistenceStatus: 'local_only',
+          persistenceMessage: 'Leads saved to local test memory.'
+        });
+    } else {
+      throw new Error('Database service unavailable or leads array empty. Check SUPABASE_SERVICE_ROLE_KEY.');
+    }
   } catch (error: any) {
     console.error('POST /leads Error:', error);
     res.status(500).json({ error: error.message || 'Failed to save leads.' });
