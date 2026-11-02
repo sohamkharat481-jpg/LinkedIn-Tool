@@ -1074,26 +1074,33 @@ dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Resp
 
       // 2. Execute Upsert with column-level error fallback
       let upsertResult: any;
-      try {
-        upsertResult = await supabase.from('leads').upsert(leadRows, {
-          onConflict: 'workspace_id,profile_url',
-          ignoreDuplicates: false
-        }).select('id, profile_url');
-      } catch (e: any) {
-        console.error('[Persistence Error] Full upsert failed, attempting core fallback:', e.message);
-        const coreRows = leadRows.map(r => ({
-           id: r.id,
-           workspace_id: r.workspace_id,
-           full_name: r.full_name,
-           current_job_title: r.current_job_title,
-           company_name: r.company_name,
-           profile_url: r.profile_url,
-           updated_at: r.updated_at
-        }));
-        upsertResult = await supabase.from('leads').upsert(coreRows, {
-           onConflict: 'workspace_id,profile_url',
-           ignoreDuplicates: false
-        }).select('id, profile_url');
+      upsertResult = await supabase.from('leads').upsert(leadRows, {
+        onConflict: 'workspace_id,profile_url',
+        ignoreDuplicates: false
+      }).select('id, profile_url');
+
+      // Check for schema/column errors that don't throw but return in .error
+      if (upsertResult.error) {
+        const errMsg = upsertResult.error.message || '';
+        const isColumnError = errMsg.includes('column') || errMsg.includes('schema cache');
+        
+        if (isColumnError) {
+          console.warn('[Persistence Warning] Schema mismatch detected, attempting core fallback:', errMsg);
+          const coreRows = leadRows.map(r => ({
+             id: r.id,
+             workspace_id: r.workspace_id,
+             full_name: r.full_name,
+             current_job_title: r.current_job_title,
+             company_name: r.company_name,
+             profile_url: r.profile_url,
+             updated_at: r.updated_at
+          }));
+          
+          upsertResult = await supabase.from('leads').upsert(coreRows, {
+             onConflict: 'workspace_id,profile_url',
+             ignoreDuplicates: false
+          }).select('id, profile_url');
+        }
       }
 
       if (upsertResult.error) {
