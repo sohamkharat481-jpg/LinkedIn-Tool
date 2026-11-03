@@ -129,6 +129,11 @@ class StorageService {
     return newClient;
   }
 
+  addClient(workspaceId: string, name: string, niche: string, notes: string): Client {
+    const id = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `client-${Date.now()}`;
+    return this.createClientWithId(id, '', workspaceId, name, niche, notes);
+  }
+
   updateClient(workspaceId: string, clientId: string, updates: { name?: string; niche?: string; notes?: string }): Client {
     const key = getScopedKey(BASE_STORAGE_KEYS.CLIENTS, workspaceId);
     const clients = this.getClients(workspaceId);

@@ -18,6 +18,8 @@ import { RefreshCw } from 'lucide-react';
 import { supabase } from './services/supabase';
 import { useAuthStartup } from './hooks/useAuthStartup';
 
+import { apiUrl } from './services/apiClient';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { TopBar } from './components/TopBar';
 import { Sidebar, NavTab } from './components/Sidebar';
 import { DashboardView } from './components/DashboardView';
@@ -282,50 +284,52 @@ export default function App() {
           )}
 
           {activeTab === 'clients' && (
-            <ClientManagementView
-              clients={clients}
-              activeWorkspaceId={activeWorkspace?.id || ''}
-              activeClient={activeClient}
-              onSelectClient={handleSelectClient}
-              onCreateClient={handleCreateClient}
-              onUpdateClient={async (clientId, updates) => {
-                  if (!activeWorkspace) return;
-                  await SupabaseDataService.updateClient(activeWorkspace.id, clientId, updates);
-                  await loadWorkspaceData(activeWorkspace.id);
-              }}
-              onDeleteClient={async (clientId) => {
-                  if (!activeWorkspace) return;
-                  await SupabaseDataService.deleteClient(activeWorkspace.id, clientId);
-                  await loadWorkspaceData(activeWorkspace.id);
-              }}
-              getLeadsForClient={(cId) => allLeads.filter(l => l.clientId === cId)}
-              getSearchesForClient={(cId) => allSearches.filter(s => s.clientId === cId)}
-              onUpdateLeadStatus={async (leadId, status) => {
-                  if (!activeWorkspace) return;
-                  await SupabaseDataService.updateLeadStatus(activeWorkspace.id, leadId, status);
-                  await loadWorkspaceData(activeWorkspace.id);
-              }}
-              onUpdateLeadNotes={async (leadId, notes) => {
-                  if (!activeWorkspace) return;
-                  await SupabaseDataService.updateLeadNotes(activeWorkspace.id, leadId, notes);
-                  await loadWorkspaceData(activeWorkspace.id);
-              }}
-              onUpdateLeadInstagram={async (leadId, data) => {
-                  if (!activeWorkspace) return;
-                  await SupabaseDataService.updateLeadInstagram(activeWorkspace.id, leadId, data);
-                  await loadWorkspaceData(activeWorkspace.id);
-              }}
-              onDeleteLeads={async (leadIds) => {
-                  if (!activeWorkspace) return;
-                  await SupabaseDataService.deleteSelectedLeads(activeWorkspace.id, leadIds);
-                  await loadWorkspaceData(activeWorkspace.id);
-              }}
-              onExportToSheets={(selected) => { setExportLeads(selected); setIsExportModalOpen(true); }}
-              isGoogleConnected={isGoogleConnected}
-              supabaseError={dataError}
-              isLoading={isLoadingData}
-              onRetry={() => activeWorkspace && loadWorkspaceData(activeWorkspace.id)}
-            />
+            <ErrorBoundary>
+              <ClientManagementView
+                clients={clients}
+                activeWorkspaceId={activeWorkspace?.id || ''}
+                activeClient={activeClient}
+                onSelectClient={handleSelectClient}
+                onCreateClient={handleCreateClient}
+                onUpdateClient={async (clientId, updates) => {
+                    if (!activeWorkspace) return;
+                    await SupabaseDataService.updateClient(activeWorkspace.id, clientId, updates);
+                    await loadWorkspaceData(activeWorkspace.id);
+                }}
+                onDeleteClient={async (clientId) => {
+                    if (!activeWorkspace) return;
+                    await SupabaseDataService.deleteClient(activeWorkspace.id, clientId);
+                    await loadWorkspaceData(activeWorkspace.id);
+                }}
+                getLeadsForClient={(cId) => allLeads.filter(l => l.clientId === cId)}
+                getSearchesForClient={(cId) => allSearches.filter(s => s.clientId === cId)}
+                onUpdateLeadStatus={async (leadId, status) => {
+                    if (!activeWorkspace) return;
+                    await SupabaseDataService.updateLeadStatus(activeWorkspace.id, leadId, status);
+                    await loadWorkspaceData(activeWorkspace.id);
+                }}
+                onUpdateLeadNotes={async (leadId, notes) => {
+                    if (!activeWorkspace) return;
+                    await SupabaseDataService.updateLeadNotes(activeWorkspace.id, leadId, notes);
+                    await loadWorkspaceData(activeWorkspace.id);
+                }}
+                onUpdateLeadInstagram={async (leadId, data) => {
+                    if (!activeWorkspace) return;
+                    await SupabaseDataService.updateLeadInstagram(activeWorkspace.id, leadId, data);
+                    await loadWorkspaceData(activeWorkspace.id);
+                }}
+                onDeleteLeads={async (leadIds) => {
+                    if (!activeWorkspace) return;
+                    await SupabaseDataService.deleteSelectedLeads(activeWorkspace.id, leadIds);
+                    await loadWorkspaceData(activeWorkspace.id);
+                }}
+                onExportToSheets={(selected) => { setExportLeads(selected); setIsExportModalOpen(true); }}
+                isGoogleConnected={isGoogleConnected}
+                supabaseError={dataError}
+                isLoading={isLoadingData}
+                onRetry={() => activeWorkspace && loadWorkspaceData(activeWorkspace.id)}
+              />
+            </ErrorBoundary>
           )}
 
           {activeTab === 'history' && <SearchHistoryView searches={allSearches} />}

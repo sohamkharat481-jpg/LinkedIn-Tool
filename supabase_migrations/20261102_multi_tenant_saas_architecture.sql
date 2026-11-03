@@ -1,42 +1,32 @@
+-- ==============================================================================
 -- Migration: 20261102_multi_tenant_saas_architecture.sql
--- Description: Implements Multi-Tenant Organization architecture with Teams and Roles.
+-- Description: Production-Safe Multi-Tenant SaaS Architecture with RLS and Teams
+-- Target: Supabase PostgreSQL (Project: dbhvslswvmrwuuzwtxzs)
+-- ==============================================================================
 
--- 1. Create Organizations Table
+-- ------------------------------------------------------------------------------
+-- 1. Create Core Multi-Tenant Tables (Idempotent)
+-- ------------------------------------------------------------------------------
+
 CREATE TABLE IF NOT EXISTS public.organizations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL,
     description TEXT,
-    owner_id TEXT NOT NULL, -- Firebase UID or Supabase UUID
+    owner_id TEXT NOT NULL, -- Supabase auth.uid()
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 2. Create Team Members Table (Roles: owner, admin, member)
 CREATE TABLE IF NOT EXISTS public.team_members (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
-    user_id TEXT NOT NULL, -- auth.uid()
+    user_id TEXT NOT NULL, -- Supabase auth.uid()
     role TEXT NOT NULL CHECK (role IN ('owner', 'admin', 'member')),
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(organization_id, user_id)
 );
 
--- 3. Add organization_id to existing tables
-ALTER TABLE public.workspaces ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES public.organizations(id) ON DELETE CASCADE;
-ALTER TABLE public.users ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES public.organizations(id) ON DELETE SET NULL;
-ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES public.organizations(id) ON DELETE CASCADE;
-ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES public.organizations(id) ON DELETE CASCADE;
-ALTER TABLE public.lead_searches ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES public.organizations(id) ON DELETE CASCADE;
-ALTER TABLE public.google_integrations ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES public.organizations(id) ON DELETE CASCADE;
-ALTER TABLE public.export_history ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES public.organizations(id) ON DELETE CASCADE;
-ALTER TABLE public.instagram_integrations ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES public.organizations(id) ON DELETE CASCADE;
-
--- 3.1 Unique Constraints for multi-tenancy
-ALTER TABLE public.leads DROP CONSTRAINT IF EXISTS leads_profile_url_workspace_id_client_id_key;
-ALTER TABLE public.leads ADD CONSTRAINT leads_profile_url_workspace_id_client_id_key UNIQUE (profile_url, workspace_id, client_id);
-
--- 4. Create Invitations Table
 CREATE TABLE IF NOT EXISTS public.team_invitations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
@@ -50,151 +40,494 @@ CREATE TABLE IF NOT EXISTS public.team_invitations (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 5. Data Migration (Backfill for existing workspace-based architecture)
+-- ------------------------------------------------------------------------------
+-- 2. Add Organization Tenancy Columns (With Safe Restrict / Set Null References)
+-- ------------------------------------------------------------------------------
+
+-- Workspaces: ON DELETE RESTRICT prevents accidental destruction of workspaces
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'workspaces') THEN
+        ALTER TABLE public.workspaces 
+            ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES public.organizations(id) ON DELETE RESTRICT;
+    END IF;
+END $$;
+
+-- Users: ON DELETE SET NULL retains user record even if org is detached
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'users') THEN
+        ALTER TABLE public.users 
+            ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES public.organizations(id) ON DELETE SET NULL;
+    END IF;
+END $$;
+
+-- Clients: ON DELETE RESTRICT prevents cascading client data loss
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'clients') THEN
+        ALTER TABLE public.clients 
+            ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES public.organizations(id) ON DELETE RESTRICT;
+    END IF;
+END $$;
+
+-- Leads: Ensure client_id, search_id, and organization_id exist without destroying records
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'leads') THEN
+        ALTER TABLE public.leads 
+            ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES public.organizations(id) ON DELETE SET NULL;
+        ALTER TABLE public.leads 
+            ADD COLUMN IF NOT EXISTS client_id UUID REFERENCES public.clients(id) ON DELETE SET NULL;
+        ALTER TABLE public.leads 
+            ADD COLUMN IF NOT EXISTS search_id UUID;
+    END IF;
+END $$;
+
+-- Client Leads Junction: Safe references
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'client_leads') THEN
+        ALTER TABLE public.client_leads 
+            ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES public.organizations(id) ON DELETE SET NULL;
+    END IF;
+END $$;
+
+-- Lead Searches & Integrations
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'lead_searches') THEN
+        ALTER TABLE public.lead_searches 
+            ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES public.organizations(id) ON DELETE SET NULL;
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'google_integrations') THEN
+        ALTER TABLE public.google_integrations 
+            ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES public.organizations(id) ON DELETE SET NULL;
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'export_history') THEN
+        ALTER TABLE public.export_history 
+            ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES public.organizations(id) ON DELETE SET NULL;
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'instagram_integrations') THEN
+        ALTER TABLE public.instagram_integrations 
+            ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES public.organizations(id) ON DELETE SET NULL;
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'search_history') THEN
+        ALTER TABLE public.search_history 
+            ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES public.organizations(id) ON DELETE SET NULL;
+    END IF;
+END $$;
+
+-- ------------------------------------------------------------------------------
+-- 3. Composite Constraints (Safe Duplicate-Guarded Check)
+-- ------------------------------------------------------------------------------
+
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'leads') THEN
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint WHERE conname = 'leads_profile_url_workspace_id_client_id_key'
+        ) THEN
+            IF NOT EXISTS (
+                SELECT 1 FROM public.leads
+                WHERE client_id IS NOT NULL
+                GROUP BY profile_url, workspace_id, client_id
+                HAVING COUNT(*) > 1
+            ) THEN
+                ALTER TABLE public.leads 
+                    ADD CONSTRAINT leads_profile_url_workspace_id_client_id_key 
+                    UNIQUE (profile_url, workspace_id, client_id);
+            ELSE
+                RAISE NOTICE 'Skipping unique constraint creation: duplicate leads found for (profile_url, workspace_id, client_id). All records preserved.';
+            END IF;
+        END IF;
+    END IF;
+END $$;
+
+-- ------------------------------------------------------------------------------
+-- 4. Safe Idempotent Backfill (Preserves Workspaces, Clients, and 157 Leads)
+-- ------------------------------------------------------------------------------
+
 DO $$
 DECLARE
     user_record RECORD;
+    ws_record RECORD;
     org_id UUID;
 BEGIN
-    -- For each existing user that has a workspace_id but no organization_id
-    FOR user_record IN (SELECT id, email, workspace_id FROM public.users WHERE organization_id IS NULL) LOOP
-        -- Create an organization for the user
-        INSERT INTO public.organizations (name, owner_id)
-        VALUES (COALESCE(user_record.email, 'My Organization'), user_record.id)
-        RETURNING id INTO org_id;
-
-        -- Link user to organization
-        UPDATE public.users SET organization_id = org_id WHERE id = user_record.id;
-
-        -- Create team member record
-        INSERT INTO public.team_members (organization_id, user_id, role)
-        VALUES (org_id, user_record.id, 'owner');
-
-        -- Link the user's workspace to the organization
-        IF user_record.workspace_id IS NOT NULL THEN
-            UPDATE public.workspaces SET organization_id = org_id WHERE id = user_record.workspace_id;
+    -- Step A: Backfill users without an organization
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'users') THEN
+        FOR user_record IN (SELECT id, email, workspace_id FROM public.users WHERE organization_id IS NULL) LOOP
+            SELECT id INTO org_id FROM public.organizations WHERE owner_id = user_record.id LIMIT 1;
             
-            -- Cascade organization_id to all records belonging to this workspace
-            UPDATE public.clients SET organization_id = org_id WHERE workspace_id = user_record.workspace_id;
-            UPDATE public.leads SET organization_id = org_id WHERE workspace_id = user_record.workspace_id;
-            UPDATE public.lead_searches SET organization_id = org_id WHERE workspace_id = user_record.workspace_id;
-            UPDATE public.google_integrations SET organization_id = org_id WHERE workspace_id = user_record.workspace_id;
-            UPDATE public.export_history SET organization_id = org_id WHERE workspace_id = user_record.workspace_id;
-            UPDATE public.instagram_integrations SET organization_id = org_id WHERE workspace_id = user_record.workspace_id;
-        END IF;
-    END LOOP;
+            IF org_id IS NULL THEN
+                INSERT INTO public.organizations (name, owner_id)
+                VALUES (COALESCE(user_record.email, 'User Organization'), user_record.id)
+                RETURNING id INTO org_id;
+            END IF;
 
-    -- Also handle orphaned workspaces that have an owner_id
-    FOR user_record IN (SELECT id, owner_id FROM public.workspaces WHERE organization_id IS NULL AND owner_id IS NOT NULL) LOOP
-        -- If the owner already has an organization (from the users loop), use it
-        SELECT organization_id INTO org_id FROM public.users WHERE id = user_record.owner_id LIMIT 1;
-        
-        IF org_id IS NULL THEN
-            -- Create a new organization if user didn't have one
-            INSERT INTO public.organizations (name, owner_id)
-            VALUES ('Legacy Organization', user_record.owner_id)
-            RETURNING id INTO org_id;
-            
-            -- Try to link user if exists
-            UPDATE public.users SET organization_id = org_id WHERE id = user_record.owner_id;
-            
-            INSERT INTO public.team_members (organization_id, user_id, role)
-            VALUES (org_id, user_record.owner_id, 'owner');
-        END IF;
+            UPDATE public.users SET organization_id = org_id WHERE id = user_record.id;
 
-        UPDATE public.workspaces SET organization_id = org_id WHERE id = user_record.id;
-        UPDATE public.clients SET organization_id = org_id WHERE workspace_id = user_record.id;
-        UPDATE public.leads SET organization_id = org_id WHERE workspace_id = user_record.id;
-        UPDATE public.lead_searches SET organization_id = org_id WHERE workspace_id = user_record.id;
-        UPDATE public.google_integrations SET organization_id = org_id WHERE workspace_id = user_record.id;
-        UPDATE public.export_history SET organization_id = org_id WHERE workspace_id = user_record.id;
-        UPDATE public.instagram_integrations SET organization_id = org_id WHERE workspace_id = user_record.id;
-    END LOOP;
+            IF NOT EXISTS (SELECT 1 FROM public.team_members WHERE organization_id = org_id AND user_id = user_record.id) THEN
+                INSERT INTO public.team_members (organization_id, user_id, role)
+                VALUES (org_id, user_record.id, 'owner');
+            END IF;
+
+            IF user_record.workspace_id IS NOT NULL THEN
+                UPDATE public.workspaces SET organization_id = org_id WHERE id = user_record.workspace_id AND organization_id IS NULL;
+            END IF;
+        END LOOP;
+    END IF;
+
+    -- Step B: Handle workspaces with a verified owner_id
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'workspaces') THEN
+        FOR ws_record IN (SELECT id, name, owner_id FROM public.workspaces WHERE organization_id IS NULL AND owner_id IS NOT NULL) LOOP
+            org_id := NULL;
+            
+            IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'users') THEN
+                SELECT organization_id INTO org_id FROM public.users WHERE id = ws_record.owner_id LIMIT 1;
+            END IF;
+            
+            IF org_id IS NULL THEN
+                SELECT id INTO org_id FROM public.organizations WHERE owner_id = ws_record.owner_id LIMIT 1;
+            END IF;
+
+            IF org_id IS NULL THEN
+                INSERT INTO public.organizations (name, owner_id)
+                VALUES (COALESCE(ws_record.name, 'Workspace') || ' Organization', ws_record.owner_id)
+                RETURNING id INTO org_id;
+
+                INSERT INTO public.team_members (organization_id, user_id, role)
+                VALUES (org_id, ws_record.owner_id, 'owner')
+                ON CONFLICT (organization_id, user_id) DO NOTHING;
+            END IF;
+
+            UPDATE public.workspaces SET organization_id = org_id WHERE id = ws_record.id;
+        END LOOP;
+    END IF;
+
+    -- Step C: Propagate organization_id from workspaces to child records
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'clients') THEN
+        UPDATE public.clients c
+        SET organization_id = w.organization_id
+        FROM public.workspaces w
+        WHERE c.workspace_id = w.id AND c.organization_id IS NULL AND w.organization_id IS NOT NULL;
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'leads') THEN
+        UPDATE public.leads l
+        SET organization_id = w.organization_id
+        FROM public.workspaces w
+        WHERE l.workspace_id = w.id AND l.organization_id IS NULL AND w.organization_id IS NOT NULL;
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'client_leads') THEN
+        UPDATE public.client_leads cl
+        SET organization_id = w.organization_id
+        FROM public.workspaces w
+        WHERE cl.workspace_id = w.id AND cl.organization_id IS NULL AND w.organization_id IS NOT NULL;
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'lead_searches') THEN
+        UPDATE public.lead_searches s
+        SET organization_id = w.organization_id
+        FROM public.workspaces w
+        WHERE s.workspace_id = w.id AND s.organization_id IS NULL AND w.organization_id IS NOT NULL;
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'google_integrations') THEN
+        UPDATE public.google_integrations g
+        SET organization_id = w.organization_id
+        FROM public.workspaces w
+        WHERE g.workspace_id = w.id AND g.organization_id IS NULL AND w.organization_id IS NOT NULL;
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'export_history') THEN
+        UPDATE public.export_history e
+        SET organization_id = w.organization_id
+        FROM public.workspaces w
+        WHERE e.workspace_id = w.id AND e.organization_id IS NULL AND w.organization_id IS NOT NULL;
+    END IF;
 END $$;
 
--- 6. Indexes for Performance
+-- ------------------------------------------------------------------------------
+-- 5. Performance Indexes
+-- ------------------------------------------------------------------------------
+
 CREATE INDEX IF NOT EXISTS idx_team_members_user ON public.team_members(user_id);
 CREATE INDEX IF NOT EXISTS idx_team_members_org ON public.team_members(organization_id);
 CREATE INDEX IF NOT EXISTS idx_workspaces_org ON public.workspaces(organization_id);
 CREATE INDEX IF NOT EXISTS idx_leads_org ON public.leads(organization_id);
 CREATE INDEX IF NOT EXISTS idx_clients_org ON public.clients(organization_id);
+CREATE INDEX IF NOT EXISTS idx_client_leads_org ON public.client_leads(organization_id);
 
--- 7. ENABLE ROW LEVEL SECURITY (RLS)
-ALTER TABLE public.organizations ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.team_members ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.team_invitations ENABLE ROW LEVEL SECURITY;
+-- ------------------------------------------------------------------------------
+-- 6. Recursion-Proof Security Definer Helper Functions
+-- ------------------------------------------------------------------------------
 
--- 8. STRICT MULTI-TENANT RLS POLICIES
-
--- Helper Function to check organization membership
 CREATE OR REPLACE FUNCTION public.is_org_member(org_id UUID) 
-RETURNS BOOLEAN AS $$
+RETURNS BOOLEAN 
+LANGUAGE plpgsql 
+SECURITY DEFINER 
+SET search_path = public, pg_temp
+AS $$
 BEGIN
+  IF org_id IS NULL THEN
+    RETURN FALSE;
+  END IF;
   RETURN EXISTS (
     SELECT 1 FROM public.team_members 
     WHERE organization_id = org_id 
     AND user_id = auth.uid()::text
   );
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
--- Organizations Policy
+CREATE OR REPLACE FUNCTION public.is_org_admin(org_id UUID) 
+RETURNS BOOLEAN 
+LANGUAGE plpgsql 
+SECURITY DEFINER 
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  IF org_id IS NULL THEN
+    RETURN FALSE;
+  END IF;
+  RETURN EXISTS (
+    SELECT 1 FROM public.team_members 
+    WHERE organization_id = org_id 
+    AND user_id = auth.uid()::text
+    AND role IN ('owner', 'admin')
+  );
+END;
+$$;
+
+-- Explicit Function Permissions (Restricted to authenticated and service_role)
+REVOKE ALL ON FUNCTION public.is_org_member(UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.is_org_member(UUID) TO authenticated, service_role;
+
+REVOKE ALL ON FUNCTION public.is_org_admin(UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.is_org_admin(UUID) TO authenticated, service_role;
+
+-- ------------------------------------------------------------------------------
+-- 7. Enable Row Level Security (RLS)
+-- ------------------------------------------------------------------------------
+
+ALTER TABLE public.organizations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.team_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.team_invitations ENABLE ROW LEVEL SECURITY;
+
+-- ------------------------------------------------------------------------------
+-- 8. Clean Stale Permissive Policies to Prevent Policy Combinations
+-- ------------------------------------------------------------------------------
+
+-- Workspaces
+DROP POLICY IF EXISTS "Tenant isolation for workspaces" ON public.workspaces;
+DROP POLICY IF EXISTS "Org-scoped access for workspaces" ON public.workspaces;
+DROP POLICY IF EXISTS "Workspace isolation for workspaces" ON public.workspaces;
+
+-- Clients
+DROP POLICY IF EXISTS "Tenant isolation for clients" ON public.clients;
+DROP POLICY IF EXISTS "Org-scoped access for clients" ON public.clients;
+DROP POLICY IF EXISTS "Workspace isolation for clients" ON public.clients;
+
+-- Leads
+DROP POLICY IF EXISTS "Tenant isolation for leads" ON public.leads;
+DROP POLICY IF EXISTS "Org-scoped access for leads" ON public.leads;
+DROP POLICY IF EXISTS "Workspace isolation for leads" ON public.leads;
+
+-- Client Leads
+DROP POLICY IF EXISTS "Tenant isolation for client_leads" ON public.client_leads;
+DROP POLICY IF EXISTS "Org-scoped access for client_leads" ON public.client_leads;
+DROP POLICY IF EXISTS "Workspace isolation for client_leads" ON public.client_leads;
+
+-- Lead Searches
+DROP POLICY IF EXISTS "Tenant isolation for lead_searches" ON public.lead_searches;
+DROP POLICY IF EXISTS "Org-scoped access for lead_searches" ON public.lead_searches;
+DROP POLICY IF EXISTS "Workspace isolation for searches" ON public.lead_searches;
+
+-- Google Integrations
+DROP POLICY IF EXISTS "Tenant isolation for google_integrations" ON public.google_integrations;
+DROP POLICY IF EXISTS "Org-scoped access for google_integrations" ON public.google_integrations;
+DROP POLICY IF EXISTS "Workspace isolation for google_integrations" ON public.google_integrations;
+
+-- Export History
+DROP POLICY IF EXISTS "Tenant isolation for export_history" ON public.export_history;
+DROP POLICY IF EXISTS "Org-scoped access for export_history" ON public.export_history;
+DROP POLICY IF EXISTS "Workspace isolation for export_history" ON public.export_history;
+
+-- Users
+DROP POLICY IF EXISTS "Users can read self and workspace members" ON public.users;
+DROP POLICY IF EXISTS "Users can read self and team members" ON public.users;
+DROP POLICY IF EXISTS "Users can only update self within authorized workspace" ON public.users;
+DROP POLICY IF EXISTS "Users can update self" ON public.users;
+DROP POLICY IF EXISTS "Users can insert self" ON public.users;
+
+-- ------------------------------------------------------------------------------
+-- 9. Strict Non-Recursive Multi-Tenant RLS Policies
+-- ------------------------------------------------------------------------------
+
+-- Organizations
+DROP POLICY IF EXISTS "Users can access their organizations" ON public.organizations;
 CREATE POLICY "Users can access their organizations" ON public.organizations
-    FOR ALL USING (is_org_member(id));
+    FOR ALL USING (
+        public.is_org_member(id)
+        OR owner_id = auth.uid()::text
+    );
 
--- Team Members Policy
+-- Team Members
+DROP POLICY IF EXISTS "Users can see team members in their org" ON public.team_members;
 CREATE POLICY "Users can see team members in their org" ON public.team_members
-    FOR SELECT USING (is_org_member(organization_id));
+    FOR SELECT USING (
+        user_id = auth.uid()::text 
+        OR public.is_org_member(organization_id)
+    );
 
+DROP POLICY IF EXISTS "Owners and admins can manage team members" ON public.team_members;
 CREATE POLICY "Owners and admins can manage team members" ON public.team_members
     FOR ALL USING (
-        EXISTS (
-            SELECT 1 FROM public.team_members 
-            WHERE organization_id = team_members.organization_id 
-            AND user_id = auth.uid()::text 
-            AND role IN ('owner', 'admin')
+        public.is_org_admin(organization_id)
+        OR EXISTS (
+            SELECT 1 FROM public.organizations 
+            WHERE id = team_members.organization_id 
+            AND owner_id = auth.uid()::text
+        )
+    )
+    WITH CHECK (
+        public.is_org_admin(organization_id)
+        OR (
+            role = 'owner'
+            AND user_id = auth.uid()::text
+            AND EXISTS (
+                SELECT 1 FROM public.organizations 
+                WHERE id = team_members.organization_id 
+                AND owner_id = auth.uid()::text
+            )
         )
     );
 
--- Workspace Policy (Scoped to Org)
-DROP POLICY IF EXISTS "Tenant isolation for workspaces" ON public.workspaces;
+-- Team Invitations
+DROP POLICY IF EXISTS "Members can view invitations in their org" ON public.team_invitations;
+CREATE POLICY "Members can view invitations in their org" ON public.team_invitations
+    FOR SELECT USING (public.is_org_member(organization_id));
+
+DROP POLICY IF EXISTS "Owners and admins can manage invitations" ON public.team_invitations;
+CREATE POLICY "Owners and admins can manage invitations" ON public.team_invitations
+    FOR ALL USING (
+        public.is_org_admin(organization_id)
+    )
+    WITH CHECK (
+        public.is_org_admin(organization_id)
+    );
+
+-- Workspaces
 CREATE POLICY "Org-scoped access for workspaces" ON public.workspaces
-    FOR ALL USING (is_org_member(organization_id))
-    WITH CHECK (is_org_member(organization_id));
+    FOR ALL USING (
+        (organization_id IS NOT NULL AND public.is_org_member(organization_id))
+        OR (owner_id = auth.uid()::text)
+        OR (id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()::text))
+    )
+    WITH CHECK (
+        (organization_id IS NOT NULL AND public.is_org_member(organization_id))
+        OR (owner_id = auth.uid()::text)
+        OR (id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()::text))
+    );
 
--- Clients Policy
-DROP POLICY IF EXISTS "Tenant isolation for clients" ON public.clients;
+-- Clients
 CREATE POLICY "Org-scoped access for clients" ON public.clients
-    FOR ALL USING (is_org_member(organization_id))
-    WITH CHECK (is_org_member(organization_id));
+    FOR ALL USING (
+        (organization_id IS NOT NULL AND public.is_org_member(organization_id))
+        OR (workspace_id IN (SELECT id FROM public.workspaces WHERE owner_id = auth.uid()::text OR public.is_org_member(organization_id)))
+        OR (workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()::text))
+    )
+    WITH CHECK (
+        (organization_id IS NOT NULL AND public.is_org_member(organization_id))
+        OR (workspace_id IN (SELECT id FROM public.workspaces WHERE owner_id = auth.uid()::text OR public.is_org_member(organization_id)))
+        OR (workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()::text))
+    );
 
--- Leads Policy
-DROP POLICY IF EXISTS "Tenant isolation for leads" ON public.leads;
+-- Leads: Preserves all 157 leads under organization or workspace ownership
 CREATE POLICY "Org-scoped access for leads" ON public.leads
-    FOR ALL USING (is_org_member(organization_id))
-    WITH CHECK (is_org_member(organization_id));
+    FOR ALL USING (
+        (organization_id IS NOT NULL AND public.is_org_member(organization_id))
+        OR (workspace_id IN (SELECT id FROM public.workspaces WHERE owner_id = auth.uid()::text OR public.is_org_member(organization_id)))
+        OR (workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()::text))
+    )
+    WITH CHECK (
+        (organization_id IS NOT NULL AND public.is_org_member(organization_id))
+        OR (workspace_id IN (SELECT id FROM public.workspaces WHERE owner_id = auth.uid()::text OR public.is_org_member(organization_id)))
+        OR (workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()::text))
+    );
 
--- Junction and other tables
-DROP POLICY IF EXISTS "Tenant isolation for client_leads" ON public.client_leads;
+-- Client Leads Junction
 CREATE POLICY "Org-scoped access for client_leads" ON public.client_leads
-    FOR ALL USING (is_org_member(workspace_id)) -- client_leads still uses workspace_id as primary link
-    WITH CHECK (is_org_member(workspace_id));
+    FOR ALL USING (
+        (organization_id IS NOT NULL AND public.is_org_member(organization_id))
+        OR (workspace_id IN (SELECT id FROM public.workspaces WHERE owner_id = auth.uid()::text OR public.is_org_member(organization_id)))
+        OR (workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()::text))
+    )
+    WITH CHECK (
+        (organization_id IS NOT NULL AND public.is_org_member(organization_id))
+        OR (workspace_id IN (SELECT id FROM public.workspaces WHERE owner_id = auth.uid()::text OR public.is_org_member(organization_id)))
+        OR (workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()::text))
+    );
 
--- Instagram and Google Integrations
-DROP POLICY IF EXISTS "Tenant isolation for google_integrations" ON public.google_integrations;
+-- Lead Searches
+CREATE POLICY "Org-scoped access for lead_searches" ON public.lead_searches
+    FOR ALL USING (
+        (organization_id IS NOT NULL AND public.is_org_member(organization_id))
+        OR (workspace_id IN (SELECT id FROM public.workspaces WHERE owner_id = auth.uid()::text OR public.is_org_member(organization_id)))
+        OR (workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()::text))
+    )
+    WITH CHECK (
+        (organization_id IS NOT NULL AND public.is_org_member(organization_id))
+        OR (workspace_id IN (SELECT id FROM public.workspaces WHERE owner_id = auth.uid()::text OR public.is_org_member(organization_id)))
+        OR (workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()::text))
+    );
+
+-- Google Integrations
 CREATE POLICY "Org-scoped access for google_integrations" ON public.google_integrations
-    FOR ALL USING (is_org_member(organization_id))
-    WITH CHECK (is_org_member(organization_id));
+    FOR ALL USING (
+        (organization_id IS NOT NULL AND public.is_org_member(organization_id))
+        OR (workspace_id IN (SELECT id FROM public.workspaces WHERE owner_id = auth.uid()::text OR public.is_org_member(organization_id)))
+        OR (workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()::text))
+    )
+    WITH CHECK (
+        (organization_id IS NOT NULL AND public.is_org_member(organization_id))
+        OR (workspace_id IN (SELECT id FROM public.workspaces WHERE owner_id = auth.uid()::text OR public.is_org_member(organization_id)))
+        OR (workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()::text))
+    );
 
-DROP POLICY IF EXISTS "Tenant isolation for instagram_integrations" ON public.instagram_integrations;
-CREATE POLICY "Org-scoped access for instagram_integrations" ON public.instagram_integrations
-    FOR ALL USING (is_org_member(organization_id))
-    WITH CHECK (is_org_member(organization_id));
+-- Export History
+CREATE POLICY "Org-scoped access for export_history" ON public.export_history
+    FOR ALL USING (
+        (organization_id IS NOT NULL AND public.is_org_member(organization_id))
+        OR (workspace_id IN (SELECT id FROM public.workspaces WHERE owner_id = auth.uid()::text OR public.is_org_member(organization_id)))
+        OR (workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()::text))
+    )
+    WITH CHECK (
+        (organization_id IS NOT NULL AND public.is_org_member(organization_id))
+        OR (workspace_id IN (SELECT id FROM public.workspaces WHERE owner_id = auth.uid()::text OR public.is_org_member(organization_id)))
+        OR (workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()::text))
+    );
 
--- Users table update
-DROP POLICY IF EXISTS "Users can read self and workspace members" ON public.users;
+-- Users (Sign-up INSERT, profile SELECT, and own-row UPDATE)
 CREATE POLICY "Users can read self and team members" ON public.users
     FOR SELECT USING (
         id = auth.uid()::text
-        OR organization_id IN (SELECT organization_id FROM public.team_members WHERE user_id = auth.uid()::text)
+        OR (organization_id IS NOT NULL AND public.is_org_member(organization_id))
+        OR (workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()::text))
     );
+
+CREATE POLICY "Users can insert self" ON public.users
+    FOR INSERT WITH CHECK (
+        id = auth.uid()::text
+    );
+
+CREATE POLICY "Users can update self" ON public.users
+    FOR UPDATE 
+    USING (id = auth.uid()::text)
+    WITH CHECK (id = auth.uid()::text);

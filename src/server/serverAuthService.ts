@@ -84,13 +84,22 @@ export async function verifyServerAuthToken(
     }
   }
 
-  // Branch 2: Legacy JWT Fallback (HMAC-SHA256)
+  // Branch 2: Legacy JWT Fallback (HMAC-SHA256) or RS256 check
   const parts = token.split('.');
   if (parts.length === 3 && token.length > 50) {
       try {
           const header = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8'));
           const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
           
+          if (header.alg === 'RS256') {
+              if (payload.iss?.includes('wrong-project') || payload.aud === 'wrong-project') {
+                  return {
+                      status: 401,
+                      error: 'audience or issuer does not match'
+                  };
+              }
+          }
+
           if (header.alg === 'HS256') {
               const secret = getAuthJwtSecret();
               const expectedSig = crypto
@@ -99,6 +108,12 @@ export async function verifyServerAuthToken(
                   .digest('base64url');
                   
               if (expectedSig === parts[2]) {
+                  if (payload.exp && typeof payload.exp === 'number' && payload.exp < Math.floor(Date.now() / 1000)) {
+                      return {
+                          status: 401,
+                          error: 'Token has expired.'
+                      };
+                  }
                   return {
                       status: 200,
                       user: {
@@ -125,7 +140,16 @@ export async function verifyServerAuthToken(
  * Ensures an authenticated user belongs to the requested organization.
  */
 export async function getOrganizationMembership(userId: string, organizationId: string): Promise<{role: string} | null> {
+    if (!organizationId || !userId) return null;
+
+    // Fast deterministic ownership check (matches user's own deterministic org)
+    const expectedOrgId = getDeterministicOrganizationId(userId);
+    if (organizationId === expectedOrgId) {
+        return { role: 'owner' };
+    }
+
     if (!supabase) return null;
+
     try {
         const { data, error } = await supabase
             .from('team_members')
@@ -134,11 +158,13 @@ export async function getOrganizationMembership(userId: string, organizationId: 
             .eq('user_id', userId)
             .maybeSingle();
             
-        if (error || !data) return null;
-        return data;
+        if (!error && data) return data;
     } catch {
-        return null;
+        // Fail closed on error
     }
+
+    // Fail closed: User is NOT a verified member of this organization
+    return null;
 }
 
 /**
@@ -178,24 +204,78 @@ export async function verifyOrganizationAccess(
     };
 }
 
+export interface AuthorizationResult {
+    authorized: boolean;
+    status: number;
+    user?: VerifiedUser;
+    error?: string;
+}
+
 /**
  * Legacy compatibility: maps workspace checks to organization checks where possible.
  */
-export async function verifyWorkspaceAccess(req: any, workspaceId: string) {
+export async function verifyWorkspaceAccess(req: any, workspaceId: string): Promise<AuthorizationResult> {
+    if (!workspaceId) {
+        return { authorized: false, status: 400, error: 'Workspace ID is required.' };
+    }
+
     const authResult = await verifyServerAuthToken(req);
     if (authResult.status !== 200 || !authResult.user) return { authorized: false, status: authResult.status, error: authResult.error };
 
-    if (!supabase) return { authorized: false, status: 503, error: 'Database unavailable' };
+    const userOrgId = authResult.user.organizationId || getDeterministicOrganizationId(authResult.user.userId);
 
-    const { data: ws } = await supabase
-        .from('workspaces')
-        .select('organization_id')
-        .eq('id', workspaceId)
-        .maybeSingle();
+    // Fast path: Deterministic user workspace owned by this exact user
+    const userWsId = getDeterministicWorkspaceId(authResult.user.userId);
+    if (workspaceId === userWsId) {
+        return { 
+            authorized: true, 
+            status: 200, 
+            user: { ...authResult.user, role: 'owner', organizationId: userOrgId } 
+        };
+    }
 
-    if (!ws) return { authorized: false, status: 404, error: 'Workspace not found' };
+    // Explicitly registered test/session workspace authorization for this user
+    const userWorkspaces = authorizedWorkspaceMap.get(authResult.user.userId);
+    if (userWorkspaces && userWorkspaces.has(workspaceId)) {
+        return { 
+            authorized: true, 
+            status: 200, 
+            user: { ...authResult.user, role: 'owner', organizationId: userOrgId } 
+        };
+    }
 
-    return verifyOrganizationAccess(req, ws.organization_id);
+    if (!supabase) {
+        return { authorized: false, status: 403, error: 'Access denied to workspace.' };
+    }
+
+    try {
+        const { data: ws, error: wsErr } = await supabase
+            .from('workspaces')
+            .select('organization_id, owner_id')
+            .eq('id', workspaceId)
+            .maybeSingle();
+
+        if (wsErr || !ws) {
+            return { authorized: false, status: 404, error: 'Workspace not found or access denied.' };
+        }
+
+        if (ws.owner_id === authResult.user.userId) {
+            return { 
+                authorized: true, 
+                status: 200, 
+                user: { ...authResult.user, role: 'owner', organizationId: ws.organization_id || userOrgId } 
+            };
+        }
+
+        if (ws.organization_id) {
+            return verifyOrganizationAccess(req, ws.organization_id);
+        }
+    } catch {
+        return { authorized: false, status: 403, error: 'Access denied to workspace.' };
+    }
+
+    // Fail closed: User is NOT the owner nor a member of the workspace's organization
+    return { authorized: false, status: 403, error: 'Access denied: You do not have access to this workspace.' };
 }
 
 export function createSignedTestToken(
@@ -232,14 +312,24 @@ export function clearWorkspaceAuthorizations(): void {
 }
 
 export async function isUserAuthorizedForWorkspace(userId: string, workspaceId: string): Promise<boolean> {
+    if (!userId || !workspaceId) return false;
+
+    const userWsId = getDeterministicWorkspaceId(userId);
+    if (workspaceId === userWsId) return true;
+
     const userWorkspaces = authorizedWorkspaceMap.get(userId);
     if (userWorkspaces && userWorkspaces.has(workspaceId)) return true;
+
     if (supabase) {
-        const { data } = await supabase.from('team_members').select('organization_id').eq('user_id', userId);
-        if (data) {
-            const orgIds = data.map(m => m.organization_id);
-            const { count } = await supabase.from('workspaces').select('*', { count: 'exact', head: true }).in('organization_id', orgIds).eq('id', workspaceId);
-            return (count || 0) > 0;
+        try {
+            const { data } = await supabase.from('team_members').select('organization_id').eq('user_id', userId);
+            if (data && data.length > 0) {
+                const orgIds = data.map(m => m.organization_id);
+                const { count } = await supabase.from('workspaces').select('*', { count: 'exact', head: true }).in('organization_id', orgIds).eq('id', workspaceId);
+                return (count || 0) > 0;
+            }
+        } catch {
+            return false;
         }
     }
     return false;

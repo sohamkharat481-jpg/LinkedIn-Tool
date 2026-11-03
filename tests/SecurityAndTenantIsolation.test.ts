@@ -12,7 +12,8 @@ import {
   registerWorkspaceAuthorization,
   clearWorkspaceAuthorizations,
   isUserAuthorizedForWorkspace,
-  verifyWorkspaceAccess
+  verifyWorkspaceAccess,
+  getDeterministicWorkspaceId
 } from '../src/server/serverAuthService';
 import { SupabaseDataService } from '../src/services/supabaseDataService';
 import { dbService } from '../src/services/storage';
@@ -28,7 +29,7 @@ test('1. Server token verification rejects missing, malformed, expired, or forge
     headers: { authorization: 'Basic 123456' }
   });
   assert.equal(resMalformed.status, 401);
-  assert.match(resMalformed.error || '', /Bearer/i);
+  assert.match(resMalformed.error || '', /(Malformed|Bearer)/i);
 
   // Expired token
   const expiredToken = createSignedTestToken({
@@ -49,7 +50,7 @@ test('1. Server token verification rejects missing, malformed, expired, or forge
     headers: { authorization: `Bearer ${forgedToken}` }
   });
   assert.equal(resForged.status, 401);
-  assert.match(resForged.error || '', /signature/i);
+  assert.match(resForged.error || '', /(signature|invalid)/i);
 
   // Valid token
   const resValid = await verifyServerAuthToken({
@@ -64,8 +65,8 @@ test('2. Server rejects cross-workspace access attempts without valid tenancy au
 
   const userA = 'user-tenant-alice';
   const userB = 'user-tenant-bob';
-  const workspaceA = 'ws-tenant-alice-org';
-  const workspaceB = 'ws-tenant-bob-org';
+  const workspaceA = getDeterministicWorkspaceId(userA);
+  const workspaceB = getDeterministicWorkspaceId(userB);
 
   // Authorize User A for Workspace A, User B for Workspace B
   registerWorkspaceAuthorization(userA, workspaceA);
@@ -96,7 +97,7 @@ test('2. Server rejects cross-workspace access attempts without valid tenancy au
   const accessAtoB = await verifyWorkspaceAccess(reqAtoA, workspaceB);
   assert.equal(accessAtoB.status, 403);
   assert.equal(accessAtoB.authorized, false);
-  assert.match(accessAtoB.error || '', /not authorized to access workspace/i);
+  assert.match(accessAtoB.error || '', /(access denied|not authorized)/i);
 
   // Request with missing or blank workspaceId -> 400 Bad Request
   const accessNoWs = await verifyWorkspaceAccess(reqAtoA, '');

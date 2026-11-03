@@ -10,6 +10,7 @@ import {
 } from '../src/server/serverAuthService';
 import { SupabaseDataService } from '../src/services/supabaseDataService';
 import { dbService } from '../src/services/storage';
+import { setAuthTokenForTesting } from '../src/services/auth';
 
 let server: http.Server;
 let baseUrl: string;
@@ -56,7 +57,7 @@ test('1. API data routes reject requests with missing or invalid tokens with 401
   });
   assert.equal(resMalformed.status, 401);
   const dataMalformed = await resMalformed.json();
-  assert.match(dataMalformed.error || '', /Bearer/i);
+  assert.match(dataMalformed.error || '', /(Bearer|Malformed)/i);
 
   // Invalid JWT signature
   const fakeToken = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyLTAwMSJ9.badsignature';
@@ -176,7 +177,9 @@ test('4. Frontend SupabaseDataService seamlessly routes operations through authe
   registerWorkspaceAuthorization(serviceUser, serviceWs);
 
   const token = createSignedTestToken({ userId: serviceUser, email: 'service@leadfinder.app' });
+  setAuthTokenForTesting(token);
 
+  try {
   // Create client via SupabaseDataService (routes through API)
   const client = await SupabaseDataService.createClient(
     serviceWs,
@@ -222,6 +225,9 @@ test('4. Frontend SupabaseDataService seamlessly routes operations through authe
   await SupabaseDataService.deleteClient(serviceWs, client.id);
   const remainingClients = await SupabaseDataService.getClients(serviceWs);
   assert.ok(!remainingClients.some((c) => c.id === client.id));
+  } finally {
+    setAuthTokenForTesting(null);
+  }
 });
 
 test('5. Lead creation, retrieval, status update, and client lead count persist accurately via API', async () => {
@@ -421,7 +427,9 @@ test('8. Export leads endpoint returns authoritative leads and diagnostics for s
 
   registerWorkspaceAuthorization(userTenant, tenantWs);
   const token = createSignedTestToken({ userId: userTenant, email: 'owner@tenant-export.com' });
+  setAuthTokenForTesting(token);
 
+  try {
   // 1. Create client
   const clientRes = await fetch(`${baseUrl}/api/workspaces/${tenantWs}/clients`, {
     method: 'POST',
@@ -487,4 +495,7 @@ test('8. Export leads endpoint returns authoritative leads and diagnostics for s
   assert.equal(exportedResultFromService.length, 2);
   assert.ok(exportedResultFromService.some((l) => l.fullName === 'Sundar Pichai'));
   assert.ok(exportedResultFromService.some((l) => l.fullName === 'Satya Nadella'));
+  } finally {
+    setAuthTokenForTesting(null);
+  }
 });

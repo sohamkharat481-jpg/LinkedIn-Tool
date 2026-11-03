@@ -87,21 +87,30 @@ export const getSupabaseUser = async () => {
   return user;
 };
 
+let testAuthToken: string | null = null;
+
+export const setAuthTokenForTesting = (token: string | null) => {
+  testAuthToken = token;
+};
+
 /**
  * Retrieves the current Supabase JWT for authenticating backend API requests.
  */
 export const getAuthToken = async (): Promise<string | null> => {
+  if (testAuthToken) return testAuthToken;
   const session = await getSupabaseSession();
   return session?.access_token || null;
 };
 
+let memoryCachedAccessToken: string | null = null;
+
 // Aliases for backward compatibility in services
 export const getFirebaseIdToken = getAuthToken;
 export const getCachedAccessToken = () => {
-    if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined' && typeof sessionStorage !== 'undefined') {
         return sessionStorage.getItem('__g_oauth_access_token');
     }
-    return null;
+    return memoryCachedAccessToken;
 };
 
 /**
@@ -163,16 +172,21 @@ export const googleSheetsAuthorize = async () => {
 export const googleSignIn = googleSheetsAuthorize;
 export const googleSignOut = supabaseSignOut;
 export const verifyGoogleAccountConnection = async (token: string) => {
+    if (!token || typeof token !== 'string' || token.trim().length < 10) {
+        throw new Error('Invalid or missing OAuth token.');
+    }
     return { email: 'connected-account@google.com', name: 'Google Account', verifiedEmail: true };
 };
 export const setCachedAccessToken = (token: string | null) => {
-    if (typeof window !== 'undefined') {
+    memoryCachedAccessToken = token;
+    if (typeof window !== 'undefined' && typeof sessionStorage !== 'undefined') {
         if (token) sessionStorage.setItem('__g_oauth_access_token', token);
         else sessionStorage.removeItem('__g_oauth_access_token');
     }
 };
-export const getUserSessionTokenKey = (user?: User | null) => {
-    if (user?.id) return `__g_oauth_session_token_${user.id}`;
+export const getUserSessionTokenKey = (user?: any) => {
+    const id = user?.id || user?.uid;
+    if (id) return `__g_oauth_session_token_${id}`;
     return '__g_oauth_session_token_guest';
 };
 

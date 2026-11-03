@@ -106,7 +106,7 @@ test('TEST B: A second authenticated user with a different email and UID can cre
   assert.ok(Array.isArray(resUser2.body.workspaces));
   assert.equal(resUser2.body.workspaces.length, 1);
   const wsUser2 = resUser2.body.workspaces[0];
-  assert.match(wsUser2.name, /Seconduser Independent/i);
+  assert.match(wsUser2.name, /Seconduser(\.| )Independent/i);
 
   // Verify that User 2 can also explicitly create a second workspace
   const createRes = await makeSimulatedRequest(

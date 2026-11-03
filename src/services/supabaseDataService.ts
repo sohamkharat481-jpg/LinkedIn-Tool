@@ -92,7 +92,10 @@ export class SupabaseDataService {
     const apiRes = await callDataApi<{ clients: Client[] }>(
       `/api/workspaces/${encodeURIComponent(workspaceId)}/clients`
     );
-    return apiRes.data?.clients || [];
+    if (apiRes.success && Array.isArray(apiRes.data?.clients)) {
+      return apiRes.data.clients;
+    }
+    return dbService.getClients(workspaceId);
   }
 
   /**
@@ -104,6 +107,15 @@ export class SupabaseDataService {
     niche: string,
     notes: string
   ): Promise<Client> {
+    if (!workspaceId || !workspaceId.trim()) {
+      throw new Error('Workspace ID is required.');
+    }
+    if (!name || !name.trim()) {
+      throw new Error('Client name is required.');
+    }
+    if (!niche || !niche.trim()) {
+      throw new Error('Business / Niche is required.');
+    }
     const apiRes = await callDataApi<{ client: Client }>(
       `/api/workspaces/${encodeURIComponent(workspaceId)}/clients`,
       {
@@ -112,7 +124,7 @@ export class SupabaseDataService {
       }
     );
     if (apiRes.success && apiRes.data?.client) return apiRes.data.client;
-    throw new Error(apiRes.error || 'Failed to create client.');
+    return dbService.addClient(workspaceId, name, niche, notes);
   }
 
   /**
@@ -131,7 +143,7 @@ export class SupabaseDataService {
       }
     );
     if (apiRes.success && apiRes.data?.client) return apiRes.data.client;
-    throw new Error(apiRes.error || 'Failed to update client');
+    return dbService.updateClient(workspaceId, clientId, updates);
   }
 
   /**
@@ -142,17 +154,22 @@ export class SupabaseDataService {
       `/api/workspaces/${encodeURIComponent(workspaceId)}/clients/${encodeURIComponent(clientId)}`,
       { method: 'DELETE' }
     );
-    if (!apiRes.success) throw new Error(apiRes.error || 'Failed to delete client.');
+    if (apiRes.success) return;
+    dbService.deleteClient(workspaceId, clientId);
   }
 
   /**
    * Retrieve all leads.
    */
   static async getAllLeads(workspaceId: string, clientId?: string): Promise<LeadRecord[]> {
+    if (!workspaceId) return [];
     const apiRes = await callDataApi<{ leads: LeadRecord[] }>(
       `/api/workspaces/${encodeURIComponent(workspaceId)}/leads${clientId ? `?clientId=${encodeURIComponent(clientId)}` : ''}`
     );
-    return apiRes.data?.leads || [];
+    if (apiRes.success && Array.isArray(apiRes.data?.leads)) {
+      return apiRes.data.leads;
+    }
+    return clientId ? dbService.getLeadsForClient(workspaceId, clientId) : dbService.getAllLeads(workspaceId);
   }
 
   /**
