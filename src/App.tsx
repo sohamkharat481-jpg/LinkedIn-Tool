@@ -12,8 +12,7 @@ import {
 import { SupabaseDataService } from './services/supabaseDataService';
 import { 
     initAuthListener, 
-    supabaseSignOut, 
-    supabaseGoogleSignIn
+    supabaseSignOut
 } from './services/auth';
 import { RefreshCw } from 'lucide-react';
 import { supabase } from './services/supabase';
@@ -236,7 +235,7 @@ export default function App() {
           onSelectClient={handleSelectClient}
           onOpenCreateWorkspace={() => {}} 
           user={user} 
-          onSignIn={async () => { await supabaseGoogleSignIn(); }}
+          onSignIn={async () => { navigateTo('/'); }}
           providerStatus={providerStatus}
         />
 

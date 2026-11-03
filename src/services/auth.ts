@@ -45,35 +45,10 @@ export const supabaseSignUp = async (email: string, password: string, fullName: 
   return data.user;
 };
 
-export const supabaseGoogleSignIn = async () => {
+export const updateUserPassword = async (newPassword: string) => {
   if (!supabase) throw new Error('Supabase client not initialized');
-  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://linked-in-tool-beta.vercel.app';
-  const redirectUrl = `${origin}/auth/callback`;
-  
-  console.log('[OAuth Trace] Initiating Google OAuth request:', {
-    provider: 'google',
-    redirectTo: redirectUrl,
-    timestamp: new Date().toISOString()
-  });
-
-  const { data, error } = await supabase.auth.signInWithOAuth({
-    provider: 'google',
-    options: {
-      redirectTo: redirectUrl,
-      queryParams: {
-        access_type: 'offline',
-        prompt: 'consent'
-      }
-    }
-  });
-  if (error) {
-    console.error('[OAuth Error] signInWithOAuth failed:', error.message);
-    if (error.message?.includes('Unsupported provider') || error.message?.includes('not enabled')) {
-      throw new Error('Google Sign-In is not enabled in your Supabase project. Please enable Google Auth in the Supabase Dashboard under Authentication -> Providers.');
-    }
-    throw error;
-  }
-  return data;
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) throw error;
 };
 
 export const supabaseSignOut = async () => {
@@ -167,7 +142,25 @@ export const initAuthListener = (
   return () => subscription.unsubscribe();
 };
 
-export const googleSignIn = supabaseGoogleSignIn;
+export const googleSheetsAuthorize = async () => {
+  if (!supabase) throw new Error('Supabase client not initialized');
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://linked-in-tool-beta.vercel.app';
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo: `${origin}/auth/callback`,
+      scopes: 'https://www.googleapis.com/auth/spreadsheets',
+      queryParams: {
+        access_type: 'offline',
+        prompt: 'consent'
+      }
+    }
+  });
+  if (error) throw error;
+  return data;
+};
+
+export const googleSignIn = googleSheetsAuthorize;
 export const googleSignOut = supabaseSignOut;
 export const verifyGoogleAccountConnection = async (token: string) => {
     return { email: 'connected-account@google.com', name: 'Google Account', verifiedEmail: true };
