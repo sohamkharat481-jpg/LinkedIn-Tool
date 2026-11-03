@@ -41,29 +41,6 @@ export function normalizePath(rawPath: string): string {
 export default function App() {
   const startup = useAuthStartup();
 
-  if (!supabase) {
-    return (
-      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white space-y-4 font-sans">
-        <p className="text-xl font-bold">Database Configuration Missing</p>
-        <p className="text-sm text-slate-400">Please check your environment variables (SUPABASE_URL, SUPABASE_ANON_KEY).</p>
-      </div>
-    );
-  }
-
-  if (startup.state === 'ERROR') {
-      return (
-        <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white p-8 font-sans text-center">
-          <p className="text-xl font-bold mb-2">Startup Error</p>
-          <div className="bg-slate-800 p-4 rounded text-sm text-left font-mono w-full max-w-md mb-4">
-              <p>Failed phase: {startup.failedPhase || 'Unknown'}</p>
-              <p>Error: {startup.error}</p>
-              <p>Duration: {startup.phaseDuration}ms</p>
-          </div>
-          <button className="bg-blue-600 px-6 py-2 rounded" onClick={() => window.location.reload()}>Retry</button>
-        </div>
-      );
-  }
-
   const [currentPath, setCurrentPath] = useState<string>(() =>
     typeof window !== 'undefined' ? window.location.pathname + window.location.search : '/'
   );
@@ -137,6 +114,30 @@ export default function App() {
       setCurrentPath('/');
     }
   }, [startup.state]);
+
+  // Early returns AFTER all hooks are unconditionally declared
+  if (!supabase) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white space-y-4 font-sans">
+        <p className="text-xl font-bold">Database Configuration Missing</p>
+        <p className="text-sm text-slate-400">Please check your environment variables (SUPABASE_URL, SUPABASE_ANON_KEY).</p>
+      </div>
+    );
+  }
+
+  if (startup.state === 'ERROR') {
+      return (
+        <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white p-8 font-sans text-center">
+          <p className="text-xl font-bold mb-2">Startup Error</p>
+          <div className="bg-slate-800 p-4 rounded text-sm text-left font-mono w-full max-w-md mb-4">
+              <p>Failed phase: {startup.failedPhase || 'Unknown'}</p>
+              <p>Error: {startup.error}</p>
+              <p>Duration: {startup.phaseDuration}ms</p>
+          </div>
+          <button className="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded font-bold cursor-pointer transition-colors" onClick={() => window.location.reload()}>Retry</button>
+        </div>
+      );
+  }
 
   const loadWorkspaceData = async (wsId: string) => {
     setIsLoadingData(true);
