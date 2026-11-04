@@ -5,6 +5,7 @@ import { ServerLeadProviderService } from './leadProviderService';
 import { testSupabaseHealth } from '../services/supabase';
 import { verifyServerAuthToken } from './serverAuthService';
 import { dataRouter } from './dataRoutes';
+import { googleAuthRouter } from './googleAuthRoutes';
 
 export const apiRouter = express.Router();
 
@@ -41,6 +42,7 @@ apiRouter.use((req: any, res: any, next) => {
 
 apiRouter.use(express.json());
 apiRouter.use(dataRouter);
+apiRouter.use(googleAuthRouter);
 
 apiRouter.get('/health', (_req: Request, res: Response) => {
   res.json({

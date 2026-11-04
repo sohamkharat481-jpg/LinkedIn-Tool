@@ -1,3 +1,20 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
+// Purge placeholder variables if present in process.env so they never mask configured credentials
+if (process.env.SUPABASE_URL?.includes('your-project') || process.env.SUPABASE_URL?.includes('placeholder')) {
+  delete process.env.SUPABASE_URL;
+}
+if (process.env.VITE_SUPABASE_URL?.includes('your-project') || process.env.VITE_SUPABASE_URL?.includes('placeholder')) {
+  delete process.env.VITE_SUPABASE_URL;
+}
+if (process.env.SUPABASE_ANON_KEY?.startsWith('your-') || process.env.SUPABASE_ANON_KEY?.includes('placeholder')) {
+  delete process.env.SUPABASE_ANON_KEY;
+}
+if (process.env.VITE_SUPABASE_ANON_KEY?.startsWith('your-') || process.env.VITE_SUPABASE_ANON_KEY?.includes('placeholder')) {
+  delete process.env.VITE_SUPABASE_ANON_KEY;
+}
+
 import express from 'express';
 import { apiRouter } from './apiHandler';
 

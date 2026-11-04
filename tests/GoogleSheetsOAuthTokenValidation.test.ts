@@ -10,7 +10,7 @@ test('Google OAuth token validation rejects empty or missing tokens', async () =
     },
     {
       name: 'Error',
-      message: 'Invalid or missing OAuth token.'
+      message: 'Invalid OAuth token.'
     }
   );
 
@@ -20,7 +20,7 @@ test('Google OAuth token validation rejects empty or missing tokens', async () =
     },
     {
       name: 'Error',
-      message: 'Invalid or missing OAuth token.'
+      message: 'Invalid OAuth token.'
     }
   );
 });

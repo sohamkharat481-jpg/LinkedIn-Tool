@@ -1,0 +1,855 @@
+
+> linkedin-lead-finder@1.0.0 test
+> NODE_ENV=test tsx --test tests/**/*.test.ts
+
+TAP version 13
+# Subtest: detectHistoricalStatus detects deceased individuals via P570 dateOfDeath and lifetime text
+ok 1 - detectHistoricalStatus detects deceased individuals via P570 dateOfDeath and lifetime text
+  ---
+  duration_ms: 2.807842
+  type: 'test'
+  ...
+# Subtest: detectHistoricalStatus distinguishes historical figures without inferring current activity solely from age
+ok 2 - detectHistoricalStatus distinguishes historical figures without inferring current activity solely from age
+  ---
+  duration_ms: 0.401302
+  type: 'test'
+  ...
+# Subtest: calculateRelevanceScore calculates transparent points without treating missing data as negative proof
+ok 3 - calculateRelevanceScore calculates transparent points without treating missing data as negative proof
+  ---
+  duration_ms: 1.098589
+  type: 'test'
+  ...
+# Subtest: lead status classification never automatically classifies discovered entities as qualified prospects
+ok 4 - lead status classification never automatically classifies discovered entities as qualified prospects
+  ---
+  duration_ms: 0.382677
+  type: 'test'
+  ...
+# Subtest: contact data integrity: website only present when real, never generates fake contacts
+ok 5 - contact data integrity: website only present when real, never generates fake contacts
+  ---
+  duration_ms: 0.500957
+  type: 'test'
+  ...
+# [Diagnostic] Wikidata Search HTTP 200 in 403ms (Attempt 1) | Raw bindings: 5 | Mapped unique leads: 5
+# Subtest: WikidataLeadProvider search returns genuine Wikidata entities with transparent relevance intelligence
+ok 6 - WikidataLeadProvider search returns genuine Wikidata entities with transparent relevance intelligence
+  ---
+  duration_ms: 458.802186
+  type: 'test'
+  ...
+# Subtest: irrelevant occupation matches are correctly identified and classified as Discovered
+ok 7 - irrelevant occupation matches are correctly identified and classified as Discovered
+  ---
+  duration_ms: 0.537076
+  type: 'test'
+  ...
+# Subtest: deceased entities with confirmed death date never receive living badge or qualified prospect status
+ok 8 - deceased entities with confirmed death date never receive living badge or qualified prospect status
+  ---
+  duration_ms: 0.349288
+  type: 'test'
+  ...
+# Subtest: contact property extraction and verification status handling
+ok 9 - contact property extraction and verification status handling
+  ---
+  duration_ms: 0.482032
+  type: 'test'
+  ...
+# [Supabase Debug] Final resolved URL: 
+# [Supabase Debug] Final resolved URL: 
+# Subtest: 1. Client creation validates required parameters and throws on empty input
+ok 10 - 1. Client creation validates required parameters and throws on empty input
+  ---
+  duration_ms: 55.0104
+  type: 'test'
+  ...
+# Subtest: 2. Successfully created client appears immediately in workspace client directory
+ok 11 - 2. Successfully created client appears immediately in workspace client directory
+  ---
+  duration_ms: 104.663239
+  type: 'test'
+  ...
+# Subtest: 3. Client remains visible across reload and repeated fetches
+ok 12 - 3. Client remains visible across reload and repeated fetches
+  ---
+  duration_ms: 12.548747
+  type: 'test'
+  ...
+# Subtest: 4. Workspace isolation ensures clients belong strictly to their assigned workspace
+ok 13 - 4. Workspace isolation ensures clients belong strictly to their assigned workspace
+  ---
+  duration_ms: 91.954637
+  type: 'test'
+  ...
+# Subtest: 5. Empty workspace returns empty client list without injecting fake demo clients
+ok 14 - 5. Empty workspace returns empty client list without injecting fake demo clients
+  ---
+  duration_ms: 8.00668
+  type: 'test'
+  ...
+# Subtest: 6. Client updates and deletions persist correctly within workspace scope
+ok 15 - 6. Client updates and deletions persist correctly within workspace scope
+  ---
+  duration_ms: 93.154366
+  type: 'test'
+  ...
+# Subtest: 7. Cache synchronization accurately updates local cache without data loss across workspaces
+ok 16 - 7. Cache synchronization accurately updates local cache without data loss across workspaces
+  ---
+  duration_ms: 8.620467
+  type: 'test'
+  ...
+# Subtest: 1. App.tsx correctly imports apiUrl and has no unimported free apiUrl calls
+ok 17 - 1. App.tsx correctly imports apiUrl and has no unimported free apiUrl calls
+  ---
+  duration_ms: 1.824122
+  type: 'test'
+  ...
+# Subtest: 2. ClientManagementView declares isCreateModalOpen and does not throw ReferenceError
+ok 18 - 2. ClientManagementView declares isCreateModalOpen and does not throw ReferenceError
+  ---
+  duration_ms: 0.533255
+  type: 'test'
+  ...
+# Subtest: 3. apiUrl utility formats relative endpoints safely with base fallback
+ok 19 - 3. apiUrl utility formats relative endpoints safely with base fallback
+  ---
+  duration_ms: 0.443813
+  type: 'test'
+  ...
+# Subtest: 4. ErrorBoundary component correctly handles lifecycle error state without throwing
+ok 20 - 4. ErrorBoundary component correctly handles lifecycle error state without throwing
+  ---
+  duration_ms: 0.387178
+  type: 'test'
+  ...
+# [Supabase Debug] Final resolved URL: 
+# [Supabase Debug] Final resolved URL: 
+# Subtest: Phase 1.1: User A login returns their deterministic workspace and authorizes access
+ok 21 - Phase 1.1: User A login returns their deterministic workspace and authorizes access
+  ---
+  duration_ms: 102.562782
+  type: 'test'
+  ...
+# Subtest: Phase 1.2: User B login returns separate deterministic workspace, isolated from User A
+ok 22 - Phase 1.2: User B login returns separate deterministic workspace, isolated from User A
+  ---
+  duration_ms: 62.619079
+  type: 'test'
+  ...
+# Subtest: Phase 1.3: User A and User B session tokens and workspaces persist deterministically
+ok 23 - Phase 1.3: User A and User B session tokens and workspaces persist deterministically
+  ---
+  duration_ms: 0.655902
+  type: 'test'
+  ...
+# Subtest: Phase 2.1: Create client "Soham Kharat (Dental Clinic)" in Workspace A
+ok 24 - Phase 2.1: Create client "Soham Kharat (Dental Clinic)" in Workspace A
+  ---
+  duration_ms: 101.823797
+  type: 'test'
+  ...
+# Subtest: Phase 2.2: Create client "soham (SaaS)" in Workspace A
+ok 25 - Phase 2.2: Create client "soham (SaaS)" in Workspace A
+  ---
+  duration_ms: 6.982573
+  type: 'test'
+  ...
+# Subtest: Phase 2.3: Edit client details and verify persistence
+ok 26 - Phase 2.3: Edit client details and verify persistence
+  ---
+  duration_ms: 6.026294
+  type: 'test'
+  ...
+# Subtest: Phase 2.4: List clients and verify distinct IDs for both clients
+ok 27 - Phase 2.4: List clients and verify distinct IDs for both clients
+  ---
+  duration_ms: 4.6886
+  type: 'test'
+  ...
+# [Diagnostic] Wikidata Search HTTP 200 in 96ms (Attempt 1) | Raw bindings: 10 | Mapped unique leads: 8
+# Subtest: Phase 3.1: Execute real search via WikidataLeadProvider for genuine executive leads
+ok 28 - Phase 3.1: Execute real search via WikidataLeadProvider for genuine executive leads
+  ---
+  duration_ms: 103.892303
+  type: 'test'
+  ...
+# Subtest: Phase 3.2: Persist genuine leads to "soham (SaaS)" and save search history
+ok 29 - Phase 3.2: Persist genuine leads to "soham (SaaS)" and save search history
+  ---
+  duration_ms: 73.780275
+  type: 'test'
+  ...
+# Subtest: Phase 3.3: Duplicate leads are handled and skipped without failure
+ok 30 - Phase 3.3: Duplicate leads are handled and skipped without failure
+  ---
+  duration_ms: 8.558456
+  type: 'test'
+  ...
+# Subtest: Phase 4.1: Search history appears in workspace searches query
+ok 31 - Phase 4.1: Search history appears in workspace searches query
+  ---
+  duration_ms: 4.856756
+  type: 'test'
+  ...
+# Subtest: Phase 4.2: Client "soham (SaaS)" has collected leads, while "Dental Clinic" has 0
+ok 32 - Phase 4.2: Client "soham (SaaS)" has collected leads, while "Dental Clinic" has 0
+  ---
+  duration_ms: 6.713581
+  type: 'test'
+  ...
+# Subtest: Phase 5.1: getUserSessionTokenKey isolates OAuth token by user UID
+ok 33 - Phase 5.1: getUserSessionTokenKey isolates OAuth token by user UID
+  ---
+  duration_ms: 0.306552
+  type: 'test'
+  ...
+# Subtest: Phase 6.1: Authoritative export-leads endpoint returns verified leads for "soham (SaaS)"
+ok 34 - Phase 6.1: Authoritative export-leads endpoint returns verified leads for "soham (SaaS)"
+  ---
+  duration_ms: 10.716874
+  type: 'test'
+  ...
+# Subtest: Phase 6.2: Authoritative export-leads endpoint returns 0 leads for "Dental Clinic"
+ok 35 - Phase 6.2: Authoritative export-leads endpoint returns 0 leads for "Dental Clinic"
+  ---
+  duration_ms: 63.419546
+  type: 'test'
+  ...
+# Subtest: Phase 6.3: Export rejects empty lead list with failure message
+ok 36 - Phase 6.3: Export rejects empty lead list with failure message
+  ---
+  duration_ms: 1.315533
+  type: 'test'
+  ...
+# Subtest: Phase 7.1: User B attempting to access User A workspace clients is rejected with 403
+ok 37 - Phase 7.1: User B attempting to access User A workspace clients is rejected with 403
+  ---
+  duration_ms: 3.925239
+  type: 'test'
+  ...
+# Subtest: Phase 7.2: User B attempting to access User A leads is rejected with 403
+ok 38 - Phase 7.2: User B attempting to access User A leads is rejected with 403
+  ---
+  duration_ms: 2.992961
+  type: 'test'
+  ...
+# Subtest: Phase 7.3: User B attempting to access User A export-leads is rejected with 403
+ok 39 - Phase 7.3: User B attempting to access User A export-leads is rejected with 403
+  ---
+  duration_ms: 3.044693
+  type: 'test'
+  ...
+# Subtest: Phase 7.4: User B attempting to access User A searches is rejected with 403
+ok 40 - Phase 7.4: User B attempting to access User A searches is rejected with 403
+  ---
+  duration_ms: 3.364896
+  type: 'test'
+  ...
+# Subtest: Phase 7.5: User B attempting to access User A google-integrations is rejected with 403
+ok 41 - Phase 7.5: User B attempting to access User A google-integrations is rejected with 403
+  ---
+  duration_ms: 2.985291
+  type: 'test'
+  ...
+# Subtest: Phase 8.1: Client leads status and notes updates work correctly within tenant boundary
+ok 42 - Phase 8.1: Client leads status and notes updates work correctly within tenant boundary
+  ---
+  duration_ms: 8.249753
+  type: 'test'
+  ...
+# [Supabase Debug] Final resolved URL: 
+# [Supabase Debug] Final resolved URL: 
+# Subtest: 1. Client lead filtering isolates 51 leads for SaaS and 0 leads for Dental Clinic
+ok 43 - 1. Client lead filtering isolates 51 leads for SaaS and 0 leads for Dental Clinic
+  ---
+  duration_ms: 1.296275
+  type: 'test'
+  ...
+# Subtest: 2. Export button disabled condition evaluates to true for Dental Clinic with clear reason
+ok 44 - 2. Export button disabled condition evaluates to true for Dental Clinic with clear reason
+  ---
+  duration_ms: 0.450855
+  type: 'test'
+  ...
+# Subtest: 3. Export button disabled condition evaluates to false for SaaS with 51 leads
+ok 45 - 3. Export button disabled condition evaluates to false for SaaS with 51 leads
+  ---
+  duration_ms: 0.213601
+  type: 'test'
+  ...
+# Subtest: 4. Switching active client resolves the correct leads count and active client object
+ok 46 - 4. Switching active client resolves the correct leads count and active client object
+  ---
+  duration_ms: 0.305597
+  type: 'test'
+  ...
+# Subtest: 5. Multi-user OAuth session key isolates tokens by user UID
+ok 47 - 5. Multi-user OAuth session key isolates tokens by user UID
+  ---
+  duration_ms: 0.280904
+  type: 'test'
+  ...
+# Subtest: 6. Sheets export service rejects 0-lead export with descriptive error and returns success: false
+ok 48 - 6. Sheets export service rejects 0-lead export with descriptive error and returns success: false
+  ---
+  duration_ms: 0.629011
+  type: 'test'
+  ...
+# Subtest: 7. Scenario C: Switching back to Dental Clinic returns 0 leads and disables both export buttons
+ok 49 - 7. Scenario C: Switching back to Dental Clinic returns 0 leads and disables both export buttons
+  ---
+  duration_ms: 0.331459
+  type: 'test'
+  ...
+# Subtest: 8. Scenario D: Refresh restoration preserves client selection, lead counts, and user OAuth token isolation
+ok 50 - 8. Scenario D: Refresh restoration preserves client selection, lead counts, and user OAuth token isolation
+  ---
+  duration_ms: 0.277057
+  type: 'test'
+  ...
+# Subtest: Firebase configuration consistency check for linkedin-tool-510912
+not ok 51 - Firebase configuration consistency check for linkedin-tool-510912
+  ---
+  duration_ms: 3.178851
+  type: 'test'
+  location: '/app/applet/tests/FirebaseConfigValidation.test.ts:6:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Project ID must be linkedin-tool-510912
+    + actual - expected
+    
+    + 'studio-8426103728-152a1'
+    - 'linkedin-tool-510912'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'linkedin-tool-510912'
+  actual: 'studio-8426103728-152a1'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (/app/applet/tests/FirebaseConfigValidation.test.ts:13:10)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.start (node:internal/test_runner/test:944:17)
+    startSubtestAfterBootstrap (node:internal/test_runner/harness:296:17)
+  ...
+# Subtest: Firebase authDomain conforms to canonical Firebase format without path or protocol
+ok 52 - Firebase authDomain conforms to canonical Firebase format without path or protocol
+  ---
+  duration_ms: 0.705008
+  type: 'test'
+  ...
+# [Supabase Debug] Final resolved URL: 
+# [Supabase Debug] Final resolved URL: 
+# Subtest: Google OAuth token validation rejects empty or missing tokens
+not ok 53 - Google OAuth token validation rejects empty or missing tokens
+  ---
+  duration_ms: 4.904909
+  type: 'test'
+  location: '/app/applet/tests/GoogleSheetsOAuthTokenValidation.test.ts:6:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly deep-equal:
+    + actual - expected
+    
+      Comparison {
+    +   message: 'Invalid OAuth token.',
+    -   message: 'Invalid or missing OAuth token.',
+        name: 'Error'
+      }
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    name: 'Error'
+    message: 'Invalid or missing OAuth token.'
+  actual:
+  error: 'Invalid OAuth token.'
+  stack: |-
+    verifyGoogleAccountConnection (/app/applet/src/services/auth.ts:276:23)
+    assert.rejects.name (/app/applet/tests/GoogleSheetsOAuthTokenValidation.test.ts:9:13)
+    waitForActual (node:assert:630:21)
+    Function.rejects (node:assert:767:31)
+    TestContext.<anonymous> (/app/applet/tests/GoogleSheetsOAuthTokenValidation.test.ts:7:16)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.start (node:internal/test_runner/test:944:17)
+    startSubtestAfterBootstrap (node:internal/test_runner/harness:296:17)
+  operator: 'rejects'
+  stack: |-
+    async TestContext.<anonymous> (/app/applet/tests/GoogleSheetsOAuthTokenValidation.test.ts:7:3)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+# Subtest: Google Sheets export requires a valid access token
+ok 54 - Google Sheets export requires a valid access token
+  ---
+  duration_ms: 0.873626
+  type: 'test'
+  ...
+# Subtest: Google Sheets export reports failure when zero leads are provided
+ok 55 - Google Sheets export reports failure when zero leads are provided
+  ---
+  duration_ms: 0.24869
+  type: 'test'
+  ...
+# Subtest: Cached access token management functions predictably in memory
+ok 56 - Cached access token management functions predictably in memory
+  ---
+  duration_ms: 0.222189
+  type: 'test'
+  ...
+# Subtest: Google Sheets export verifies actual inserted row count from API response
+ok 57 - Google Sheets export verifies actual inserted row count from API response
+  ---
+  duration_ms: 5.994392
+  type: 'test'
+  ...
+# Subtest: parseInstagramUsernameFromHtml extracts authentic profile handle and ignores reserved paths
+ok 58 - parseInstagramUsernameFromHtml extracts authentic profile handle and ignores reserved paths
+  ---
+  duration_ms: 2.445159
+  type: 'test'
+  ...
+# Subtest: InstagramDiscoveryService assigns Verified status and authentic evidence for website discovery
+ok 59 - InstagramDiscoveryService assigns Verified status and authentic evidence for website discovery
+  ---
+  duration_ms: 0.377095
+  type: 'test'
+  ...
+# Subtest: InstagramDiscoveryService assigns Needs Review for candidate manual handles
+ok 60 - InstagramDiscoveryService assigns Needs Review for candidate manual handles
+  ---
+  duration_ms: 1.088844
+  type: 'test'
+  ...
+# Subtest: InstagramDiscoveryService assigns Not Found when no records or website link exist
+ok 61 - InstagramDiscoveryService assigns Not Found when no records or website link exist
+  ---
+  duration_ms: 0.423947
+  type: 'test'
+  ...
+# Subtest: WikidataLeadProvider parses P2003 Instagram username into Verified profile fields
+ok 62 - WikidataLeadProvider parses P2003 Instagram username into Verified profile fields
+  ---
+  duration_ms: 1.789272
+  type: 'test'
+  ...
+# Subtest: storage and SupabaseDataService persist Instagram profile updates and survive retrieval
+ok 63 - storage and SupabaseDataService persist Instagram profile updates and survive retrieval
+  ---
+  duration_ms: 1.010831
+  type: 'test'
+  ...
+# [Supabase Debug] Final resolved URL: 
+# [Supabase Debug] Final resolved URL: 
+# Subtest: 1. Two authorized accounts (anjanapadhi21@gmail.com and sohamkharat481@gmail.com) are accepted
+ok 64 - 1. Two authorized accounts (anjanapadhi21@gmail.com and sohamkharat481@gmail.com) are accepted
+  ---
+  duration_ms: 2.677034
+  type: 'test'
+  ...
+# Subtest: 2. Any valid user account can sign up and log in (public access)
+ok 65 - 2. Any valid user account can sign up and log in (public access)
+  ---
+  duration_ms: 0.478015
+  type: 'test'
+  ...
+# Subtest: 3. Unauthenticated requests are rejected with 401
+ok 66 - 3. Unauthenticated requests are rejected with 401
+  ---
+  duration_ms: 0.422751
+  type: 'test'
+  ...
+# Subtest: 4. RS256 Firebase token verification rejects mismatched audience or issuer
+ok 67 - 4. RS256 Firebase token verification rejects mismatched audience or issuer
+  ---
+  duration_ms: 0.437079
+  type: 'test'
+  ...
+# [Supabase Debug] Final resolved URL: 
+# [Supabase Debug] Final resolved URL: 
+# Subtest: TEST A: A previously unseen authenticated user can create/initialize their own workspace
+ok 68 - TEST A: A previously unseen authenticated user can create/initialize their own workspace
+  ---
+  duration_ms: 41.802218
+  type: 'test'
+  ...
+# Subtest: TEST B: A second authenticated user with a different email and UID can create their own independent workspace
+ok 69 - TEST B: A second authenticated user with a different email and UID can create their own independent workspace
+  ---
+  duration_ms: 73.741388
+  type: 'test'
+  ...
+# Subtest: TEST C: Repeated requests do not create duplicate workspaces or memberships
+ok 70 - TEST C: Repeated requests do not create duplicate workspaces or memberships
+  ---
+  duration_ms: 12.246142
+  type: 'test'
+  ...
+# Subtest: TEST D: Returning users retrieve their existing workspace
+ok 71 - TEST D: Returning users retrieve their existing workspace
+  ---
+  duration_ms: 6.880962
+  type: 'test'
+  ...
+# Subtest: TEST E: An unauthenticated request cannot create or view a workspace
+ok 72 - TEST E: An unauthenticated request cannot create or view a workspace
+  ---
+  duration_ms: 8.090842
+  type: 'test'
+  ...
+# Subtest: TEST F: A user cannot access another user workspace by changing the workspace ID
+ok 73 - TEST F: A user cannot access another user workspace by changing the workspace ID
+  ---
+  duration_ms: 56.693534
+  type: 'test'
+  ...
+# Subtest: TEST G: An authenticated user whose email is not on any allowlist can still initialize their workspace
+ok 74 - TEST G: An authenticated user whose email is not on any allowlist can still initialize their workspace
+  ---
+  duration_ms: 3.86606
+  type: 'test'
+  ...
+# Subtest: TEST H: Invalid payload or empty workspace name returns explicit error instead of silent failure
+ok 75 - TEST H: Invalid payload or empty workspace name returns explicit error instead of silent failure
+  ---
+  duration_ms: 5.413721
+  type: 'test'
+  ...
+# Subtest: TEST I: Existing authorized users retain access to their existing workspaces
+ok 76 - TEST I: Existing authorized users retain access to their existing workspaces
+  ---
+  duration_ms: 5.23239
+  type: 'test'
+  ...
+# Subtest: 1. Contact-page link discovery extracts same-domain contact, about, and team paths
+ok 77 - 1. Contact-page link discovery extracts same-domain contact, about, and team paths
+  ---
+  duration_ms: 1.881072
+  type: 'test'
+  ...
+# Subtest: 2. mailto and tel extraction parses authentic contact details
+ok 78 - 2. mailto and tel extraction parses authentic contact details
+  ---
+  duration_ms: 0.787527
+  type: 'test'
+  ...
+# Subtest: 3. Visible phone number parsing extracts standard 10-digit phone patterns without postal codes
+ok 79 - 3. Visible phone number parsing extracts standard 10-digit phone patterns without postal codes
+  ---
+  duration_ms: 0.846783
+  type: 'test'
+  ...
+# Subtest: 4. Instagram URL validation and normalization
+ok 80 - 4. Instagram URL validation and normalization
+  ---
+  duration_ms: 0.763551
+  type: 'test'
+  ...
+# Subtest: 5. Duplicate-page prevention ensures subpage links are deduplicated
+ok 81 - 5. Duplicate-page prevention ensures subpage links are deduplicated
+  ---
+  duration_ms: 0.343392
+  type: 'test'
+  ...
+# Subtest: 6. Unsafe redirects and private-network URLs are rejected by sanitizer
+ok 82 - 6. Unsafe redirects and private-network URLs are rejected by sanitizer
+  ---
+  duration_ms: 0.498708
+  type: 'test'
+  ...
+# Subtest: 7. Preservation of previously verified data during failed lookup
+ok 83 - 7. Preservation of previously verified data during failed lookup
+  ---
+  duration_ms: 1.144177
+  type: 'test'
+  ...
+# Subtest: 1. Website HTML Inspection extracts authentic email (mailto:), phone (tel:), and Instagram links
+ok 84 - 1. Website HTML Inspection extracts authentic email (mailto:), phone (tel:), and Instagram links
+  ---
+  duration_ms: 2.650152
+  type: 'test'
+  ...
+# [Diagnostic] Website inspection error for "Unreachable Site Entity" (https://unreachablesite-does-not-exist-9999.com): fetch failed
+# Subtest: 2. Verification status correctly distinguishes Not Checked, Not Found, and Lookup Failed
+ok 85 - 2. Verification status correctly distinguishes Not Checked, Not Found, and Lookup Failed
+  ---
+  duration_ms: 186.126267
+  type: 'test'
+  ...
+# Subtest: 3. Failed lookup preserves previously verified contact and Instagram details
+ok 86 - 3. Failed lookup preserves previously verified contact and Instagram details
+  ---
+  duration_ms: 0.997101
+  type: 'test'
+  ...
+# Subtest: 4. WikidataLeadProvider parses P856, P968, P1329, P2003 correctly without fabrication
+ok 87 - 4. WikidataLeadProvider parses P856, P968, P1329, P2003 correctly without fabrication
+  ---
+  duration_ms: 2.027619
+  type: 'test'
+  ...
+# Subtest: the server supports only the Wikidata provider
+ok 88 - the server supports only the Wikidata provider
+  ---
+  duration_ms: 1.539551
+  type: 'test'
+  ...
+# Subtest: the provider factory creates the Wikidata provider
+ok 89 - the provider factory creates the Wikidata provider
+  ---
+  duration_ms: 0.608565
+  type: 'test'
+  ...
+# Subtest: provider diagnostics report Wikidata configuration
+ok 90 - provider diagnostics report Wikidata configuration
+  ---
+  duration_ms: 0.265945
+  type: 'test'
+  ...
+# Subtest: 1. Phone extraction from tel: links with valid formatting
+ok 91 - 1. Phone extraction from tel: links with valid formatting
+  ---
+  duration_ms: 1.681931
+  type: 'test'
+  ...
+# Subtest: 2. Rejection of unrelated numeric strings and script identifiers in tel: links
+ok 92 - 2. Rejection of unrelated numeric strings and script identifiers in tel: links
+  ---
+  duration_ms: 0.706961
+  type: 'test'
+  ...
+# Subtest: 3. Visible phone number parsing with standard formatting separators
+ok 93 - 3. Visible phone number parsing with standard formatting separators
+  ---
+  duration_ms: 0.530059
+  type: 'test'
+  ...
+# Subtest: 4. Instagram status and handle consistency
+ok 94 - 4. Instagram status and handle consistency
+  ---
+  duration_ms: 1.363242
+  type: 'test'
+  ...
+# Subtest: 5. Save and reload persistence of enriched contact and Instagram details
+ok 95 - 5. Save and reload persistence of enriched contact and Instagram details
+  ---
+  duration_ms: 1.258382
+  type: 'test'
+  ...
+# [Supabase Debug] Final resolved URL: 
+# [Supabase Debug] Final resolved URL: 
+# Subtest: 1. Server token verification rejects missing, malformed, expired, or forged tokens
+ok 96 - 1. Server token verification rejects missing, malformed, expired, or forged tokens
+  ---
+  duration_ms: 4.036876
+  type: 'test'
+  ...
+# Subtest: 2. Server rejects cross-workspace access attempts without valid tenancy authorization
+ok 97 - 2. Server rejects cross-workspace access attempts without valid tenancy authorization
+  ---
+  duration_ms: 1.728845
+  type: 'test'
+  ...
+# Subtest: 3. Schema and RLS policies audit: Enforces tenant isolation and rejects insecure workspace_id IS NOT NULL
+ok 98 - 3. Schema and RLS policies audit: Enforces tenant isolation and rejects insecure workspace_id IS NOT NULL
+  ---
+  duration_ms: 2.776459
+  type: 'test'
+  ...
+# Subtest: 4. Cross-workspace client isolation prevents data leakage between tenants
+ok 99 - 4. Cross-workspace client isolation prevents data leakage between tenants
+  ---
+  duration_ms: 192.642306
+  type: 'test'
+  ...
+# Subtest: 5. WITH CHECK simulation: Reject moving or inserting client into unauthorized workspace
+ok 100 - 5. WITH CHECK simulation: Reject moving or inserting client into unauthorized workspace
+  ---
+  duration_ms: 6.834914
+  type: 'test'
+  ...
+# [Supabase Debug] Final resolved URL: 
+# [Supabase Debug] Final resolved URL: 
+# Subtest: 1. API data routes reject requests with missing or invalid tokens with 401
+ok 101 - 1. API data routes reject requests with missing or invalid tokens with 401
+  ---
+  duration_ms: 119.436959
+  type: 'test'
+  ...
+# Subtest: 2. API data routes reject cross-workspace access attempts with 403 Forbidden
+ok 102 - 2. API data routes reject cross-workspace access attempts with 403 Forbidden
+  ---
+  duration_ms: 98.308665
+  type: 'test'
+  ...
+# Subtest: 3. Client create, list, update, and delete work end-to-end through API with tenant isolation
+ok 103 - 3. Client create, list, update, and delete work end-to-end through API with tenant isolation
+  ---
+  duration_ms: 92.180813
+  type: 'test'
+  ...
+# Subtest: 4. Frontend SupabaseDataService seamlessly routes operations through authenticated API
+ok 104 - 4. Frontend SupabaseDataService seamlessly routes operations through authenticated API
+  ---
+  duration_ms: 24.706082
+  type: 'test'
+  ...
+# Subtest: 5. Lead creation, retrieval, status update, and client lead count persist accurately via API
+ok 105 - 5. Lead creation, retrieval, status update, and client lead count persist accurately via API
+  ---
+  duration_ms: 93.656664
+  type: 'test'
+  ...
+# Subtest: 6. Google Integrations and Export History endpoints persist and retrieve records
+ok 106 - 6. Google Integrations and Export History endpoints persist and retrieve records
+  ---
+  duration_ms: 12.45819
+  type: 'test'
+  ...
+# Subtest: 7. Cross-tenant isolation strictly blocks unauthorized access to leads, searches, integrations, and export history
+ok 107 - 7. Cross-tenant isolation strictly blocks unauthorized access to leads, searches, integrations, and export history
+  ---
+  duration_ms: 61.681356
+  type: 'test'
+  ...
+# Subtest: 8. Export leads endpoint returns authoritative leads and diagnostics for selected client
+ok 108 - 8. Export leads endpoint returns authoritative leads and diagnostics for selected client
+  ---
+  duration_ms: 15.624111
+  type: 'test'
+  ...
+# Subtest: WikidataLeadProvider resolves executive and job title QIDs correctly
+ok 109 - WikidataLeadProvider resolves executive and job title QIDs correctly
+  ---
+  duration_ms: 1.687326
+  type: 'test'
+  ...
+# Subtest: WikidataLeadProvider maps country names to Wikidata QIDs
+ok 110 - WikidataLeadProvider maps country names to Wikidata QIDs
+  ---
+  duration_ms: 0.348801
+  type: 'test'
+  ...
+# [Diagnostic] Wikidata Search HTTP 200 in 388ms (Attempt 1) | Raw bindings: 20 | Mapped unique leads: 17
+# Subtest: WikidataLeadProvider executes real search for India executive leads and returns genuine records
+ok 111 - WikidataLeadProvider executes real search for India executive leads and returns genuine records
+  ---
+  duration_ms: 398.563322
+  type: 'test'
+  ...
+# [Supabase Debug] Final resolved URL: 
+# [Supabase Debug] Final resolved URL: 
+# Subtest: Privacy Policy view component exists and contains all required compliance disclosures
+ok 112 - Privacy Policy view component exists and contains all required compliance disclosures
+  ---
+  duration_ms: 1.918663
+  type: 'test'
+  ...
+# Subtest: Terms of Service view component exists and contains all required terms and limitations
+ok 113 - Terms of Service view component exists and contains all required terms and limitations
+  ---
+  duration_ms: 0.327578
+  type: 'test'
+  ...
+# Subtest: App.tsx integrates unauthenticated routing and path normalization for /privacy and /terms
+ok 114 - App.tsx integrates unauthenticated routing and path normalization for /privacy and /terms
+  ---
+  duration_ms: 0.347962
+  type: 'test'
+  ...
+# Subtest: normalizePath helper function handles trailing slashes, query parameters, uppercase, and empty paths
+ok 115 - normalizePath helper function handles trailing slashes, query parameters, uppercase, and empty paths
+  ---
+  duration_ms: 0.438862
+  type: 'test'
+  ...
+# Subtest: LoginScreen.tsx and Sidebar.tsx contain accessible links to Privacy Policy and Terms of Service
+ok 116 - LoginScreen.tsx and Sidebar.tsx contain accessible links to Privacy Policy and Terms of Service
+  ---
+  duration_ms: 0.339648
+  type: 'test'
+  ...
+# [Supabase Debug] Final resolved URL: 
+# [Supabase Debug] Final resolved URL: 
+# Subtest: Multi-Tenant Security & Data Isolation Audit
+    # Subtest: 1. User A and User B produce strictly distinct deterministic tenant identities
+    ok 1 - 1. User A and User B produce strictly distinct deterministic tenant identities
+      ---
+      duration_ms: 1.238573
+      type: 'test'
+      ...
+    # Subtest: 2. Onboarding User A generates tenant context exclusively for User A
+    ok 2 - 2. Onboarding User A generates tenant context exclusively for User A
+      ---
+      duration_ms: 98.100149
+      type: 'test'
+      ...
+    # Subtest: 3. Onboarding User B generates tenant context exclusively for User B
+    ok 3 - 3. Onboarding User B generates tenant context exclusively for User B
+      ---
+      duration_ms: 6.887442
+      type: 'test'
+      ...
+    # Subtest: 4. User A CANNOT access User B workspace leads (Cross-Tenant Rejection HTTP 403)
+    ok 4 - 4. User A CANNOT access User B workspace leads (Cross-Tenant Rejection HTTP 403)
+      ---
+      duration_ms: 5.809193
+      type: 'test'
+      ...
+    # Subtest: 5. User A CANNOT create leads in User B workspace (Cross-Tenant Rejection HTTP 403)
+    ok 5 - 5. User A CANNOT create leads in User B workspace (Cross-Tenant Rejection HTTP 403)
+      ---
+      duration_ms: 9.310844
+      type: 'test'
+      ...
+    # Subtest: 6. User A CANNOT access User B workspace clients (Cross-Tenant Rejection HTTP 403)
+    ok 6 - 6. User A CANNOT access User B workspace clients (Cross-Tenant Rejection HTTP 403)
+      ---
+      duration_ms: 3.297757
+      type: 'test'
+      ...
+    # Subtest: 7. User A CANNOT access User B organization members (Cross-Tenant Rejection HTTP 403)
+    ok 7 - 7. User A CANNOT access User B organization members (Cross-Tenant Rejection HTTP 403)
+      ---
+      duration_ms: 44.306603
+      type: 'test'
+      ...
+    # Subtest: 8. User A CANNOT send invitations to User B organization (Cross-Tenant Rejection HTTP 403)
+    ok 8 - 8. User A CANNOT send invitations to User B organization (Cross-Tenant Rejection HTTP 403)
+      ---
+      duration_ms: 4.912671
+      type: 'test'
+      ...
+    # Subtest: 9. Unauthenticated requests are rejected with HTTP 401 Unauthorized
+    ok 9 - 9. Unauthenticated requests are rejected with HTTP 401 Unauthorized
+      ---
+      duration_ms: 9.186661
+      type: 'test'
+      ...
+    # Subtest: 10. User A CAN access User A workspace leads cleanly
+    ok 10 - 10. User A CAN access User A workspace leads cleanly
+      ---
+      duration_ms: 5.269537
+      type: 'test'
+      ...
+    1..10
+ok 117 - Multi-Tenant Security & Data Isolation Audit
+  ---
+  duration_ms: 206.495936
+  type: 'suite'
+  ...
+1..117
+# tests 126
+# suites 1
+# pass 124
+# fail 2
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 9100.543278

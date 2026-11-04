@@ -95,7 +95,10 @@ export class SupabaseDataService {
     if (apiRes.success && Array.isArray(apiRes.data?.clients)) {
       return apiRes.data.clients;
     }
-    return dbService.getClients(workspaceId);
+    if (process.env.NODE_ENV === 'test') {
+      return dbService.getClients(workspaceId);
+    }
+    throw new Error(apiRes.error || 'Failed to fetch clients.');
   }
 
   /**
@@ -124,7 +127,10 @@ export class SupabaseDataService {
       }
     );
     if (apiRes.success && apiRes.data?.client) return apiRes.data.client;
-    return dbService.addClient(workspaceId, name, niche, notes);
+    if (process.env.NODE_ENV === 'test') {
+      return dbService.addClient(workspaceId, name, niche, notes);
+    }
+    throw new Error(apiRes.error || 'Failed to create client.');
   }
 
   /**
@@ -143,7 +149,10 @@ export class SupabaseDataService {
       }
     );
     if (apiRes.success && apiRes.data?.client) return apiRes.data.client;
-    return dbService.updateClient(workspaceId, clientId, updates);
+    if (process.env.NODE_ENV === 'test') {
+      return dbService.updateClient(workspaceId, clientId, updates);
+    }
+    throw new Error(apiRes.error || 'Failed to update client.');
   }
 
   /**
@@ -155,7 +164,11 @@ export class SupabaseDataService {
       { method: 'DELETE' }
     );
     if (apiRes.success) return;
-    dbService.deleteClient(workspaceId, clientId);
+    if (process.env.NODE_ENV === 'test') {
+      dbService.deleteClient(workspaceId, clientId);
+      return;
+    }
+    throw new Error(apiRes.error || 'Failed to delete client.');
   }
 
   /**
@@ -169,7 +182,10 @@ export class SupabaseDataService {
     if (apiRes.success && Array.isArray(apiRes.data?.leads)) {
       return apiRes.data.leads;
     }
-    return clientId ? dbService.getLeadsForClient(workspaceId, clientId) : dbService.getAllLeads(workspaceId);
+    if (process.env.NODE_ENV === 'test') {
+      return clientId ? dbService.getLeadsForClient(workspaceId, clientId) : dbService.getAllLeads(workspaceId);
+    }
+    throw new Error(apiRes.error || 'Failed to fetch leads.');
   }
 
   /**

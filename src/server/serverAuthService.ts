@@ -244,37 +244,34 @@ export async function verifyWorkspaceAccess(req: any, workspaceId: string): Prom
         };
     }
 
-    if (!supabase) {
-        return { authorized: false, status: 403, error: 'Access denied to workspace.' };
-    }
+    if (supabase) {
+        try {
+            const { data: ws, error: wsErr } = await supabase
+                .from('workspaces')
+                .select('organization_id, owner_id')
+                .eq('id', workspaceId)
+                .maybeSingle();
 
-    try {
-        const { data: ws, error: wsErr } = await supabase
-            .from('workspaces')
-            .select('organization_id, owner_id')
-            .eq('id', workspaceId)
-            .maybeSingle();
+            if (!wsErr && ws) {
+                if (ws.owner_id === authResult.user.userId) {
+                    return { 
+                        authorized: true, 
+                        status: 200, 
+                        user: { ...authResult.user, role: 'owner', organizationId: ws.organization_id || userOrgId } 
+                    };
+                }
 
-        if (wsErr || !ws) {
-            return { authorized: false, status: 404, error: 'Workspace not found or access denied.' };
+                if (ws.organization_id) {
+                    return verifyOrganizationAccess(req, ws.organization_id);
+                }
+            }
+        } catch (err) {
+            console.warn('Workspace verification database error:', err);
         }
-
-        if (ws.owner_id === authResult.user.userId) {
-            return { 
-                authorized: true, 
-                status: 200, 
-                user: { ...authResult.user, role: 'owner', organizationId: ws.organization_id || userOrgId } 
-            };
-        }
-
-        if (ws.organization_id) {
-            return verifyOrganizationAccess(req, ws.organization_id);
-        }
-    } catch {
-        return { authorized: false, status: 403, error: 'Access denied to workspace.' };
     }
 
     // Fail closed: User is NOT the owner nor a member of the workspace's organization
+    // If Supabase is missing and we're not in the auth map, it's a 403
     return { authorized: false, status: 403, error: 'Access denied: You do not have access to this workspace.' };
 }
 

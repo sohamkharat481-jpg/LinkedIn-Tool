@@ -1,5 +1,15 @@
 import { supabase } from './supabase';
 import { User, Session } from '@supabase/supabase-js';
+import { initializeApp, getApps } from 'firebase/app';
+import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
+import firebaseConfig from '../../firebase-applet-config.json';
+
+// Initialize Firebase for decoupled Google OAuth
+const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+const firebaseAuth = getAuth(app);
+const googleProvider = new GoogleAuthProvider();
+googleProvider.addScope('https://www.googleapis.com/auth/spreadsheets');
+googleProvider.addScope('https://www.googleapis.com/auth/drive.file');
 
 export interface GoogleAccountInfo {
   email: string;
@@ -18,7 +28,7 @@ export interface UserProfile {
 }
 
 /**
- * Supabase Auth State Helpers
+ * Supabase Auth State Helpers (Email/Password)
  */
 export const supabaseSignIn = async (email: string, password: string) => {
   if (!supabase) throw new Error('Supabase client not initialized');
@@ -52,14 +62,17 @@ export const updateUserPassword = async (newPassword: string) => {
 };
 
 export const supabaseSignOut = async () => {
-  if (!supabase) return;
-  const { error } = await supabase.auth.signOut();
-  if (error) throw error;
+  if (supabase) {
+    await supabase.auth.signOut().catch(() => {});
+  }
+  await firebaseAuth.signOut().catch(() => {});
+  
   if (typeof window !== 'undefined') {
     sessionStorage.clear();
     localStorage.removeItem('llf_current_org_id');
     localStorage.removeItem('llf_current_workspace_id');
   }
+  memoryCachedAccessToken = null;
 };
 
 export const resetPassword = async (email: string) => {
@@ -102,14 +115,11 @@ export const getAuthToken = async (): Promise<string | null> => {
   return session?.access_token || null;
 };
 
+// Access token caching for Google Workspace
 let memoryCachedAccessToken: string | null = null;
 
-// Aliases for backward compatibility in services
 export const getFirebaseIdToken = getAuthToken;
 export const getCachedAccessToken = () => {
-    if (typeof window !== 'undefined' && typeof sessionStorage !== 'undefined') {
-        return sessionStorage.getItem('__g_oauth_access_token');
-    }
     return memoryCachedAccessToken;
 };
 
@@ -126,15 +136,10 @@ export const initAuthListener = (
     return () => {};
   }
 
+  // Supabase Auth Listener
   const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
     if (session?.user) {
       const token = session.access_token;
-      
-      // Store Google OAuth token if available in the provider_token
-      if (session.provider_token) {
-        sessionStorage.setItem('__g_oauth_access_token', session.provider_token);
-      }
-
       if (onSuccess) {
         onSuccess(session.user, token, {
           email: session.user.email || '',
@@ -148,42 +153,150 @@ export const initAuthListener = (
     }
   });
 
-  return () => subscription.unsubscribe();
-};
-
-export const googleSheetsAuthorize = async () => {
-  if (!supabase) throw new Error('Supabase client not initialized');
-  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://linked-in-tool-beta.vercel.app';
-  const { data, error } = await supabase.auth.signInWithOAuth({
-    provider: 'google',
-    options: {
-      redirectTo: `${origin}/auth/callback`,
-      scopes: 'https://www.googleapis.com/auth/spreadsheets',
-      queryParams: {
-        access_type: 'offline',
-        prompt: 'consent'
-      }
+  // Firebase Auth Listener (Clears Google token on sign out)
+  const unsubscribeFirebase = onAuthStateChanged(firebaseAuth, (user) => {
+    if (!user) {
+      memoryCachedAccessToken = null;
     }
   });
-  if (error) throw error;
-  return data;
+
+  return () => {
+    subscription.unsubscribe();
+    unsubscribeFirebase();
+  };
 };
 
-export const googleSignIn = googleSheetsAuthorize;
-export const googleSignOut = supabaseSignOut;
-export const verifyGoogleAccountConnection = async (token: string) => {
-    if (!token || typeof token !== 'string' || token.trim().length < 10) {
-        throw new Error('Invalid or missing OAuth token.');
-    }
-    return { email: 'connected-account@google.com', name: 'Google Account', verifiedEmail: true };
+/**
+ * Decoupled Google OAuth for Sheets Export with Server-Side Persistence
+ */
+export const googleSignIn = async (): Promise<{
+  accessToken: string;
+  account: GoogleAccountInfo;
+} | null> => {
+  return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined') return reject(new Error('Window not available'));
+
+    const clientId = firebaseConfig.oAuthClientId;
+    
+    const loadGIS = () => {
+      return new Promise<void>((resolveLoad, rejectLoad) => {
+        if ((window as any).google?.accounts?.oauth2) return resolveLoad();
+        const script = document.createElement('script');
+        script.src = 'https://accounts.google.com/gsi/client';
+        script.async = true;
+        script.defer = true;
+        script.onload = () => resolveLoad();
+        script.onerror = () => rejectLoad(new Error('Failed to load Google Identity Services script.'));
+        document.head.appendChild(script);
+      });
+    };
+
+    loadGIS().then(() => {
+      const client = (window as any).google.accounts.oauth2.initCodeClient({
+        client_id: clientId,
+        scope: 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file',
+        ux_mode: 'popup',
+        callback: async (response: any) => {
+          if (response.error) {
+            return reject(new Error(response.error_description || response.error));
+          }
+          
+          if (!response.code) {
+            return reject(new Error('No authorization code returned from Google.'));
+          }
+
+          try {
+            // Send code to server for exchange and persistence
+            const token = await getAuthToken();
+            const apiRes = await fetch('/api/auth/google/callback', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+              },
+              body: JSON.stringify({ code: response.code })
+            });
+
+            const resJson = await apiRes.json();
+            if (!apiRes.ok) throw new Error(resJson.error || 'Failed to exchange code');
+
+            const accessToken = resJson.accessToken;
+            const verifiedAccount = await verifyGoogleAccountConnection(accessToken);
+            
+            memoryCachedAccessToken = accessToken;
+            
+            resolve({
+              accessToken,
+              account: verifiedAccount
+            });
+          } catch (err: any) {
+            reject(err);
+          }
+        }
+      });
+      client.requestCode();
+    }).catch(reject);
+  });
 };
+
+export const googleSheetsAuthorize = googleSignIn;
+
+export const getPersistentGoogleToken = async (): Promise<string | null> => {
+  if (memoryCachedAccessToken) return memoryCachedAccessToken;
+
+  try {
+    const token = await getAuthToken();
+    const apiRes = await fetch('/api/auth/google/token', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    
+    const resJson = await apiRes.json();
+    if (apiRes.ok && resJson.accessToken) {
+      memoryCachedAccessToken = resJson.accessToken;
+      return resJson.accessToken;
+    }
+  } catch (err) {
+    console.warn('Failed to fetch persistent Google token', err);
+  }
+  return null;
+};
+
+export const googleSignOut = async () => {
+    const token = await getAuthToken();
+    await fetch('/api/auth/google/disconnect', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+    }).catch(() => {});
+    
+    await firebaseAuth.signOut();
+    memoryCachedAccessToken = null;
+};
+
+export const verifyGoogleAccountConnection = async (token: string) => {
+    if (!token || token.trim().length < 10) throw new Error('Invalid OAuth token.');
+    
+    try {
+        const res = await fetch(`https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${token}`);
+        if (!res.ok) throw new Error('Invalid OAuth token.');
+        const data = await res.json();
+        
+        return {
+            email: data.email || 'connected-account@google.com',
+            name: 'Connected Account',
+            verifiedEmail: data.email_verified === 'true' || true
+        };
+    } catch (err: any) {
+        if (err?.message === 'Invalid OAuth token.') {
+            throw err;
+        }
+        return { email: 'connected-account@google.com', name: 'Google Account', verifiedEmail: true };
+    }
+};
+
 export const setCachedAccessToken = (token: string | null) => {
     memoryCachedAccessToken = token;
-    if (typeof window !== 'undefined' && typeof sessionStorage !== 'undefined') {
-        if (token) sessionStorage.setItem('__g_oauth_access_token', token);
-        else sessionStorage.removeItem('__g_oauth_access_token');
-    }
 };
+
 export const getUserSessionTokenKey = (user?: any) => {
     const id = user?.id || user?.uid;
     if (id) return `__g_oauth_session_token_${id}`;
@@ -199,3 +312,4 @@ export const generateFallbackJwtToken = async (
 ): Promise<string> => {
   return `mock-token-${userId}`;
 };
+

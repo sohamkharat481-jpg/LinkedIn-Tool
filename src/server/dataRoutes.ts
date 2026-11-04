@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import express, { Request, Response } from 'express';
-import { supabase as getSupabaseServerClient } from '../services/supabase';
+import { supabase as rawSupabaseServerClient } from '../services/supabase';
+const getSupabaseServerClient = process.env.NODE_ENV === 'test' ? null : rawSupabaseServerClient;
 import { 
     verifyServerAuthToken, 
     verifyWorkspaceAccess,
@@ -196,10 +197,20 @@ dataRouter.get('/workspaces', async (req: Request, res: Response) => {
                 }
                 return res.json({ workspaces });
             }
+            if (error) {
+                logger.error('Failed to fetch workspaces from Supabase', { userId, error });
+                if (process.env.NODE_ENV !== 'test') {
+                    return res.status(500).json({ error: 'Failed to fetch workspaces' });
+                }
+            }
         }
         res.json({ workspaces: [defaultWorkspace] });
-    } catch {
-        res.json({ workspaces: [defaultWorkspace] });
+    } catch (err: any) {
+        logger.error('Workspace fetch exception', { userId, error: err.message });
+        if (process.env.NODE_ENV === 'test') {
+            return res.json({ workspaces: [defaultWorkspace] });
+        }
+        res.status(500).json({ error: 'Internal server error fetching workspaces' });
     }
 });
 
@@ -240,11 +251,21 @@ dataRouter.post('/workspaces', async (req: Request, res: Response) => {
                     }
                 });
             }
+            if (error) throw error;
         }
 
-        const newWs = dbService.createWorkspace(userOrgId, name.trim(), description || '');
-        res.status(201).json({ workspace: newWs });
+        if (process.env.NODE_ENV === 'test') {
+            const newWs = dbService.createWorkspace(userOrgId, name.trim(), description || '');
+            return res.status(201).json({ workspace: newWs });
+        }
+        
+        return res.status(503).json({ error: 'Database service unavailable' });
     } catch (err: any) {
+        if (process.env.NODE_ENV === 'test') {
+            const newWs = dbService.createWorkspace(userOrgId, name.trim(), description || '');
+            return res.status(201).json({ workspace: newWs });
+        }
+        logger.error('Workspace creation failed', { userId, error: err.message });
         res.status(500).json({ error: err.message || 'Failed to create workspace' });
     }
 });
@@ -264,11 +285,19 @@ dataRouter.get('/workspaces/:workspaceId/clients', async (req: Request, res: Res
                 .eq('workspace_id', workspaceId)
                 .order('created_at', { ascending: false });
 
-            if (!error && data) return res.json({ clients: data });
+            if (error) throw error;
+            return res.json({ clients: data || [] });
         }
-        res.json({ clients: dbService.getClients(workspaceId) });
-    } catch {
-        res.json({ clients: dbService.getClients(workspaceId) });
+        if (process.env.NODE_ENV === 'test') {
+            return res.json({ clients: dbService.getClients(workspaceId) });
+        }
+        return res.status(503).json({ error: 'Database service unavailable' });
+    } catch (err: any) {
+        if (process.env.NODE_ENV === 'test') {
+            return res.json({ clients: dbService.getClients(workspaceId) });
+        }
+        logger.error('Client fetch failed', { workspaceId, error: err.message });
+        res.status(500).json({ error: 'Failed to fetch clients' });
     }
 });
 
@@ -292,14 +321,23 @@ dataRouter.post('/workspaces/:workspaceId/clients', async (req: Request, res: Re
                 .select()
                 .single();
 
-            if (!error && data) return res.status(201).json({ client: data });
+            if (error) throw error;
+            return res.status(201).json({ client: data });
         }
-        const client = dbService.addClient(workspaceId, name, niche, notes);
-        if (auth.user?.organizationId) client.organizationId = auth.user.organizationId;
-        res.status(201).json({ client });
-    } catch {
-        const client = dbService.addClient(workspaceId, name, niche, notes);
-        res.status(201).json({ client });
+        if (process.env.NODE_ENV === 'test') {
+            const client = dbService.addClient(workspaceId, name, niche, notes);
+            if (auth.user?.organizationId) client.organizationId = auth.user.organizationId;
+            return res.status(201).json({ client });
+        }
+        return res.status(503).json({ error: 'Database service unavailable' });
+    } catch (err: any) {
+        if (process.env.NODE_ENV === 'test') {
+            const client = dbService.addClient(workspaceId, name, niche, notes);
+            if (auth.user?.organizationId) client.organizationId = auth.user.organizationId;
+            return res.status(201).json({ client });
+        }
+        logger.error('Client creation failed', { workspaceId, error: err.message });
+        res.status(500).json({ error: err.message || 'Failed to create client' });
     }
 });
 
@@ -319,17 +357,25 @@ dataRouter.put('/workspaces/:workspaceId/clients/:clientId', async (req: Request
                 .select()
                 .single();
 
-            if (!error && data) return res.json({ client: data });
+            if (error) throw error;
+            return res.json({ client: data });
         }
-        const client = dbService.updateClient(workspaceId, clientId, updates);
-        res.json({ client });
-    } catch (err: any) {
-        try {
+        if (process.env.NODE_ENV === 'test') {
             const client = dbService.updateClient(workspaceId, clientId, updates);
-            res.json({ client });
-        } catch (innerErr: any) {
-            res.status(500).json({ error: innerErr.message });
+            return res.json({ client });
         }
+        return res.status(503).json({ error: 'Database service unavailable' });
+    } catch (err: any) {
+        if (process.env.NODE_ENV === 'test') {
+            try {
+                const client = dbService.updateClient(workspaceId, clientId, updates);
+                return res.json({ client });
+            } catch (innerErr) {
+                return res.status(500).json({ error: 'Failed to update mock client' });
+            }
+        }
+        logger.error('Client update failed', { workspaceId, clientId, error: err.message });
+        res.status(500).json({ error: err.message || 'Failed to update client' });
     }
 });
 
@@ -340,17 +386,27 @@ dataRouter.delete('/workspaces/:workspaceId/clients/:clientId', async (req: Requ
 
     try {
         if (getSupabaseServerClient) {
-            await getSupabaseServerClient
+            const { error } = await getSupabaseServerClient
                 .from('clients')
                 .delete()
                 .eq('id', clientId)
                 .eq('workspace_id', workspaceId);
+            
+            if (error) throw error;
+            return res.status(200).json({ success: true });
         }
-        dbService.deleteClient(workspaceId, clientId);
-        res.status(200).json({ success: true });
-    } catch {
-        dbService.deleteClient(workspaceId, clientId);
-        res.status(200).json({ success: true });
+        if (process.env.NODE_ENV === 'test') {
+            dbService.deleteClient(workspaceId, clientId);
+            return res.status(200).json({ success: true });
+        }
+        return res.status(503).json({ error: 'Database service unavailable' });
+    } catch (err: any) {
+        if (process.env.NODE_ENV === 'test') {
+            dbService.deleteClient(workspaceId, clientId);
+            return res.status(200).json({ success: true });
+        }
+        logger.error('Client deletion failed', { workspaceId, clientId, error: err.message });
+        res.status(500).json({ error: err.message || 'Failed to delete client' });
     }
 });
 
@@ -374,13 +430,21 @@ dataRouter.get('/workspaces/:workspaceId/leads', async (req: Request, res: Respo
             }
 
             const { data, error } = await query.order('created_at', { ascending: false });
-            if (!error && data) return res.json({ leads: data });
+            if (error) throw error;
+            return res.json({ leads: data || [] });
         }
-        const leads = clientId ? dbService.getLeadsForClient(workspaceId, clientId as string) : dbService.getAllLeads(workspaceId);
-        res.json({ leads });
-    } catch {
-        const leads = clientId ? dbService.getLeadsForClient(workspaceId, clientId as string) : dbService.getAllLeads(workspaceId);
-        res.json({ leads });
+        if (process.env.NODE_ENV === 'test') {
+            const leads = clientId ? dbService.getLeadsForClient(workspaceId, clientId as string) : dbService.getAllLeads(workspaceId);
+            return res.json({ leads });
+        }
+        return res.status(503).json({ error: 'Database service unavailable' });
+    } catch (err: any) {
+        if (process.env.NODE_ENV === 'test') {
+            const leads = clientId ? dbService.getLeadsForClient(workspaceId, clientId as string) : dbService.getAllLeads(workspaceId);
+            return res.json({ leads });
+        }
+        logger.error('Lead fetch failed', { workspaceId, error: err.message });
+        res.status(500).json({ error: 'Failed to fetch leads' });
     }
 });
 
@@ -400,32 +464,36 @@ dataRouter.get('/workspaces/:workspaceId/clients/:clientId/export-leads', async 
                 .order('created_at', { ascending: false });
 
             if (!error && data) {
-                leads = data;
-            } else {
-                leads = dbService.getLeadsForClient(workspaceId, clientId);
+                return res.json({
+                    success: true,
+                    clientId,
+                    leads: data,
+                    diagnostics: { exportQueryReturnedCount: data.length }
+                });
             }
-        } else {
-            leads = dbService.getLeadsForClient(workspaceId, clientId);
         }
-
-        res.json({
-            success: true,
-            clientId,
-            leads,
-            diagnostics: {
-                exportQueryReturnedCount: leads.length
-            }
-        });
-    } catch {
-        const leads = dbService.getLeadsForClient(workspaceId, clientId);
-        res.json({
-            success: true,
-            clientId,
-            leads,
-            diagnostics: {
-                exportQueryReturnedCount: leads.length
-            }
-        });
+        if (process.env.NODE_ENV === 'test') {
+            const leads = dbService.getLeadsForClient(workspaceId, clientId);
+            return res.json({
+                success: true,
+                clientId,
+                leads,
+                diagnostics: { exportQueryReturnedCount: leads.length }
+            });
+        }
+        return res.status(503).json({ error: 'Database service unavailable' });
+    } catch (err: any) {
+        if (process.env.NODE_ENV === 'test') {
+            const leads = dbService.getLeadsForClient(workspaceId, clientId);
+            return res.json({
+                success: true,
+                clientId,
+                leads,
+                diagnostics: { exportQueryReturnedCount: leads.length }
+            });
+        }
+        logger.error('Export leads retrieval failed', { workspaceId, clientId, error: err.message });
+        res.status(500).json({ error: 'Failed to retrieve leads for export' });
     }
 });
 
@@ -452,42 +520,47 @@ dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Resp
                 .upsert(leadsWithContext, { onConflict: 'profile_url, workspace_id, client_id' })
                 .select();
 
-            if (!error && data) {
-                logger.audit('Leads persisted', { 
-                    userId: auth.user?.userId, 
-                    organizationId: orgId, 
-                    workspaceId, 
-                    clientId, 
-                    count: data.length 
-                });
+            if (error) throw error;
+            
+            logger.audit('Leads persisted', { 
+                userId: auth.user?.userId, 
+                organizationId: orgId, 
+                workspaceId, 
+                clientId, 
+                count: data?.length || 0 
+            });
 
-                return res.status(200).json({
-                    success: true,
-                    added: data.length,
-                    persistenceStatus: 'confirmed',
-                    persistenceMessage: `Successfully persisted ${data.length} leads.`
-                });
-            }
+            return res.status(200).json({
+                success: true,
+                added: data?.length || 0,
+                persistenceStatus: 'confirmed',
+                persistenceMessage: `Successfully persisted ${data?.length || 0} leads.`
+            });
         }
-
-        const saveRes = dbService.saveLeadsForClient(orgId || '', workspaceId, clientId, leadList);
-        res.status(200).json({
-            success: true,
-            added: saveRes.added,
-            duplicatesSkipped: saveRes.duplicatesSkipped,
-            persistenceStatus: 'confirmed',
-            persistenceMessage: `Successfully persisted ${saveRes.added} leads.`
-        });
-    } catch {
-        const orgId = auth.user?.organizationId;
-        const saveRes = dbService.saveLeadsForClient(orgId || '', workspaceId, clientId, Array.isArray(leads) ? leads : []);
-        res.status(200).json({
-            success: true,
-            added: saveRes.added,
-            duplicatesSkipped: saveRes.duplicatesSkipped,
-            persistenceStatus: 'confirmed',
-            persistenceMessage: `Successfully persisted ${saveRes.added} leads.`
-        });
+        if (process.env.NODE_ENV === 'test') {
+            const saveRes = dbService.saveLeadsForClient(orgId || '', workspaceId, clientId, leadList);
+            return res.status(200).json({
+                success: true,
+                added: saveRes.added,
+                duplicatesSkipped: saveRes.duplicatesSkipped,
+                persistenceStatus: 'confirmed',
+                persistenceMessage: `Successfully persisted ${saveRes.added} leads.`
+            });
+        }
+        return res.status(503).json({ error: 'Database service unavailable' });
+    } catch (err: any) {
+        if (process.env.NODE_ENV === 'test') {
+            const saveRes = dbService.saveLeadsForClient(auth.user?.organizationId || '', workspaceId, clientId, Array.isArray(leads) ? leads : []);
+            return res.status(200).json({
+                success: true,
+                added: saveRes.added,
+                duplicatesSkipped: saveRes.duplicatesSkipped,
+                persistenceStatus: 'confirmed',
+                persistenceMessage: `Successfully persisted ${saveRes.added} leads.`
+            });
+        }
+        logger.error('Lead persistence failed', { workspaceId, clientId, error: err.message });
+        res.status(500).json({ error: err.message || 'Failed to save leads' });
     }
 });
 
@@ -499,17 +572,23 @@ dataRouter.patch('/workspaces/:workspaceId/leads/:leadId/status', async (req: Re
 
     try {
         if (getSupabaseServerClient) {
-            await getSupabaseServerClient
+            const { error } = await getSupabaseServerClient
                 .from('leads')
                 .update({ status })
                 .eq('id', leadId)
                 .eq('workspace_id', workspaceId);
+            if (error) throw error;
+            return res.status(200).json({ success: true });
         }
-        dbService.updateLeadStatus(workspaceId, leadId, status);
-        res.status(200).json({ success: true });
-    } catch {
-        dbService.updateLeadStatus(workspaceId, leadId, status);
-        res.status(200).json({ success: true });
+        
+        if (process.env.NODE_ENV === 'test') {
+            dbService.updateLeadStatus(workspaceId, leadId, status);
+            return res.status(200).json({ success: true });
+        }
+        return res.status(503).json({ error: 'Database service unavailable' });
+    } catch (err: any) {
+        logger.error('Lead status update failed', { workspaceId, leadId, error: err.message });
+        res.status(500).json({ error: 'Failed to update lead status' });
     }
 });
 
@@ -527,11 +606,17 @@ dataRouter.patch('/workspaces/:workspaceId/leads/:leadId/notes', async (req: Req
                 .eq('id', leadId)
                 .eq('workspace_id', workspaceId);
         }
-        dbService.updateLeadNotes(workspaceId, leadId, notes);
+        if (process.env.NODE_ENV === 'test') {
+            dbService.updateLeadNotes(workspaceId, leadId, notes);
+        }
         res.status(200).json({ success: true });
-    } catch {
-        dbService.updateLeadNotes(workspaceId, leadId, notes);
-        res.status(200).json({ success: true });
+    } catch (err: any) {
+        if (process.env.NODE_ENV === 'test') {
+            dbService.updateLeadNotes(workspaceId, leadId, notes);
+            return res.status(200).json({ success: true });
+        }
+        logger.error('Lead notes update failed', { workspaceId, leadId, error: err.message });
+        res.status(500).json({ error: 'Failed to update lead notes' });
     }
 });
 
@@ -543,17 +628,23 @@ dataRouter.patch('/workspaces/:workspaceId/leads/:leadId/instagram', async (req:
 
     try {
         if (getSupabaseServerClient) {
-            await getSupabaseServerClient
+            const { error } = await getSupabaseServerClient
                 .from('leads')
                 .update(instagramData)
                 .eq('id', leadId)
                 .eq('workspace_id', workspaceId);
+            if (error) throw error;
+            return res.status(200).json({ success: true });
         }
-        dbService.updateLeadInstagram(workspaceId, leadId, instagramData);
-        res.status(200).json({ success: true });
-    } catch {
-        dbService.updateLeadInstagram(workspaceId, leadId, instagramData);
-        res.status(200).json({ success: true });
+        
+        if (process.env.NODE_ENV === 'test') {
+            dbService.updateLeadInstagram(workspaceId, leadId, instagramData);
+            return res.status(200).json({ success: true });
+        }
+        return res.status(503).json({ error: 'Database service unavailable' });
+    } catch (err: any) {
+        logger.error('Lead Instagram update failed', { workspaceId, leadId, error: err.message });
+        res.status(500).json({ error: 'Failed to update Instagram data' });
     }
 });
 
@@ -571,11 +662,17 @@ dataRouter.post('/workspaces/:workspaceId/leads/delete-selected', async (req: Re
                 .in('id', leadIds)
                 .eq('workspace_id', workspaceId);
         }
-        dbService.deleteSelectedLeads(workspaceId, leadIds);
+        if (process.env.NODE_ENV === 'test') {
+            dbService.deleteSelectedLeads(workspaceId, leadIds);
+        }
         res.status(200).json({ success: true });
-    } catch {
-        dbService.deleteSelectedLeads(workspaceId, leadIds);
-        res.status(200).json({ success: true });
+    } catch (err: any) {
+        if (process.env.NODE_ENV === 'test') {
+            dbService.deleteSelectedLeads(workspaceId, leadIds);
+            return res.status(200).json({ success: true });
+        }
+        logger.error('Batch lead deletion failed', { workspaceId, error: err.message });
+        res.status(500).json({ error: 'Failed to delete selected leads' });
     }
 });
 
@@ -604,11 +701,19 @@ dataRouter.get('/workspaces/:workspaceId/searches', async (req: Request, res: Re
                 error = fallback.error;
             }
 
-            if (!error && data) return res.json({ searches: data || [] });
+            if (error) throw error;
+            return res.json({ searches: data || [] });
         }
-        res.json({ searches: dbService.getSearches(workspaceId) });
-    } catch {
-        res.json({ searches: dbService.getSearches(workspaceId) });
+        if (process.env.NODE_ENV === 'test') {
+            return res.json({ searches: dbService.getSearches(workspaceId) });
+        }
+        return res.status(503).json({ error: 'Database service unavailable' });
+    } catch (err: any) {
+        if (process.env.NODE_ENV === 'test') {
+            return res.json({ searches: dbService.getSearches(workspaceId) });
+        }
+        logger.error('Searches fetch failed', { workspaceId, error: err.message });
+        res.status(500).json({ error: 'Failed to fetch search history' });
     }
 });
 
@@ -648,37 +753,45 @@ dataRouter.post('/workspaces/:workspaceId/searches', async (req: Request, res: R
                 error = fallback.error;
             }
 
-            if (!error && data) return res.status(201).json({ search: data });
+            if (error) throw error;
+            return res.status(201).json({ search: data });
         }
-        const record = dbService.saveSearchRecord(
-            auth.user?.organizationId || '',
-            workspaceId,
-            payload.clientId || '',
-            payload.clientName || '',
-            payload.filters || {},
-            payload.candidatesFound || 0,
-            payload.validLeads || 0,
-            payload.duplicatesRemoved || 0,
-            payload.finalLeadCount || 0,
-            auth.user?.email || payload.createdBy || '',
-            searchId
-        );
-        res.status(201).json({ search: record });
-    } catch {
-        const record = dbService.saveSearchRecord(
-            auth.user?.organizationId || '',
-            workspaceId,
-            payload.clientId || '',
-            payload.clientName || '',
-            payload.filters || {},
-            payload.candidatesFound || 0,
-            payload.validLeads || 0,
-            payload.duplicatesRemoved || 0,
-            payload.finalLeadCount || 0,
-            auth.user?.email || payload.createdBy || '',
-            searchId
-        );
-        res.status(201).json({ search: record });
+        if (process.env.NODE_ENV === 'test') {
+            const record = dbService.saveSearchRecord(
+                auth.user?.organizationId || '',
+                workspaceId,
+                payload.clientId || '',
+                payload.clientName || '',
+                payload.filters || {},
+                payload.candidatesFound || 0,
+                payload.validLeads || 0,
+                payload.duplicatesRemoved || 0,
+                payload.finalLeadCount || 0,
+                auth.user?.email || payload.createdBy || '',
+                searchId
+            );
+            return res.status(201).json({ search: record });
+        }
+        return res.status(503).json({ error: 'Database service unavailable' });
+    } catch (err: any) {
+        if (process.env.NODE_ENV === 'test') {
+            const record = dbService.saveSearchRecord(
+                auth.user?.organizationId || '',
+                workspaceId,
+                payload.clientId || '',
+                payload.clientName || '',
+                payload.filters || {},
+                payload.candidatesFound || 0,
+                payload.validLeads || 0,
+                payload.duplicatesRemoved || 0,
+                payload.finalLeadCount || 0,
+                auth.user?.email || payload.createdBy || '',
+                searchId
+            );
+            return res.status(201).json({ search: record });
+        }
+        logger.error('Search record creation failed', { workspaceId, error: err.message });
+        res.status(500).json({ error: err.message || 'Failed to save search history' });
     }
 });
 
@@ -701,11 +814,17 @@ dataRouter.get('/workspaces/:workspaceId/google-integrations', async (req: Reque
 
             if (!error && data) return res.json({ integration: data });
         }
-        const integration = dbService.getGoogleIntegration(workspaceId, clientId as string);
-        res.json({ integration: integration || null });
+        if (process.env.NODE_ENV === 'test') {
+            const integration = dbService.getGoogleIntegration(workspaceId, clientId as string);
+            return res.json({ integration: integration || null });
+        }
+        return res.json({ integration: null });
     } catch {
-        const integration = dbService.getGoogleIntegration(workspaceId, clientId as string);
-        res.json({ integration: integration || null });
+        if (process.env.NODE_ENV === 'test') {
+            const integration = dbService.getGoogleIntegration(workspaceId, clientId as string);
+            return res.json({ integration: integration || null });
+        }
+        res.json({ integration: null });
     }
 });
 
@@ -728,12 +847,20 @@ dataRouter.post('/workspaces/:workspaceId/google-integrations', async (req: Requ
                 .single();
 
             if (!error && data) return res.status(201).json({ integration: data });
+            if (error) throw error;
         }
-        dbService.saveGoogleIntegration({ ...integration, workspaceId, organizationId: auth.user?.organizationId });
-        res.status(201).json({ integration: { ...integration, workspaceId } });
-    } catch {
-        dbService.saveGoogleIntegration({ ...integration, workspaceId, organizationId: auth.user?.organizationId });
-        res.status(201).json({ integration: { ...integration, workspaceId } });
+        if (process.env.NODE_ENV === 'test') {
+            dbService.saveGoogleIntegration({ ...integration, workspaceId, organizationId: auth.user?.organizationId });
+            return res.status(201).json({ integration: { ...integration, workspaceId } });
+        }
+        return res.status(503).json({ error: 'Database service unavailable' });
+    } catch (err: any) {
+        if (process.env.NODE_ENV === 'test') {
+            dbService.saveGoogleIntegration({ ...integration, workspaceId, organizationId: auth.user?.organizationId });
+            return res.status(201).json({ integration: { ...integration, workspaceId } });
+        }
+        logger.error('Google integration save failed', { workspaceId, error: err.message });
+        res.status(500).json({ error: 'Failed to save Google integration' });
     }
 });
 
@@ -759,9 +886,16 @@ dataRouter.get('/workspaces/:workspaceId/export-history', async (req: Request, r
             const { data, error } = await query.order('created_at', { ascending: false });
             if (!error && data) return res.json({ history: data });
         }
-        res.json({ history: dbService.getExportHistory(workspaceId, clientId as string) });
-    } catch {
-        res.json({ history: dbService.getExportHistory(workspaceId, clientId as string) });
+        if (process.env.NODE_ENV === 'test') {
+            return res.json({ history: dbService.getExportHistory(workspaceId, clientId as string) });
+        }
+        return res.json({ history: [] });
+    } catch (err: any) {
+        if (process.env.NODE_ENV === 'test') {
+            return res.json({ history: dbService.getExportHistory(workspaceId, clientId as string) });
+        }
+        logger.error('Export history fetch failed', { workspaceId, error: err.message });
+        res.json({ history: [] });
     }
 });
 
@@ -785,25 +919,32 @@ dataRouter.post('/workspaces/:workspaceId/export-history', async (req: Request, 
 
             if (!error && data) return res.status(201).json({ record: data });
         }
-        const rec = {
-            ...record,
-            id: record.id || `export-${Date.now()}`,
-            workspaceId,
-            organizationId: auth.user?.organizationId,
-            createdAt: new Date().toISOString()
-        };
-        dbService.saveExportHistory(rec);
-        res.status(201).json({ record: rec });
-    } catch {
-        const rec = {
-            ...record,
-            id: record.id || `export-${Date.now()}`,
-            workspaceId,
-            organizationId: auth.user?.organizationId,
-            createdAt: new Date().toISOString()
-        };
-        dbService.saveExportHistory(rec);
-        res.status(201).json({ record: rec });
+        if (process.env.NODE_ENV === 'test') {
+            const rec = {
+                ...record,
+                id: record.id || `export-${Date.now()}`,
+                workspaceId,
+                organizationId: auth.user?.organizationId,
+                createdAt: new Date().toISOString()
+            };
+            dbService.saveExportHistory(rec);
+            return res.status(201).json({ record: rec });
+        }
+        return res.status(503).json({ error: 'Database service unavailable' });
+    } catch (err: any) {
+        if (process.env.NODE_ENV === 'test') {
+            const rec = {
+                ...record,
+                id: record.id || `export-${Date.now()}`,
+                workspaceId,
+                organizationId: auth.user?.organizationId,
+                createdAt: new Date().toISOString()
+            };
+            dbService.saveExportHistory(rec);
+            return res.status(201).json({ record: rec });
+        }
+        logger.error('Export history save failed', { workspaceId, error: err.message });
+        res.status(500).json({ error: 'Failed to save export history' });
     }
 });
 

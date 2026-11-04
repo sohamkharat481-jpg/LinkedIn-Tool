@@ -32,6 +32,10 @@ export const getApiBaseUrl = (): string => {
     if (customUrl && typeof customUrl === 'string' && customUrl.trim().length > 0) {
       return customUrl.trim().replace(/\/+$/, '');
     }
+    // Fallback for test environments where fetch needs absolute URLs
+    if (process.env.NODE_ENV === 'test') {
+      return 'http://127.0.0.1:3000';
+    }
   }
   return '';
 };

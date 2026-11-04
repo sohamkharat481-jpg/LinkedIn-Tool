@@ -47,7 +47,13 @@ export function useAuthStartup(): StartupResult {
       if (!isMounted) return;
 
       if (!supabase) {
-        setResult(r => ({ ...r, state: 'ERROR', error: 'Database Configuration Missing' }));
+        setResult(r => ({
+          ...r,
+          state: 'ERROR',
+          error: 'Database Configuration Missing: Supabase URL or Anon Key is missing or invalid.',
+          failedPhase: 'DATABASE_INITIALIZATION',
+          phaseDuration: Date.now() - startTimeRef.current
+        }));
         return;
       }
 
@@ -55,11 +61,16 @@ export function useAuthStartup(): StartupResult {
       const authStart = Date.now();
 
       // 2. Initial Session Check & Auth Listener
-      const [initialSession, initialUser] = await Promise.all([
+      let sessionUser: User | null = null;
+      try {
+        const [initialSession, initialUser] = await Promise.all([
           supabase.auth.getSession(),
           supabase.auth.getUser()
-      ]);
-      const sessionUser = initialSession.data.session?.user || initialUser.data.user;
+        ]);
+        sessionUser = initialSession.data.session?.user || initialUser.data.user || null;
+      } catch (authInitErr: any) {
+        console.warn('[useAuthStartup] Session retrieval notice:', authInitErr?.message || authInitErr);
+      }
 
       const handleUser = async (user: User | null) => {
           if (!isMounted) return;

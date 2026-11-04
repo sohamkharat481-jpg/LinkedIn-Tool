@@ -3,7 +3,6 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 // Resolve Supabase environment variables from server or client runtime safely
 export const getSupabaseUrl = (): string => {
   let url = '';
-  
 
   // Try Vite-specific environment access first (replaced at build time for client)
   try {
@@ -11,9 +10,8 @@ export const getSupabaseUrl = (): string => {
     if (typeof import.meta !== 'undefined' && import.meta.env) {
       // @ts-ignore
       const val = import.meta.env.VITE_SUPABASE_URL || import.meta.env.SUPABASE_URL;
-      if (val) {
-          console.log('[Supabase Debug] Found URL in import.meta.env:', val);
-          url = val;
+      if (val && typeof val === 'string' && !isPlaceholderUrl(val)) {
+        url = val;
       }
     }
   } catch (e) {
@@ -23,22 +21,19 @@ export const getSupabaseUrl = (): string => {
   // Fallback to process.env (for server-side and dev)
   if (!url && typeof process !== 'undefined' && process.env) {
     const val = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
-    if (val) {
-        console.log('[Supabase Debug] Found URL in process.env:', val);
-        url = val;
+    if (val && typeof val === 'string' && !isPlaceholderUrl(val)) {
+      url = val;
     }
   }
 
   // Last resort: check window properties (for runtime injection if any)
   if (!url && typeof window !== 'undefined') {
     const val = (window as any).__SUPABASE_URL__ || (window as any)?.__ENV__?.VITE_SUPABASE_URL;
-    if (val) {
-        console.log('[Supabase Debug] Found URL in window:', val);
-        url = val;
+    if (val && typeof val === 'string' && !isPlaceholderUrl(val)) {
+      url = val;
     }
   }
 
-  console.log('[Supabase Debug] Final resolved URL:', url);
   return (url || '').trim();
 };
 
@@ -50,7 +45,10 @@ export const getSupabaseAnonKey = (): string => {
     // @ts-ignore
     if (typeof import.meta !== 'undefined' && import.meta.env) {
       // @ts-ignore
-      key = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.SUPABASE_ANON_KEY;
+      const val = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.SUPABASE_ANON_KEY;
+      if (val && typeof val === 'string' && !isPlaceholderKey(val)) {
+        key = val;
+      }
     }
   } catch (e) {
     // ignore
@@ -58,12 +56,18 @@ export const getSupabaseAnonKey = (): string => {
 
   // Fallback to process.env
   if (!key && typeof process !== 'undefined' && process.env) {
-    key = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
+    const val = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
+    if (val && typeof val === 'string' && !isPlaceholderKey(val)) {
+      key = val;
+    }
   }
 
   // Last resort: check window properties
   if (!key && typeof window !== 'undefined') {
-    key = (window as any).__SUPABASE_ANON_KEY || (window as any)?.__ENV__?.VITE_SUPABASE_ANON_KEY || '';
+    const val = (window as any).__SUPABASE_ANON_KEY || (window as any)?.__ENV__?.VITE_SUPABASE_ANON_KEY || '';
+    if (val && typeof val === 'string' && !isPlaceholderKey(val)) {
+      key = val;
+    }
   }
 
   return (key || '').trim();
@@ -73,7 +77,6 @@ export const getSupabaseServiceRoleKey = (): string => {
   if (typeof process !== 'undefined' && process.env) {
     const raw =
       process.env.SUPABASE_SERVICE_ROLE_KEY ||
-      process.env.VITE_SUPABASE_SERVICE_ROLE_KEY ||
       process.env.SUPABASE_SERVICE_KEY ||
       process.env.SERVICE_ROLE_KEY ||
       '';
@@ -151,18 +154,30 @@ export function getSupabaseServerClient(): SupabaseClient | null {
   if (!url || isPlaceholderUrl(url)) return null;
 
   const serviceKey = getSupabaseServiceRoleKey();
-  if (!serviceKey || isPlaceholderKey(serviceKey)) {
-    // Explicitly fail if service role credential is not provided; never fallback to anon key for server writes
-    return null;
+  if (serviceKey && !isPlaceholderKey(serviceKey)) {
+    const keyInfo = detectKeyType(serviceKey);
+    if (keyInfo.type !== 'PUBLISHABLE' && keyInfo.roleClaim !== 'anon') {
+      return createClient(url, serviceKey, {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false
+        },
+        global: {
+          headers: {
+            apikey: serviceKey,
+            Authorization: `Bearer ${serviceKey}`
+          }
+        }
+      });
+    }
   }
 
-  const keyInfo = detectKeyType(serviceKey);
-  if (keyInfo.type === 'PUBLISHABLE' || keyInfo.roleClaim === 'anon') {
-    console.warn(`[Supabase Server Client Error] Configured SUPABASE_SERVICE_ROLE_KEY is an ANON/PUBLISHABLE key (type: ${keyInfo.type}, role: ${keyInfo.roleClaim}). Refusing unprivileged server client creation.`);
-    return null;
-  }
+  // Server client fallback to anon/publishable key if elevated service role key is not configured
+  const anonKey = getSupabaseAnonKey();
+  if (!anonKey || isPlaceholderKey(anonKey)) return null;
 
-  return createClient(url, serviceKey, {
+  return createClient(url, anonKey, {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
@@ -170,8 +185,8 @@ export function getSupabaseServerClient(): SupabaseClient | null {
     },
     global: {
       headers: {
-        apikey: serviceKey,
-        Authorization: `Bearer ${serviceKey}`
+        apikey: anonKey,
+        Authorization: `Bearer ${anonKey}`
       }
     }
   });

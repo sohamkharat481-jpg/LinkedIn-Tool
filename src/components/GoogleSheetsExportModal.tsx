@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { User } from '@supabase/supabase-js';
 import { LeadRecord } from '../types';
 import { exportLeadsToGoogleSheet } from '../services/sheetsExport';
-import { googleSignIn, getCachedAccessToken, setCachedAccessToken } from '../services/auth';
+import { googleSignIn, getPersistentGoogleToken, setCachedAccessToken } from '../services/auth';
 import { FileSpreadsheet, Loader2, CheckCircle2, AlertCircle, ExternalLink, X, ShieldCheck } from 'lucide-react';
 
 import { SupabaseDataService } from '../services/supabaseDataService';
@@ -18,6 +18,7 @@ interface GoogleSheetsExportModalProps {
   onGoogleAuthSuccess: (user: User, token: string) => void;
   existingSpreadsheetId?: string;
   onExportSuccess?: (spreadsheetId: string, spreadsheetUrl: string, addedCount: number, skippedCount: number) => void;
+  isGoogleConnected?: boolean;
 }
 
 export const GoogleSheetsExportModal: React.FC<GoogleSheetsExportModalProps> = ({
@@ -30,7 +31,8 @@ export const GoogleSheetsExportModal: React.FC<GoogleSheetsExportModalProps> = (
   currentUser,
   onGoogleAuthSuccess,
   existingSpreadsheetId,
-  onExportSuccess
+  onExportSuccess,
+  isGoogleConnected
 }) => {
   const [isExporting, setIsExporting] = useState(false);
   const [exportStepMessage, setExportStepMessage] = useState('');
@@ -73,12 +75,16 @@ export const GoogleSheetsExportModal: React.FC<GoogleSheetsExportModalProps> = (
       }
 
       // 2. Check for OAuth Token
-      let token = getCachedAccessToken();
+      let token = await getPersistentGoogleToken();
       if (!token) {
-        setExportStepMessage('Redirecting to Google for authorization...');
-        await googleSignIn();
-        // Since googleSignIn redirects, the code below won't execute in this session
-        return;
+        setExportStepMessage('Waiting for Google authorization...');
+        const authRes = await googleSignIn();
+        if (authRes) {
+          token = authRes.accessToken;
+          onGoogleAuthSuccess(currentUser as any, token);
+        } else {
+          throw new Error('Google authorization failed or was cancelled.');
+        }
       }
 
       setExportStepMessage('Opening Google Sheets REST API connection...');
@@ -182,7 +188,7 @@ export const GoogleSheetsExportModal: React.FC<GoogleSheetsExportModalProps> = (
                   onClick={handleStartExport}
                   className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-emerald-600/20"
                 >
-                  {getCachedAccessToken() ? 'Export Now' : 'Connect Google & Export'}
+                  {isGoogleConnected ? 'Export Now' : 'Connect Google & Export'}
                 </button>
               </div>
             </div>

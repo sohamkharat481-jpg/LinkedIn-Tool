@@ -1,3 +1,21 @@
+import dotenv from 'dotenv';
+// Load environment variables with override so local .env takes precedence
+dotenv.config({ override: true });
+
+// Purge container placeholder values if present in process.env so they never mask configured credentials
+if (process.env.SUPABASE_URL?.includes('your-project') || process.env.SUPABASE_URL?.includes('placeholder')) {
+  delete process.env.SUPABASE_URL;
+}
+if (process.env.VITE_SUPABASE_URL?.includes('your-project') || process.env.VITE_SUPABASE_URL?.includes('placeholder')) {
+  delete process.env.VITE_SUPABASE_URL;
+}
+if (process.env.SUPABASE_ANON_KEY?.startsWith('your-') || process.env.SUPABASE_ANON_KEY?.includes('placeholder')) {
+  delete process.env.SUPABASE_ANON_KEY;
+}
+if (process.env.VITE_SUPABASE_ANON_KEY?.startsWith('your-') || process.env.VITE_SUPABASE_ANON_KEY?.includes('placeholder')) {
+  delete process.env.VITE_SUPABASE_ANON_KEY;
+}
+
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -7,7 +25,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+const PORT = 3000;
+console.log('Using port:', PORT);
 
 app.set('trust proxy', 1);
 

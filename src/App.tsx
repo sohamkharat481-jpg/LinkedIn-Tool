@@ -1,24 +1,24 @@
 import React, { useState, useEffect } from 'react';
-import { User } from '@supabase/supabase-js';
 import {
   Client,
   LeadFilter,
   LeadRecord,
   SearchHistoryRecord,
   Workspace,
-  Organization,
   ProviderStatusInfo
 } from './types';
 import { SupabaseDataService } from './services/supabaseDataService';
 import { 
-    initAuthListener, 
-    supabaseSignOut
+    supabaseSignOut,
+    googleSheetsAuthorize,
+    googleSignOut,
+    getPersistentGoogleToken
 } from './services/auth';
 import { RefreshCw } from 'lucide-react';
 import { supabase } from './services/supabase';
 import { useAuthStartup } from './hooks/useAuthStartup';
-
 import { apiUrl } from './services/apiClient';
+
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { TopBar } from './components/TopBar';
 import { Sidebar, NavTab } from './components/Sidebar';
@@ -69,7 +69,6 @@ export default function App() {
   const [selectedWorkspace, setSelectedWorkspace] = useState<Workspace | null>(null);
   const activeWorkspace = selectedWorkspace || startup.activeWorkspace;
   const isAuthLoading = startup.state === 'INITIALIZING' || startup.state === 'AUTHENTICATING' || startup.state === 'RESOLVING_ORGANIZATION' || startup.state === 'RESOLVING_WORKSPACE';
-  const onboarded = startup.state === 'READY';
   
   // Data State
   const [activeTab, setActiveTab] = useState<NavTab>('finder');
@@ -82,9 +81,20 @@ export default function App() {
 
   // Google Integration State
   const [isGoogleConnected, setIsGoogleConnected] = useState<boolean>(false);
+  const [isConnectingSheets, setIsConnectingSheets] = useState(false);
+
+  useEffect(() => {
+    const checkGoogleStatus = async () => {
+      if (user) {
+        const token = await getPersistentGoogleToken();
+        setIsGoogleConnected(!!token);
+      }
+    };
+    checkGoogleStatus();
+  }, [user]);
 
   // Provider State
-  const [providerStatus, setProviderStatus] = useState<ProviderStatusInfo>({
+  const [providerStatus] = useState<ProviderStatusInfo>({
     configured: true,
     providerName: 'Wikidata Query Service',
     status: 'Connected',
@@ -109,37 +119,13 @@ export default function App() {
     }
   }, [activeWorkspace?.id]);
 
-  // Clean up /auth/callback URL path after successful OAuth startup
+  // Clean up /auth/callback URL path
   useEffect(() => {
     if (startup.state === 'READY' && typeof window !== 'undefined' && window.location.pathname.startsWith('/auth/callback')) {
       window.history.replaceState({}, '', '/');
       setCurrentPath('/');
     }
   }, [startup.state]);
-
-  // Early returns AFTER all hooks are unconditionally declared
-  if (!supabase) {
-    return (
-      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white space-y-4 font-sans">
-        <p className="text-xl font-bold">Database Configuration Missing</p>
-        <p className="text-sm text-slate-400">Please check your environment variables (SUPABASE_URL, SUPABASE_ANON_KEY).</p>
-      </div>
-    );
-  }
-
-  if (startup.state === 'ERROR') {
-      return (
-        <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white p-8 font-sans text-center">
-          <p className="text-xl font-bold mb-2">Startup Error</p>
-          <div className="bg-slate-800 p-4 rounded text-sm text-left font-mono w-full max-w-md mb-4">
-              <p>Failed phase: {startup.failedPhase || 'Unknown'}</p>
-              <p>Error: {startup.error}</p>
-              <p>Duration: {startup.phaseDuration}ms</p>
-          </div>
-          <button className="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded font-bold cursor-pointer transition-colors" onClick={() => window.location.reload()}>Retry</button>
-        </div>
-      );
-  }
 
   const loadWorkspaceData = async (wsId: string) => {
     setIsLoadingData(true);
@@ -179,17 +165,20 @@ export default function App() {
       setActiveClient(client);
   };
 
-  // Actions
   const handleCreateClient = async (name: string, niche: string, notes: string) => {
     if (!activeWorkspace) return;
-    const newClient = await SupabaseDataService.createClient(activeWorkspace.id, name, niche, notes);
-    setClients(prev => [...prev, newClient]);
-    setActiveClient(newClient);
+    try {
+      const newClient = await SupabaseDataService.createClient(activeWorkspace.id, name, niche, notes);
+      setClients(prev => [...prev, newClient]);
+      setActiveClient(newClient);
+    } catch (err: any) {
+      setDataError(err.message);
+    }
   };
 
   const handleExecuteSearch = async (filters: LeadFilter, targetClient: Client) => {
     if (!activeWorkspace) throw new Error('No active workspace');
-    const res = await SupabaseDataService.saveLeadsForClient(activeWorkspace.id, targetClient.id, []); 
+    await SupabaseDataService.saveLeadsForClient(activeWorkspace.id, targetClient.id, []); 
     await loadWorkspaceData(activeWorkspace.id);
     return { 
         uniqueLeads: [], 
@@ -199,6 +188,28 @@ export default function App() {
         persistenceStatus: 'confirmed' as any, 
         persistenceMessage: 'Search completed' 
     };
+  };
+
+  const handleConnectSheets = async () => {
+    setIsConnectingSheets(true);
+    try {
+      await googleSheetsAuthorize();
+      setIsGoogleConnected(true);
+      setDataError(null);
+    } catch (err: any) {
+      setDataError(`Google connection failed: ${err.message}`);
+    } finally {
+      setIsConnectingSheets(false);
+    }
+  };
+
+  const handleDisconnectSheets = async () => {
+    try {
+      await googleSignOut();
+      setIsGoogleConnected(false);
+    } catch (err: any) {
+      console.error('Google sign out failed:', err);
+    }
   };
 
   // Render Logic
@@ -216,6 +227,29 @@ export default function App() {
       <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white space-y-4 font-sans">
         <RefreshCw className="w-8 h-8 text-blue-500 animate-spin" />
         <p className="text-sm font-semibold text-slate-400">Initializing secure session...</p>
+      </div>
+    );
+  }
+
+  if (startup.state === 'ERROR') {
+      return (
+        <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white p-8 font-sans text-center">
+          <p className="text-xl font-bold mb-2">Startup Error</p>
+          <div className="bg-slate-800 p-4 rounded text-sm text-left font-mono w-full max-w-md mb-4">
+              <p>Failed phase: {startup.failedPhase || 'Unknown'}</p>
+              <p>Error: {startup.error}</p>
+              <p>Duration: {startup.phaseDuration}ms</p>
+          </div>
+          <button className="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded font-bold cursor-pointer transition-colors" onClick={() => window.location.reload()}>Retry</button>
+        </div>
+      );
+  }
+
+  if (!supabase) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white space-y-4 font-sans">
+        <p className="text-xl font-bold">Database Configuration Missing</p>
+        <p className="text-sm text-slate-400">Please check your environment variables (SUPABASE_URL, SUPABASE_ANON_KEY).</p>
       </div>
     );
   }
@@ -256,10 +290,10 @@ export default function App() {
                 onStartLeadSearch={() => setActiveTab('finder')}
                 providerStatus={providerStatus}
                 isGoogleConnected={isGoogleConnected}
-                isConnectingSheets={false}
+                isConnectingSheets={isConnectingSheets}
                 sheetsAuthError={null}
-                onConnectSheets={() => {}}
-                onDisconnectSheets={() => {}}
+                onConnectSheets={handleConnectSheets}
+                onDisconnectSheets={handleDisconnectSheets}
                 onOpenExportModal={(leads) => { setExportLeads(leads); setIsExportModalOpen(true); }}
                 userEmail={user.email || ''}
                 onSignOut={handleSignOut}
@@ -356,7 +390,7 @@ export default function App() {
               currentUser={user}
               userEmail={user.email || ''}
               isGoogleConnected={isGoogleConnected}
-              onGoogleAuthSuccess={() => {}}
+              onGoogleAuthSuccess={() => setIsGoogleConnected(true)}
             />
           )}
         </main>
@@ -370,8 +404,9 @@ export default function App() {
         activeWorkspaceId={activeWorkspace?.id}
         activeClientId={activeClient?.id}
         currentUser={user}
-        onGoogleAuthSuccess={() => {}}
+        onGoogleAuthSuccess={() => setIsGoogleConnected(true)}
         onExportSuccess={async () => {}}
+        isGoogleConnected={isGoogleConnected}
       />
     </div>
   );

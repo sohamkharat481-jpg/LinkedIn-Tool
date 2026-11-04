@@ -17,6 +17,7 @@ import {
 } from '../src/server/serverAuthService';
 import { SupabaseDataService } from '../src/services/supabaseDataService';
 import { dbService } from '../src/services/storage';
+import { setAuthTokenForTesting } from '../src/services/auth';
 
 test('1. Server token verification rejects missing, malformed, expired, or forged tokens', async () => {
   // Missing header
@@ -147,8 +148,18 @@ test('3. Schema and RLS policies audit: Enforces tenant isolation and rejects in
 });
 
 test('4. Cross-workspace client isolation prevents data leakage between tenants', async () => {
+  const user = 'test-security-user';
+  const token = createSignedTestToken({ userId: user });
+  setAuthTokenForTesting(token);
+  registerWorkspaceAuthorization(user, 'ws-cross-tenant-x-');
+  registerWorkspaceAuthorization(user, 'ws-cross-tenant-y-');
+
   const wsX = 'ws-cross-tenant-x-' + Date.now();
   const wsY = 'ws-cross-tenant-y-' + Date.now();
+
+  // Manually register these dynamic IDs for the test
+  registerWorkspaceAuthorization(user, wsX);
+  registerWorkspaceAuthorization(user, wsY);
 
   // Create clients in Workspace X
   const clientX1 = await SupabaseDataService.createClient(wsX, 'Acme Corp X1', 'Cloud Infrastructure', 'Internal');
@@ -184,8 +195,14 @@ test('4. Cross-workspace client isolation prevents data leakage between tenants'
 });
 
 test('5. WITH CHECK simulation: Reject moving or inserting client into unauthorized workspace', async () => {
+  const user = 'test-security-user-5';
+  const token = createSignedTestToken({ userId: user });
+  setAuthTokenForTesting(token);
+  
   const authorizedWs = 'ws-auth-permitted';
   const unauthorizedWs = 'ws-auth-forbidden';
+  
+  registerWorkspaceAuthorization(user, authorizedWs);
 
   // Ensure invalid workspace ID is rejected at validation layer
   await assert.rejects(

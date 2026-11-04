@@ -1,0 +1,5 @@
+{
+  "summary": "SQL migration to fix RLS recursion and backfill organization IDs for approximately 157 leads and hidden clients. This ensures data visibility and strict multi-tenant isolation.",
+  "updatedAt": "2026-11-03T14:16:37.647859238Z",
+  "userFacing": true
+}
