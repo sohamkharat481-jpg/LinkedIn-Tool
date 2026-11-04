@@ -32,11 +32,20 @@ export interface UserProfile {
  */
 export const supabaseSignIn = async (email: string, password: string) => {
   if (!supabase) throw new Error('Supabase client not initialized');
+  const cleanEmail = email.trim();
   const { data, error } = await supabase.auth.signInWithPassword({
-    email,
+    email: cleanEmail,
     password
   });
-  if (error) throw error;
+  if (error) {
+    if (error.message.includes('Email not confirmed') || error.code === 'email_not_confirmed') {
+      throw new Error('Email not confirmed. Please check your inbox or click "Resend Confirmation Email".');
+    }
+    if (error.message.includes('Invalid login credentials') || error.code === 'invalid_credentials') {
+      throw new Error('Invalid email or password. If you forgot your password, please click "Forgot password?" to reset it.');
+    }
+    throw error;
+  }
   return data.user;
 };
 

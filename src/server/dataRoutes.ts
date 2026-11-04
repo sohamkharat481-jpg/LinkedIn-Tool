@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import express, { Request, Response } from 'express';
-import { supabase as rawSupabaseServerClient } from '../services/supabase';
+import { supabase as rawSupabaseServerClient, getSupabaseAdminClient } from '../services/supabase';
 const getSupabaseServerClient = process.env.NODE_ENV === 'test' ? null : rawSupabaseServerClient;
 import { 
     verifyServerAuthToken, 
@@ -149,6 +149,118 @@ dataRouter.post('/onboard', async (req: Request, res: Response) => {
     } catch (err: any) {
         logger.error('Onboarding failed', { userId, error: err });
         res.status(500).json({ error: err.message || 'Onboarding error' });
+    }
+});
+
+async function isAuthorizedAdmin(req: Request): Promise<boolean> {
+  const adminHeader = (req.headers['x-admin-secret'] as string) || (req.headers['x-admin-key'] as string) || '';
+  const expectedSecret = process.env.ADMIN_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+
+  if (expectedSecret && adminHeader.trim() === expectedSecret.trim()) {
+    return true;
+  }
+
+  const auth = await verifyServerAuthToken(req);
+  if (auth.status === 200 && auth.user && auth.user.role === 'owner') {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Admin API: Inspect user status (server-side only via service_role key)
+ */
+dataRouter.post('/admin/check-user', async (req: Request, res: Response) => {
+    if (!(await isAuthorizedAdmin(req))) {
+        return res.status(401).json({ error: 'Unauthorized admin access.' });
+    }
+
+    const email = req.body?.email?.trim();
+    if (!email) return res.status(400).json({ error: 'Email is required' });
+
+    const adminClient = getSupabaseAdminClient();
+    if (!adminClient) {
+        return res.status(503).json({ 
+            error: 'Server service_role key is not configured on this environment.',
+            hasServiceRoleKey: false
+        });
+    }
+
+    try {
+        const { data, error } = await adminClient.auth.admin.listUsers();
+        if (error) return res.status(500).json({ error: error.message });
+
+        const targetUser = data.users.find((u: any) => u.email?.toLowerCase() === email.toLowerCase());
+        if (!targetUser) {
+            return res.json({ found: false, email });
+        }
+
+        return res.json({
+            found: true,
+            user: {
+                id: targetUser.id,
+                email: targetUser.email,
+                emailConfirmedAt: targetUser.email_confirmed_at,
+                isConfirmed: Boolean(targetUser.email_confirmed_at),
+                createdAt: targetUser.created_at,
+                lastSignInAt: targetUser.last_sign_in_at,
+                bannedUntil: targetUser.banned_until
+            }
+        });
+    } catch (err: any) {
+        return res.status(500).json({ error: err.message || 'Failed to inspect user' });
+    }
+});
+
+/**
+ * Admin API: Confirm user email server-side using service_role key
+ */
+dataRouter.post('/admin/confirm-user', async (req: Request, res: Response) => {
+    if (!(await isAuthorizedAdmin(req))) {
+        return res.status(401).json({ error: 'Unauthorized admin access.' });
+    }
+
+    const email = req.body?.email?.trim();
+    if (!email) return res.status(400).json({ error: 'Email is required' });
+
+    const adminClient = getSupabaseAdminClient();
+    if (!adminClient) {
+        return res.status(503).json({ 
+            error: 'Server service_role key is not configured on this environment.',
+            hasServiceRoleKey: false
+        });
+    }
+
+    try {
+        const { data, error } = await adminClient.auth.admin.listUsers();
+        if (error) return res.status(500).json({ error: error.message });
+
+        const targetUser = data.users.find((u: any) => u.email?.toLowerCase() === email.toLowerCase());
+        if (!targetUser) {
+            return res.status(404).json({ error: `User with email ${email} not found in Supabase Auth.` });
+        }
+
+        const { data: updatedData, error: updateError } = await adminClient.auth.admin.updateUserById(
+            targetUser.id,
+            { email_confirm: true }
+        );
+
+        if (updateError) return res.status(500).json({ error: updateError.message });
+
+        logger.audit('User email confirmed via admin endpoint', { userId: targetUser.id, email: targetUser.email });
+
+        return res.json({
+            success: true,
+            user: {
+                id: updatedData.user.id,
+                email: updatedData.user.email,
+                emailConfirmedAt: updatedData.user.email_confirmed_at,
+                isConfirmed: true
+            }
+        });
+    } catch (err: any) {
+        return res.status(500).json({ error: err.message || 'Failed to confirm user' });
     }
 });
 
@@ -312,7 +424,6 @@ dataRouter.post('/workspaces/:workspaceId/clients', async (req: Request, res: Re
             const { data, error } = await getSupabaseServerClient
                 .from('clients')
                 .insert({
-                    organization_id: auth.user?.organizationId,
                     workspace_id: workspaceId,
                     name,
                     niche,
@@ -343,7 +454,7 @@ dataRouter.post('/workspaces/:workspaceId/clients', async (req: Request, res: Re
 
 dataRouter.put('/workspaces/:workspaceId/clients/:clientId', async (req: Request, res: Response) => {
     const { workspaceId, clientId } = req.params;
-    const updates = req.body;
+    const { organization_id, ...validUpdates } = req.body || {};
     const auth = await verifyWorkspaceAccess(req, workspaceId);
     if (!auth.authorized) return res.status(auth.status).json({ error: auth.error });
 
@@ -351,7 +462,7 @@ dataRouter.put('/workspaces/:workspaceId/clients/:clientId', async (req: Request
         if (getSupabaseServerClient) {
             const { data, error } = await getSupabaseServerClient
                 .from('clients')
-                .update(updates)
+                .update(validUpdates)
                 .eq('id', clientId)
                 .eq('workspace_id', workspaceId)
                 .select()
@@ -361,14 +472,14 @@ dataRouter.put('/workspaces/:workspaceId/clients/:clientId', async (req: Request
             return res.json({ client: data });
         }
         if (process.env.NODE_ENV === 'test') {
-            const client = dbService.updateClient(workspaceId, clientId, updates);
+            const client = dbService.updateClient(workspaceId, clientId, validUpdates);
             return res.json({ client });
         }
         return res.status(503).json({ error: 'Database service unavailable' });
     } catch (err: any) {
         if (process.env.NODE_ENV === 'test') {
             try {
-                const client = dbService.updateClient(workspaceId, clientId, updates);
+                const client = dbService.updateClient(workspaceId, clientId, validUpdates);
                 return res.json({ client });
             } catch (innerErr) {
                 return res.status(500).json({ error: 'Failed to update mock client' });

@@ -3,19 +3,22 @@ import { supabase as rawSupabaseServerClient } from '../services/supabase';
 const getSupabaseServerClient = process.env.NODE_ENV === 'test' ? null : rawSupabaseServerClient;
 import { encryptAccessToken, decryptAccessToken } from './cryptoService';
 import { logger } from '../services/loggerService';
+import firebaseConfig from '../../firebase-applet-config.json';
 
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || firebaseConfig.oAuthClientId || '';
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
 
-// Redirect URI for code exchange in GIS popup flow is usually 'postmessage'
+// Redirect URI for code exchange in GIS popup flow is 'postmessage'
 const REDIRECT_URI = 'postmessage';
 
 export class GoogleAuthService {
-  private static client = new OAuth2Client(
-    GOOGLE_CLIENT_ID,
-    GOOGLE_CLIENT_SECRET,
-    REDIRECT_URI
-  );
+  private static getClient(): OAuth2Client {
+    return new OAuth2Client(
+      GOOGLE_CLIENT_ID,
+      GOOGLE_CLIENT_SECRET,
+      REDIRECT_URI
+    );
+  }
 
   /**
    * Exchanges an authorization code for tokens and saves the refresh token.
@@ -26,7 +29,8 @@ export class GoogleAuthService {
     code: string
   ): Promise<{ accessToken: string }> {
     try {
-      const { tokens } = await this.client.getToken(code);
+      const client = this.getClient();
+      const { tokens } = await client.getToken(code);
       
       if (tokens.refresh_token) {
         const encryptedToken = encryptAccessToken(tokens.refresh_token);
@@ -72,9 +76,9 @@ export class GoogleAuthService {
       if (error || !data?.encrypted_refresh_token) return null;
 
       const refreshToken = decryptAccessToken(data.encrypted_refresh_token);
-      
-      this.client.setCredentials({ refresh_token: refreshToken });
-      const { token } = await this.client.getAccessToken();
+      const client = this.getClient();
+      client.setCredentials({ refresh_token: refreshToken });
+      const { token } = await client.getAccessToken();
       
       return token || null;
     } catch (error: any) {

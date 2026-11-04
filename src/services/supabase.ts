@@ -192,6 +192,32 @@ export function getSupabaseServerClient(): SupabaseClient | null {
   });
 }
 
+export function getSupabaseAdminClient(): SupabaseClient | null {
+  const url = getSupabaseUrl();
+  if (!url || isPlaceholderUrl(url)) return null;
+
+  const serviceKey = getSupabaseServiceRoleKey();
+  if (serviceKey && !isPlaceholderKey(serviceKey)) {
+    const keyInfo = detectKeyType(serviceKey);
+    if (keyInfo.type !== 'PUBLISHABLE' && keyInfo.roleClaim !== 'anon') {
+      return createClient(url, serviceKey, {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false
+        },
+        global: {
+          headers: {
+            apikey: serviceKey,
+            Authorization: `Bearer ${serviceKey}`
+          }
+        }
+      });
+    }
+  }
+  return null;
+}
+
 let cachedClient: SupabaseClient | null = null;
 let cachedKeyUsed: string = '';
 
