@@ -178,15 +178,33 @@ export default function App() {
 
   const handleExecuteSearch = async (filters: LeadFilter, targetClient: Client) => {
     if (!activeWorkspace) throw new Error('No active workspace');
-    await SupabaseDataService.saveLeadsForClient(activeWorkspace.id, targetClient.id, []); 
+    
+    // Call the backend search API
+    const response = await fetch(apiUrl('/api/search-leads'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filters })
+    });
+    
+    if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Search failed');
+    }
+    
+    const searchResult = await response.json();
+    const leads = searchResult.leads || [];
+
+    // Save discovered leads to the selected client
+    await SupabaseDataService.saveLeadsForClient(activeWorkspace.id, targetClient.id, leads);
     await loadWorkspaceData(activeWorkspace.id);
+    
     return { 
-        uniqueLeads: [], 
-        candidatesFound: 0, 
-        duplicatesRemoved: 0, 
-        finalCount: 0, 
+        uniqueLeads: leads, 
+        candidatesFound: searchResult.metrics.rawCandidatesCount, 
+        duplicatesRemoved: searchResult.metrics.totalDuplicatesRemoved, 
+        finalCount: searchResult.metrics.finalLeadCount, 
         persistenceStatus: 'confirmed' as any, 
-        persistenceMessage: 'Search completed' 
+        persistenceMessage: `Successfully persisted ${leads.length} leads to ${targetClient.name}.`
     };
   };
 
