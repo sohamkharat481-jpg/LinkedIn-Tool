@@ -531,18 +531,39 @@ dataRouter.get('/workspaces/:workspaceId/leads', async (req: Request, res: Respo
 
     try {
         if (getSupabaseServerClient) {
-            let query = getSupabaseServerClient
-                .from('leads')
-                .select('*')
-                .eq('workspace_id', workspaceId);
+            if (clientId && typeof clientId === 'string' && clientId.trim()) {
+                const { data: clData, error: clError } = await getSupabaseServerClient
+                    .from('client_leads')
+                    .select('lead_id')
+                    .eq('workspace_id', workspaceId)
+                    .eq('client_id', clientId.trim());
 
-            if (clientId) {
-                query = query.eq('client_id', clientId);
+                if (clError) throw clError;
+
+                const leadIds = (clData || []).map((row: any) => row.lead_id).filter(Boolean);
+                if (leadIds.length === 0) {
+                    return res.json({ leads: [] });
+                }
+
+                const { data: leadsData, error: leadsError } = await getSupabaseServerClient
+                    .from('leads')
+                    .select('*')
+                    .eq('workspace_id', workspaceId)
+                    .in('id', leadIds)
+                    .order('created_at', { ascending: false });
+
+                if (leadsError) throw leadsError;
+                return res.json({ leads: leadsData || [] });
+            } else {
+                const { data, error } = await getSupabaseServerClient
+                    .from('leads')
+                    .select('*')
+                    .eq('workspace_id', workspaceId)
+                    .order('created_at', { ascending: false });
+
+                if (error) throw error;
+                return res.json({ leads: data || [] });
             }
-
-            const { data, error } = await query.order('created_at', { ascending: false });
-            if (error) throw error;
-            return res.json({ leads: data || [] });
         }
         if (process.env.NODE_ENV === 'test') {
             const leads = clientId ? dbService.getLeadsForClient(workspaceId, clientId as string) : dbService.getAllLeads(workspaceId);
@@ -565,13 +586,30 @@ dataRouter.get('/workspaces/:workspaceId/clients/:clientId/export-leads', async 
     if (!auth.authorized) return res.status(auth.status).json({ error: auth.error });
 
     try {
-        let leads: any[] = [];
         if (getSupabaseServerClient) {
+            const { data: clData, error: clError } = await getSupabaseServerClient
+                .from('client_leads')
+                .select('lead_id')
+                .eq('workspace_id', workspaceId)
+                .eq('client_id', clientId);
+
+            if (clError) throw clError;
+
+            const leadIds = (clData || []).map((row: any) => row.lead_id).filter(Boolean);
+            if (leadIds.length === 0) {
+                return res.json({
+                    success: true,
+                    clientId,
+                    leads: [],
+                    diagnostics: { exportQueryReturnedCount: 0 }
+                });
+            }
+
             const { data, error } = await getSupabaseServerClient
                 .from('leads')
                 .select('*')
                 .eq('workspace_id', workspaceId)
-                .eq('client_id', clientId)
+                .in('id', leadIds)
                 .order('created_at', { ascending: false });
 
             if (!error && data) {
@@ -582,6 +620,7 @@ dataRouter.get('/workspaces/:workspaceId/clients/:clientId/export-leads', async 
                     diagnostics: { exportQueryReturnedCount: data.length }
                 });
             }
+            if (error) throw error;
         }
         if (process.env.NODE_ENV === 'test') {
             const leads = dbService.getLeadsForClient(workspaceId, clientId);
@@ -610,46 +649,63 @@ dataRouter.get('/workspaces/:workspaceId/clients/:clientId/export-leads', async 
 
 dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Response) => {
     const { workspaceId } = req.params;
-    const { clientId, leads, searchId } = req.body;
+    const { clientId, leads } = req.body;
     const auth = await verifyWorkspaceAccess(req, workspaceId);
     if (!auth.authorized) return res.status(auth.status).json({ error: auth.error });
 
     try {
-        const orgId = auth.user?.organizationId;
         const leadList = Array.isArray(leads) ? leads : [];
-        const leadsWithContext = leadList.map((l: any) => ({
-            ...l,
-            organization_id: orgId,
-            workspace_id: workspaceId,
-            client_id: clientId,
-            search_id: searchId
-        }));
-
         if (getSupabaseServerClient) {
-            const { data, error } = await getSupabaseServerClient
+            const cleanLeadsToUpsert = leadList.map((l: any) => ({
+                id: l.id || undefined,
+                workspace_id: workspaceId,
+                full_name: l.full_name || l.fullName || l.name || 'Anonymous Lead',
+                headline: l.headline || l.job_title || l.title || l.headlineRole || '',
+                company_name: l.company_name || l.company || l.companyName || '',
+                location: l.location || l.country || '',
+                profile_url: l.profile_url || l.linkedin_url || l.linkedinUrl || `https://www.linkedin.com/in/lead-${Math.random().toString(36).substr(2, 9)}`,
+                source: l.source || 'Wikidata'
+            }));
+
+            const { data: savedLeads, error: leadsError } = await getSupabaseServerClient
                 .from('leads')
-                .upsert(leadsWithContext, { onConflict: 'profile_url, workspace_id, client_id' })
+                .upsert(cleanLeadsToUpsert, { onConflict: 'profile_url, workspace_id' })
                 .select();
 
-            if (error) throw error;
-            
+            if (leadsError) throw leadsError;
+
+            if (clientId && savedLeads && savedLeads.length > 0) {
+                const clientLeadsToUpsert = savedLeads.map((sl: any) => ({
+                    client_id: clientId,
+                    lead_id: sl.id,
+                    workspace_id: workspaceId
+                }));
+
+                const { error: clError } = await getSupabaseServerClient
+                    .from('client_leads')
+                    .upsert(clientLeadsToUpsert, { onConflict: 'client_id, lead_id' });
+
+                if (clError) {
+                    logger.warn('Failed to upsert client_leads junction records', { error: clError.message });
+                }
+            }
+
             logger.audit('Leads persisted', { 
                 userId: auth.user?.userId, 
-                organizationId: orgId, 
                 workspaceId, 
                 clientId, 
-                count: data?.length || 0 
+                count: savedLeads?.length || 0 
             });
 
             return res.status(200).json({
                 success: true,
-                added: data?.length || 0,
+                added: savedLeads?.length || 0,
                 persistenceStatus: 'confirmed',
-                persistenceMessage: `Successfully persisted ${data?.length || 0} leads.`
+                persistenceMessage: `Successfully persisted ${savedLeads?.length || 0} leads.`
             });
         }
         if (process.env.NODE_ENV === 'test') {
-            const saveRes = dbService.saveLeadsForClient(orgId || '', workspaceId, clientId, leadList);
+            const saveRes = dbService.saveLeadsForClient(auth.user?.organizationId || '', workspaceId, clientId, leadList);
             return res.status(200).json({
                 success: true,
                 added: saveRes.added,
@@ -838,16 +894,18 @@ dataRouter.post('/workspaces/:workspaceId/searches', async (req: Request, res: R
 
     try {
         if (getSupabaseServerClient) {
+            const cleanSearchRecord = {
+                id: searchId || undefined,
+                workspace_id: workspaceId,
+                client_id: payload.clientId || payload.client_id || null,
+                filters: payload.filters || {}
+            };
+
             let { data, error } = await getSupabaseServerClient
                 .from('lead_searches')
-                .insert({
-                    ...payload,
-                    id: searchId,
-                    organization_id: auth.user?.organizationId,
-                    workspace_id: workspaceId
-                })
+                .insert(cleanSearchRecord)
                 .select()
-                .single();
+                .maybeSingle();
 
             if (error) {
                 const fallback = await getSupabaseServerClient
@@ -859,13 +917,13 @@ dataRouter.post('/workspaces/:workspaceId/searches', async (req: Request, res: R
                         workspace_id: workspaceId
                     })
                     .select()
-                    .single();
+                    .maybeSingle();
                 data = fallback.data;
                 error = fallback.error;
             }
 
+            if (!error && data) return res.status(201).json({ search: data });
             if (error) throw error;
-            return res.status(201).json({ search: data });
         }
         if (process.env.NODE_ENV === 'test') {
             const record = dbService.saveSearchRecord(
