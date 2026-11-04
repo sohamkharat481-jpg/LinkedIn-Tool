@@ -16,6 +16,47 @@ import { dbService } from '../services/storage';
 export const dataRouter = express.Router();
 
 /**
+ * SCHEMA DEFINITIONS
+ * These constants allow us to handle cases where the production database is missing newer enrichment columns.
+ */
+const CORE_LEAD_COLUMNS = 'id, workspace_id, full_name, headline, current_job_title, company_name, location, profile_url, source, created_at, updated_at';
+const ALL_LEAD_COLUMNS = '*'; // Default to *, but we handle downgrades
+
+/**
+ * Shared helper to handle lead fetching with multi-tenant isolation and automatic schema fallback.
+ */
+const fetchLeadsWithSchemaFallback = async (wsId: string, leadIds: string[], selectCols: string): Promise<any[]> => {
+    const supabase = getSupabaseServerClient;
+    if (!supabase) return [];
+    
+    const query = supabase
+        .from('leads')
+        .select(selectCols)
+        .eq('workspace_id', wsId)
+        .order('created_at', { ascending: false });
+    
+    if (leadIds.length > 0) {
+        query.in('id', leadIds);
+    }
+    
+    const { data, error } = await query;
+    if (error) {
+        const isSchemaError = error.message?.includes('column') || 
+                             error.message?.includes('cache') || 
+                             error.message?.includes('not found');
+
+        // Automatically downgrade to CORE columns if the schema is out of sync
+        if (selectCols === ALL_LEAD_COLUMNS && isSchemaError) {
+            console.warn(`[Schema Fallback] Downgrading to CORE_LEAD_COLUMNS for workspace ${wsId} due to: ${error.message}`);
+            return fetchLeadsWithSchemaFallback(wsId, leadIds, CORE_LEAD_COLUMNS);
+        }
+        throw error;
+    }
+    return data || [];
+};
+
+
+/**
  * Onboarding: Idempotently creates an organization and default workspace for a new user.
  */
 dataRouter.post('/onboard', async (req: Request, res: Response) => {
@@ -546,17 +587,10 @@ dataRouter.get('/workspaces/:workspaceId/leads', async (req: Request, res: Respo
                     return res.json({ leads: [] });
                 }
 
-                const { data: leadsData, error: leadsError } = await getSupabaseServerClient
-                    .from('leads')
-                    .select('*')
-                    .eq('workspace_id', workspaceId)
-                    .in('id', leadIds)
-                    .order('created_at', { ascending: false });
-
-                if (leadsError) throw leadsError;
+                const leadsData = await fetchLeadsWithSchemaFallback(workspaceId, leadIds, ALL_LEAD_COLUMNS);
                 
                 // Map the clientId back onto the leads for the frontend
-                const leadsWithClientId = (leadsData || []).map(l => ({
+                const leadsWithClientId = (leadsData || []).map((l: any) => ({
                     ...l,
                     clientId: clientId.trim()
                 }));
@@ -584,17 +618,10 @@ dataRouter.get('/workspaces/:workspaceId/leads', async (req: Request, res: Respo
                     return res.json({ leads: [] });
                 }
 
-                const { data, error } = await getSupabaseServerClient
-                    .from('leads')
-                    .select('*')
-                    .eq('workspace_id', workspaceId)
-                    .in('id', leadIds)
-                    .order('created_at', { ascending: false });
-
-                if (error) throw error;
+                const data = await fetchLeadsWithSchemaFallback(workspaceId, leadIds, ALL_LEAD_COLUMNS);
 
                 // Map the clientId onto each lead record
-                const leadsWithClientId = (data || []).map(l => ({
+                const leadsWithClientId = (data || []).map((l: any) => ({
                     ...l,
                     clientId: leadClientMap.get(l.id)
                 }));
@@ -642,22 +669,16 @@ dataRouter.get('/workspaces/:workspaceId/clients/:clientId/export-leads', async 
                 });
             }
 
-            const { data, error } = await getSupabaseServerClient
-                .from('leads')
-                .select('*')
-                .eq('workspace_id', workspaceId)
-                .in('id', leadIds)
-                .order('created_at', { ascending: false });
+            const leadsData = await fetchLeadsWithSchemaFallback(workspaceId, leadIds, ALL_LEAD_COLUMNS);
 
-            if (!error && data) {
+            if (leadsData) {
                 return res.json({
                     success: true,
                     clientId,
-                    leads: data,
-                    diagnostics: { exportQueryReturnedCount: data.length }
+                    leads: leadsData,
+                    diagnostics: { exportQueryReturnedCount: leadsData.length }
                 });
             }
-            if (error) throw error;
         }
         if (process.env.NODE_ENV === 'test') {
             const leads = dbService.getLeadsForClient(workspaceId, clientId);
@@ -771,21 +792,26 @@ dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Resp
             let persistenceResult: any;
 
             try {
+                // Try full payload first
                 persistenceResult = await getSupabaseServerClient
                     .from('leads')
                     .upsert(leadsToUpsert, { onConflict: 'profile_url, workspace_id' })
-                    .select();
+                    .select(ALL_LEAD_COLUMNS);
                 
                 if (persistenceResult.error) throw persistenceResult.error;
             } catch (upsertErr: any) {
-                // If error is about missing columns, retry with minimal payload
-                if (upsertErr.message?.includes('column') && upsertErr.message?.includes('does not exist')) {
+                // Handle various forms of 'column not found' errors
+                const isSchemaError = upsertErr.message?.includes('column') || 
+                                     upsertErr.message?.includes('cache') || 
+                                     upsertErr.message?.includes('not found');
+
+                if (isSchemaError) {
                     console.warn('[Persistence Warning] Production schema mismatch detected. Retrying with minimal core columns...', upsertErr.message);
                     leadsToUpsert = leadList.map(l => prepareLeadPayload(l, true));
                     persistenceResult = await getSupabaseServerClient
                         .from('leads')
                         .upsert(leadsToUpsert, { onConflict: 'profile_url, workspace_id' })
-                        .select();
+                        .select(CORE_LEAD_COLUMNS);
                     
                     if (persistenceResult.error) throw persistenceResult.error;
                 } else {
