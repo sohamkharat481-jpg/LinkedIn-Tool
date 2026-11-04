@@ -42,22 +42,48 @@ export const supabaseSignIn = async (email: string, password: string) => {
 
 export const supabaseSignUp = async (email: string, password: string, fullName: string) => {
   if (!supabase) throw new Error('Supabase client not initialized');
+  const cleanEmail = email.trim();
+  const cleanName = fullName.trim();
+
   const { data, error } = await supabase.auth.signUp({
-    email: email.trim(),
+    email: cleanEmail,
     password,
     options: {
       data: {
-        full_name: fullName.trim()
+        full_name: cleanName
       }
     }
   });
   if (error) throw error;
   
-  // If Supabase has email confirmation enabled, data.session will be null upon signup
+  let session = data.session;
+  let signInErrorMsg: string | null = null;
+
+  if (!session && data.user) {
+    const signInRes = await supabase.auth.signInWithPassword({
+      email: cleanEmail,
+      password
+    });
+    if (!signInRes.error && signInRes.data.session) {
+      session = signInRes.data.session;
+    } else if (signInRes.error) {
+      signInErrorMsg = signInRes.error.message;
+    }
+  }
+
+  if (!session) {
+    if (signInErrorMsg === 'Email not confirmed' || !data.session) {
+      throw new Error(
+        'Account created, but email confirmation is required by your Supabase Auth project settings. ' +
+        'To enable instant signup, turn off "Confirm email" in Supabase Dashboard (Authentication -> Providers -> Email).'
+      );
+    }
+    throw new Error('Account created, but an active authentication session could not be established.');
+  }
+
   return {
-    user: data.user,
-    session: data.session,
-    needsEmailConfirmation: !data.session && !!data.user
+    user: data.user || session.user,
+    session
   };
 };
 
@@ -81,9 +107,21 @@ export const supabaseSignOut = async () => {
   memoryCachedAccessToken = null;
 };
 
+export const resendConfirmationEmail = async (email: string) => {
+  if (!supabase) throw new Error('Supabase client not initialized');
+  const { error } = await supabase.auth.resend({
+    type: 'signup',
+    email: email.trim(),
+    options: {
+      emailRedirectTo: `${window.location.origin}/auth/callback`
+    }
+  });
+  if (error) throw error;
+};
+
 export const resetPassword = async (email: string) => {
   if (!supabase) throw new Error('Supabase client not initialized');
-  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+  const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
     redirectTo: `${window.location.origin}/reset-password`
   });
   if (error) throw error;

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../services/supabase';
-import { supabaseSignIn, supabaseSignUp, resetPassword, updateUserPassword } from '../services/auth';
+import { supabaseSignIn, supabaseSignUp, resetPassword, updateUserPassword, resendConfirmationEmail } from '../services/auth';
 import { Database, ShieldCheck, Zap, Users, AlertCircle, CheckCircle2, Loader2, ArrowLeft, KeyRound, Mail, Lock, User } from 'lucide-react';
 
 interface AuthPageProps {
@@ -39,17 +39,9 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess }) => {
         await supabaseSignIn(email.trim(), password);
         onSuccess();
       } else if (view === 'sign_up') {
-        const result = await supabaseSignUp(email, password, fullName);
-        if (result.needsEmailConfirmation) {
-          setSuccessMessage('Account created successfully! Please check your email inbox to confirm your address before signing in.');
-          setTimeout(() => {
-            setView('sign_in');
-            setSuccessMessage(null);
-          }, 4000);
-        } else {
-          setSuccessMessage('Account created successfully! You are now signed in.');
-          onSuccess();
-        }
+        await supabaseSignUp(email, password, fullName);
+        setSuccessMessage('Account created successfully! Redirecting to dashboard...');
+        onSuccess();
       } else if (view === 'forgot_password') {
         await resetPassword(email);
         setSuccessMessage('Password reset email sent! Check your inbox for instructions.');
@@ -255,20 +247,47 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess }) => {
                   {/* Mode Navigation */}
                   <div className="pt-3 text-center border-t border-slate-100 mt-4">
                     {view === 'sign_in' && (
-                      <p className="text-xs text-slate-500">
-                        Don't have an account?{' '}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setView('sign_up');
-                            setError(null);
-                            setSuccessMessage(null);
-                          }}
-                          className="font-semibold text-blue-600 hover:text-blue-700 cursor-pointer"
-                        >
-                          Sign Up
-                        </button>
-                      </p>
+                      <div className="space-y-2">
+                        <p className="text-xs text-slate-500">
+                          Don't have an account?{' '}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setView('sign_up');
+                              setError(null);
+                              setSuccessMessage(null);
+                            }}
+                            className="font-semibold text-blue-600 hover:text-blue-700 cursor-pointer"
+                          >
+                            Sign Up
+                          </button>
+                        </p>
+                        <div>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              if (!email || !email.includes('@')) {
+                                setError('Please enter your email address above to resend confirmation instructions.');
+                                return;
+                              }
+                              setLoading(true);
+                              setError(null);
+                              setSuccessMessage(null);
+                              try {
+                                await resendConfirmationEmail(email);
+                                setSuccessMessage('Confirmation email resent successfully! Please check your inbox.');
+                              } catch (resendErr: any) {
+                                setError(resendErr.message || 'Failed to resend confirmation email.');
+                              } finally {
+                                setLoading(false);
+                              }
+                            }}
+                            className="text-xs font-medium text-slate-600 hover:text-blue-600 underline cursor-pointer"
+                          >
+                            Resend Confirmation Email
+                          </button>
+                        </div>
+                      </div>
                     )}
 
                     {view === 'sign_up' && (
