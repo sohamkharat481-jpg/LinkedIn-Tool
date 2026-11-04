@@ -85,8 +85,8 @@ export function isValidLeadRecord(lead: RawLead): boolean {
     Boolean(value?.trim() && !['n/a', 'na', 'unknown'].includes(value.trim().toLowerCase()));
 
   const hasName = Boolean(isPresent(lead.fullName) && lead.fullName.trim().length >= 2);
-  const hasJobTitle = Boolean(isPresent(lead.currentJobTitle) && lead.currentJobTitle.trim().length >= 2);
-
+  
+  // Relaxed: A lead is valid if it has at least a name and a profile URL
   const rawUrl = (lead.profileUrl || '').trim().toLowerCase();
   const hasValidUrl = Boolean(
     rawUrl &&
@@ -96,13 +96,7 @@ export function isValidLeadRecord(lead: RawLead): boolean {
         rawUrl.startsWith('https://'))
   );
 
-  // A lead is valid if it has a real name, job title, valid profile URL, and either an organization or valid profile source
-  const hasCompanyOrSource = Boolean(
-    (lead.companyName && lead.companyName.trim().length >= 2) ||
-    lead.source?.includes('Wikidata')
-  );
-
-  return hasName && hasJobTitle && hasValidUrl && hasCompanyOrSource;
+  return hasName && hasValidUrl;
 }
 
 /**
@@ -110,10 +104,12 @@ export function isValidLeadRecord(lead: RawLead): boolean {
  */
 export function filterAndDeduplicateLeads(candidates: RawLead[]): DeduplicationResult {
   const rawCandidatesCount = candidates.length;
+  console.log(`[Dedupe Diagnostic] Starting with ${rawCandidatesCount} raw candidates`);
 
   // Step 1 & 2: Validate required fields and remove invalid records
   const validRecords = candidates.filter(isValidLeadRecord);
   const validRecordsCount = validRecords.length;
+  console.log(`[Dedupe Diagnostic] Found ${validRecordsCount} valid records after validation`);
 
   // Step 3 & 4: Normalize LinkedIn profile URLs and remove duplicate profile URLs
   const uniqueUrlLeadsMap = new Map<string, RawLead>();
@@ -134,6 +130,7 @@ export function filterAndDeduplicateLeads(candidates: RawLead[]): DeduplicationR
       uniqueUrlLeadsMap.set(normalizedUrl, normalizedLead);
     }
   }
+  console.log(`[Dedupe Diagnostic] After URL deduplication: ${uniqueUrlLeadsMap.size} unique URLs`);
 
   // Step 5: Remove duplicate people using composite key (name + company + profile URL)
   const uniquePeopleMap = new Map<string, RawLead>();
@@ -147,10 +144,13 @@ export function filterAndDeduplicateLeads(candidates: RawLead[]): DeduplicationR
       uniquePeopleMap.set(compositeKey, lead);
     }
   }
+  console.log(`[Dedupe Diagnostic] After composite key deduplication: ${uniquePeopleMap.size} unique people`);
 
   // Step 6: Return final unique leads
   const finalUniqueLeads = Array.from(uniquePeopleMap.values());
   const totalDuplicatesRemoved = duplicateProfilesRemoved + duplicatePeopleRemoved;
+  
+  console.log(`[Dedupe Diagnostic] Final pipeline result: ${finalUniqueLeads.length} unique leads`);
 
   return {
     rawCandidatesCount,

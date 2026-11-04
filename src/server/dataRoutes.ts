@@ -532,6 +532,7 @@ dataRouter.get('/workspaces/:workspaceId/leads', async (req: Request, res: Respo
     try {
         if (getSupabaseServerClient) {
             if (clientId && typeof clientId === 'string' && clientId.trim()) {
+                // Fetch leads for a specific client
                 const { data: clData, error: clError } = await getSupabaseServerClient
                     .from('client_leads')
                     .select('lead_id')
@@ -553,16 +554,52 @@ dataRouter.get('/workspaces/:workspaceId/leads', async (req: Request, res: Respo
                     .order('created_at', { ascending: false });
 
                 if (leadsError) throw leadsError;
-                return res.json({ leads: leadsData || [] });
+                
+                // Map the clientId back onto the leads for the frontend
+                const leadsWithClientId = (leadsData || []).map(l => ({
+                    ...l,
+                    clientId: clientId.trim()
+                }));
+
+                return res.json({ leads: leadsWithClientId });
             } else {
+                // Fetch all leads for the workspace with their client associations
+                const { data: clData, error: clError } = await getSupabaseServerClient
+                    .from('client_leads')
+                    .select('lead_id, client_id')
+                    .eq('workspace_id', workspaceId);
+
+                if (clError) throw clError;
+
+                const leadClientMap = new Map<string, string>();
+                const leadIds: string[] = [];
+                (clData || []).forEach(row => {
+                    if (row.lead_id && row.client_id) {
+                        leadClientMap.set(row.lead_id, row.client_id);
+                        leadIds.push(row.lead_id);
+                    }
+                });
+
+                if (leadIds.length === 0) {
+                    return res.json({ leads: [] });
+                }
+
                 const { data, error } = await getSupabaseServerClient
                     .from('leads')
                     .select('*')
                     .eq('workspace_id', workspaceId)
+                    .in('id', leadIds)
                     .order('created_at', { ascending: false });
 
                 if (error) throw error;
-                return res.json({ leads: data || [] });
+
+                // Map the clientId onto each lead record
+                const leadsWithClientId = (data || []).map(l => ({
+                    ...l,
+                    clientId: leadClientMap.get(l.id)
+                }));
+
+                return res.json({ leads: leadsWithClientId });
             }
         }
         if (process.env.NODE_ENV === 'test') {
@@ -675,11 +712,10 @@ dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Resp
             }
 
             // 2. Prepare leads with valid IDs and full field mapping
-            const cleanLeadsToUpsert = leadList.map((l: any) => {
+            const prepareLeadPayload = (l: any, minimal = false) => {
                 const profileUrl = l.profile_url || l.profileUrl || l.linkedin_url || l.linkedinUrl || `https://www.linkedin.com/in/lead-${Math.random().toString(36).substr(2, 9)}`;
                 
-                return {
-                    // Critical Fix: Ensure ID is never null by checking existing map or generating a new UUID
+                const base = {
                     id: l.id || existingIdMap.get(profileUrl) || crypto.randomUUID(),
                     workspace_id: workspaceId,
                     full_name: l.full_name || l.fullName || l.name || 'Anonymous Lead',
@@ -688,8 +724,13 @@ dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Resp
                     company_name: l.company_name || l.companyName || l.company || '',
                     location: l.location || l.country || '',
                     profile_url: profileUrl,
-                    source: l.source || 'Wikidata',
-                    
+                    source: l.source || 'Wikidata'
+                };
+
+                if (minimal) return base;
+
+                return {
+                    ...base,
                     // Expanded professional fields
                     lead_type: l.lead_type || l.leadType || 'business',
                     business_category: l.business_category || l.businessCategory,
@@ -724,14 +765,35 @@ dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Resp
                     entity_period: l.entity_period || l.entityPeriod,
                     active_evidence: l.active_evidence || l.activeEvidence
                 };
-            });
+            };
 
-            const { data: savedLeads, error: leadsError } = await getSupabaseServerClient
-                .from('leads')
-                .upsert(cleanLeadsToUpsert, { onConflict: 'profile_url, workspace_id' })
-                .select();
+            let leadsToUpsert = leadList.map(l => prepareLeadPayload(l));
+            let persistenceResult: any;
 
-            if (leadsError) throw leadsError;
+            try {
+                persistenceResult = await getSupabaseServerClient
+                    .from('leads')
+                    .upsert(leadsToUpsert, { onConflict: 'profile_url, workspace_id' })
+                    .select();
+                
+                if (persistenceResult.error) throw persistenceResult.error;
+            } catch (upsertErr: any) {
+                // If error is about missing columns, retry with minimal payload
+                if (upsertErr.message?.includes('column') && upsertErr.message?.includes('does not exist')) {
+                    console.warn('[Persistence Warning] Production schema mismatch detected. Retrying with minimal core columns...', upsertErr.message);
+                    leadsToUpsert = leadList.map(l => prepareLeadPayload(l, true));
+                    persistenceResult = await getSupabaseServerClient
+                        .from('leads')
+                        .upsert(leadsToUpsert, { onConflict: 'profile_url, workspace_id' })
+                        .select();
+                    
+                    if (persistenceResult.error) throw persistenceResult.error;
+                } else {
+                    throw upsertErr;
+                }
+            }
+
+            const savedLeads = persistenceResult.data;
 
             if (clientId && savedLeads && savedLeads.length > 0) {
                 // 3. Resolve existing client_leads IDs to prevent changing them
@@ -739,7 +801,7 @@ dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Resp
                     .from('client_leads')
                     .select('id, lead_id')
                     .eq('client_id', clientId)
-                    .in('lead_id', savedLeads.map(l => l.id));
+                    .in('lead_id', savedLeads.map((l: any) => l.id));
                 
                 const clIdMap = new Map<string, string>();
                 (existingCl || []).forEach(row => {
@@ -747,7 +809,6 @@ dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Resp
                 });
 
                 const clientLeadsToUpsert = savedLeads.map((sl: any) => ({
-                    // Critical Fix: Satisfy NOT NULL constraint for id column
                     id: clIdMap.get(sl.id) || crypto.randomUUID(),
                     client_id: clientId,
                     lead_id: sl.id,

@@ -39,6 +39,11 @@ export const OCCUPATION_MAP: Record<string, string[]> = {
   'marketer': ['wd:Q88206817', 'wd:Q329439'],
   'clinical director': ['wd:Q1162163', 'wd:Q3455803'],
   'chief medical officer': ['wd:Q484876', 'wd:Q1162163', 'wd:Q3455803'],
+  'software engineer': ['wd:Q5482740', 'wd:Q183'],
+  'developer': ['wd:Q5482740', 'wd:Q183'],
+  'engineer': ['wd:Q8162', 'wd:Q183'],
+  'it consultant': ['wd:Q15978655', 'wd:Q183'],
+  'sales': ['wd:Q64155861', 'wd:Q43845'],
   'senior': ['wd:Q1162163', 'wd:Q3455803', 'wd:Q1622275', 'wd:Q43845']
 };
 
@@ -290,21 +295,28 @@ export class WikidataLeadProvider implements LeadProvider {
   }
 
   private toLead(binding: any, requestedTitle: string, filters: LeadFilter): RawLead | null {
-    if (!binding.item || !binding.itemLabel || !binding.itemLabel.value) {
-        console.log('[Diagnostic] Discarding lead: Missing item or label');
+    if (!binding.item || !binding.item.value) {
+        return null;
+    }
+    
+    const itemUri = binding.item.value;
+    const itemQid = itemUri.split('/').pop() || 'Unknown';
+
+    if (!binding.itemLabel || !binding.itemLabel.value) {
+        console.log(`[Mapping Diagnostic] Discarding ${itemQid}: Missing label`);
         return null;
     }
     
     // Ignore internal placeholder IDs if label missing
     const label = binding.itemLabel.value.trim();
     if (!label || /^Q\d+$/.test(label)) {
-        console.log('[Diagnostic] Discarding lead: Missing or placeholder label', { label });
+        console.log(`[Mapping Diagnostic] Discarding ${itemQid}: Placeholder label '${label}'`);
         return null;
     }
 
     // Filter out deceased individuals if any slipped past SPARQL filter
     if (binding.deathDate && binding.deathDate.value) {
-        console.log('[Diagnostic] Discarding lead: Deceased', { label });
+        console.log(`[Mapping Diagnostic] Discarding ${label} (${itemQid}): Deceased detected`);
         return null;
     }
 
@@ -323,9 +335,6 @@ export class WikidataLeadProvider implements LeadProvider {
     const rawLinkedin = binding.linkedin?.value ? binding.linkedin.value.trim() : undefined;
     const linkedInProfileUrl = rawLinkedin ? (rawLinkedin.startsWith('http') ? rawLinkedin : `https://www.linkedin.com/in/${rawLinkedin}`) : undefined;
     
-    // Validate if lead has minimal contact info - accepted without mandatory contact info
-
-
     const rawInstagram = binding.instagram?.value ? binding.instagram.value.trim().replace(/^@/, '') : undefined;
     const instagramUsername = rawInstagram && /^[a-zA-Z0-9._]{1,30}$/.test(rawInstagram) ? rawInstagram : undefined;
     const instagramProfileUrl = instagramUsername ? `https://www.instagram.com/${instagramUsername}/` : undefined;
@@ -346,7 +355,7 @@ export class WikidataLeadProvider implements LeadProvider {
       currentJobTitle: requestedTitle,
       companyName: description.toLowerCase().includes('founder') ? 'Founder / Self-Employed' : 'Independent / Public Entity',
       location: country,
-      profileUrl: binding.item.value,
+      profileUrl: itemUri,
       connectionsOrFollowers: 'N/A',
       lastActivityDate: 'N/A',
       source: SOURCE_NAME,
@@ -364,6 +373,7 @@ export class WikidataLeadProvider implements LeadProvider {
       instagramLastCheckedAt
     };
 
-    return enrichRawLead(baseLead, filters, undefined, undefined, dateOfBirth);
+    const enriched = enrichRawLead(baseLead, filters, undefined, undefined, dateOfBirth);
+    return enriched;
   }
 }
