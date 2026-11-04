@@ -289,15 +289,22 @@ export class WikidataLeadProvider implements LeadProvider {
   }
 
   private toLead(binding: any, requestedTitle: string, filters: LeadFilter): RawLead | null {
-    if (!binding.item || !binding.itemLabel || !binding.itemLabel.value) return null;
+    if (!binding.item || !binding.itemLabel || !binding.itemLabel.value) {
+        console.log('[Diagnostic] Discarding lead: Missing item or label');
+        return null;
+    }
     
     // Ignore internal placeholder IDs if label missing
     const label = binding.itemLabel.value.trim();
-    if (!label || /^Q\d+$/.test(label)) return null;
+    if (!label || /^Q\d+$/.test(label)) {
+        console.log('[Diagnostic] Discarding lead: Missing or placeholder label', { label });
+        return null;
+    }
 
     // Filter out deceased individuals if any slipped past SPARQL filter
     if (binding.deathDate && binding.deathDate.value) {
-      return null;
+        console.log('[Diagnostic] Discarding lead: Deceased', { label });
+        return null;
     }
 
     const description = binding.itemDescription?.value || '';
@@ -314,6 +321,12 @@ export class WikidataLeadProvider implements LeadProvider {
 
     const rawLinkedin = binding.linkedin?.value ? binding.linkedin.value.trim() : undefined;
     const linkedInProfileUrl = rawLinkedin ? (rawLinkedin.startsWith('http') ? rawLinkedin : `https://www.linkedin.com/in/${rawLinkedin}`) : undefined;
+    
+    // Validate if lead has minimal contact info
+    if (!website && !email && !phone && !linkedInProfileUrl) {
+        console.log('[Diagnostic] Discarding lead: No contact info', { label });
+        // return null; // Relaxing this for now to see if we get more leads
+    }
 
     const rawInstagram = binding.instagram?.value ? binding.instagram.value.trim().replace(/^@/, '') : undefined;
     const instagramUsername = rawInstagram && /^[a-zA-Z0-9._]{1,30}$/.test(rawInstagram) ? rawInstagram : undefined;
