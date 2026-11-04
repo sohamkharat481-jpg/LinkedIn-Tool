@@ -656,16 +656,75 @@ dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Resp
     try {
         const leadList = Array.isArray(leads) ? leads : [];
         if (getSupabaseServerClient) {
-            const cleanLeadsToUpsert = leadList.map((l: any) => ({
-                id: l.id || undefined,
-                workspace_id: workspaceId,
-                full_name: l.full_name || l.fullName || l.name || 'Anonymous Lead',
-                headline: l.headline || l.job_title || l.title || l.headlineRole || '',
-                company_name: l.company_name || l.company || l.companyName || '',
-                location: l.location || l.country || '',
-                profile_url: l.profile_url || l.linkedin_url || l.linkedinUrl || `https://www.linkedin.com/in/lead-${Math.random().toString(36).substr(2, 9)}`,
-                source: l.source || 'Wikidata'
-            }));
+            // 1. Resolve existing IDs to prevent changing them during upsert
+            const profileUrls = leadList
+                .map((l: any) => (l.profile_url || l.profileUrl || l.linkedin_url || l.linkedinUrl))
+                .filter(Boolean);
+            
+            const existingIdMap = new Map<string, string>();
+            if (profileUrls.length > 0) {
+                const { data: existingLeads } = await getSupabaseServerClient
+                    .from('leads')
+                    .select('id, profile_url')
+                    .eq('workspace_id', workspaceId)
+                    .in('profile_url', profileUrls);
+                
+                (existingLeads || []).forEach(row => {
+                    existingIdMap.set(row.profile_url, row.id);
+                });
+            }
+
+            // 2. Prepare leads with valid IDs and full field mapping
+            const cleanLeadsToUpsert = leadList.map((l: any) => {
+                const profileUrl = l.profile_url || l.profileUrl || l.linkedin_url || l.linkedinUrl || `https://www.linkedin.com/in/lead-${Math.random().toString(36).substr(2, 9)}`;
+                
+                return {
+                    // Critical Fix: Ensure ID is never null by checking existing map or generating a new UUID
+                    id: l.id || existingIdMap.get(profileUrl) || crypto.randomUUID(),
+                    workspace_id: workspaceId,
+                    full_name: l.full_name || l.fullName || l.name || 'Anonymous Lead',
+                    headline: l.headline || l.job_title || l.title || l.headlineRole || '',
+                    current_job_title: l.current_job_title || l.currentJobTitle || l.job_title || l.title || '',
+                    company_name: l.company_name || l.companyName || l.company || '',
+                    location: l.location || l.country || '',
+                    profile_url: profileUrl,
+                    source: l.source || 'Wikidata',
+                    
+                    // Expanded professional fields
+                    lead_type: l.lead_type || l.leadType || 'business',
+                    business_category: l.business_category || l.businessCategory,
+                    business_website: l.business_website || l.businessWebsite,
+                    business_phone: l.business_phone || l.businessPhone,
+                    business_address: l.business_address || l.businessAddress,
+                    business_city: l.business_city || l.businessCity,
+                    business_country: l.business_country || l.businessCountry,
+                    latitude: l.latitude,
+                    longitude: l.longitude,
+                    business_email: l.business_email || l.businessEmail,
+                    linkedin_profile_url: l.linkedin_profile_url || l.linkedInProfileUrl || l.profileUrl,
+                    contact_source: l.contact_source || l.contactSource || l.source || 'Wikidata',
+                    contact_verification_status: l.contact_verification_status || l.contactVerificationStatus || 'Not checked',
+                    
+                    // Instagram Discovery fields
+                    instagram_username: l.instagram_username || l.instagramUsername,
+                    instagram_profile_url: l.instagram_profile_url || l.instagramProfileUrl,
+                    instagram_verification_status: l.instagram_verification_status || l.instagramVerificationStatus,
+                    instagram_verification_evidence: l.instagram_verification_evidence || l.instagramVerificationEvidence,
+                    instagram_discovery_source: l.instagram_discovery_source || l.instagramDiscoverySource,
+                    instagram_last_checked_at: l.instagram_last_checked_at || l.instagramLastCheckedAt,
+                    
+                    // B2B Relevance & Intelligence fields
+                    relevance_score: l.relevance_score || l.relevanceScore,
+                    relevance_explanation: l.relevance_explanation || l.relevanceExplanation,
+                    relevance_breakdown: l.relevance_breakdown || l.relevanceBreakdown,
+                    b2b_classification: l.b2b_classification || l.b2bClassification || 'Discovered',
+                    is_deceased: l.is_deceased ?? l.isDeceased,
+                    date_of_death: l.date_of_death || l.dateOfDeath,
+                    date_of_birth: l.date_of_birth || l.dateOfBirth,
+                    entity_period: l.entity_period || l.entityPeriod,
+                    active_evidence: l.active_evidence || l.activeEvidence
+                };
+            });
 
             const { data: savedLeads, error: leadsError } = await getSupabaseServerClient
                 .from('leads')
@@ -675,7 +734,21 @@ dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Resp
             if (leadsError) throw leadsError;
 
             if (clientId && savedLeads && savedLeads.length > 0) {
+                // 3. Resolve existing client_leads IDs to prevent changing them
+                const { data: existingCl } = await getSupabaseServerClient
+                    .from('client_leads')
+                    .select('id, lead_id')
+                    .eq('client_id', clientId)
+                    .in('lead_id', savedLeads.map(l => l.id));
+                
+                const clIdMap = new Map<string, string>();
+                (existingCl || []).forEach(row => {
+                    clIdMap.set(row.lead_id, row.id);
+                });
+
                 const clientLeadsToUpsert = savedLeads.map((sl: any) => ({
+                    // Critical Fix: Satisfy NOT NULL constraint for id column
+                    id: clIdMap.get(sl.id) || crypto.randomUUID(),
                     client_id: clientId,
                     lead_id: sl.id,
                     workspace_id: workspaceId
