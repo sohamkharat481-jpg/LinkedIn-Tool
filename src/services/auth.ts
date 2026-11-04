@@ -43,16 +43,22 @@ export const supabaseSignIn = async (email: string, password: string) => {
 export const supabaseSignUp = async (email: string, password: string, fullName: string) => {
   if (!supabase) throw new Error('Supabase client not initialized');
   const { data, error } = await supabase.auth.signUp({
-    email,
+    email: email.trim(),
     password,
     options: {
       data: {
-        full_name: fullName
+        full_name: fullName.trim()
       }
     }
   });
   if (error) throw error;
-  return data.user;
+  
+  // If Supabase has email confirmation enabled, data.session will be null upon signup
+  return {
+    user: data.user,
+    session: data.session,
+    needsEmailConfirmation: !data.session && !!data.user
+  };
 };
 
 export const updateUserPassword = async (newPassword: string) => {

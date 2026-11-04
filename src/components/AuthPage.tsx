@@ -36,12 +36,20 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess }) => {
 
     try {
       if (view === 'sign_in') {
-        await supabaseSignIn(email, password);
+        await supabaseSignIn(email.trim(), password);
         onSuccess();
       } else if (view === 'sign_up') {
-        await supabaseSignUp(email, password, fullName);
-        setSuccessMessage('Account created successfully! You are now signed in.');
-        onSuccess();
+        const result = await supabaseSignUp(email, password, fullName);
+        if (result.needsEmailConfirmation) {
+          setSuccessMessage('Account created successfully! Please check your email inbox to confirm your address before signing in.');
+          setTimeout(() => {
+            setView('sign_in');
+            setSuccessMessage(null);
+          }, 4000);
+        } else {
+          setSuccessMessage('Account created successfully! You are now signed in.');
+          onSuccess();
+        }
       } else if (view === 'forgot_password') {
         await resetPassword(email);
         setSuccessMessage('Password reset email sent! Check your inbox for instructions.');
