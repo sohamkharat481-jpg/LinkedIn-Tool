@@ -150,6 +150,7 @@ export class WikidataLeadProvider implements LeadProvider {
 
       const data = await response.json();
       const rawResultsCount = Array.isArray(data?.results?.bindings) ? data.results.bindings.length : 0;
+      console.log(`[Diagnostic] Raw bindings received: ${rawResultsCount}`, JSON.stringify(data.results.bindings.slice(0, 2)));
 
       if (!data?.results?.bindings || !Array.isArray(data.results.bindings)) {
         console.warn(`[Diagnostic] Wikidata Search HTTP 200 in ${durationMs}ms (Attempt ${attempt}) | Raw bindings: 0 | Mapped unique leads: 0`);
@@ -322,11 +323,8 @@ export class WikidataLeadProvider implements LeadProvider {
     const rawLinkedin = binding.linkedin?.value ? binding.linkedin.value.trim() : undefined;
     const linkedInProfileUrl = rawLinkedin ? (rawLinkedin.startsWith('http') ? rawLinkedin : `https://www.linkedin.com/in/${rawLinkedin}`) : undefined;
     
-    // Validate if lead has minimal contact info
-    if (!website && !email && !phone && !linkedInProfileUrl) {
-        console.log('[Diagnostic] Discarding lead: No contact info', { label });
-        // return null; // Relaxing this for now to see if we get more leads
-    }
+    // Validate if lead has minimal contact info - accepted without mandatory contact info
+
 
     const rawInstagram = binding.instagram?.value ? binding.instagram.value.trim().replace(/^@/, '') : undefined;
     const instagramUsername = rawInstagram && /^[a-zA-Z0-9._]{1,30}$/.test(rawInstagram) ? rawInstagram : undefined;
