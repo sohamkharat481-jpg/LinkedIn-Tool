@@ -250,16 +250,17 @@ export class WikidataLeadProvider implements LeadProvider {
       }
       const qids = this.resolveQidsForTitles(titleCandidates);
       occValues = qids.join(' ');
+      console.log(`[Diagnostic] Generated Occupation QIDs: ${occValues}`);
     }
 
+    const limit = Math.min(Math.max(Number(filters.maxLeads) || 20, 1), 100);
     const countryNorm = (filters.country || '').toLowerCase().trim();
     const countryQid = COUNTRY_MAP[countryNorm];
     const countryClause = countryQid ? `?item wdt:P27 ${countryQid} .` : '';
-
-    const limit = Math.min(Math.max(Number(filters.maxLeads) || 20, 1), 100);
     const innerLimit = Math.min(Math.max(limit * 2, limit + 25), 150);
 
-    return `
+
+    const query = `
       SELECT DISTINCT ?item ?itemLabel ?itemDescription ?website ?countryLabel ?dateOfBirth ?email ?phone ?linkedin ?instagram WHERE {
         {
           SELECT DISTINCT ?item WHERE {
@@ -283,6 +284,8 @@ export class WikidataLeadProvider implements LeadProvider {
       }
       LIMIT ${limit}
     `;
+    console.log(`[Diagnostic] Final SPARQL Query: ${query}`);
+    return query;
   }
 
   private toLead(binding: any, requestedTitle: string, filters: LeadFilter): RawLead | null {

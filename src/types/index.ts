@@ -233,7 +233,7 @@ export interface SearchProgressState {
 }
 
 export interface LeadProviderConfig {
-  providerType: 'wikidata';
+  providerType: 'wikidata' | 'apollo';
   apiKey?: string;
   customEndpoint?: string;
 }
