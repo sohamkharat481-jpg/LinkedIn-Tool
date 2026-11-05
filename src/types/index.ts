@@ -6,7 +6,7 @@ export type SeniorityLevel = 'Entry' | 'Manager' | 'Senior' | 'Director' | 'VP' 
 
 export type CompanySizeRange = '1-10' | '11-50' | '51-200' | '201-500' | '501-1000' | '1001+';
 
-export type LeadStatus = 'Not Contacted' | 'Request Sent' | 'Accepted' | 'Replied' | 'Call Booked';
+export type LeadStatus = 'Not Contacted' | 'Contacted' | 'Follow-up Required' | 'Replied' | 'Interested' | 'Not Interested' | 'Converted';
 
 export interface LeadFilter {
   jobTitles: string[];
@@ -44,6 +44,7 @@ export interface RawLead {
   connectionsOrFollowers?: string;
   lastActivityDate?: string;
   source?: string;
+  seniority?: SeniorityLevel;
   leadType?: 'business';
   businessCategory?: string;
   businessWebsite?: string;
@@ -96,6 +97,7 @@ export interface LeadRecord {
   status: LeadStatus;
   notes: string;
   source: string;
+  seniority?: SeniorityLevel;
   leadType?: 'business';
   businessCategory?: string;
   businessWebsite?: string;

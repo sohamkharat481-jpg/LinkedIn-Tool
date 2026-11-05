@@ -213,10 +213,10 @@ export class SupabaseDataService {
   /**
    * Update individual lead status.
    */
-  static async updateLeadStatus(workspaceId: string, leadId: string, status: LeadStatus): Promise<void> {
+  static async updateLeadStatus(workspaceId: string, leadId: string, status: LeadStatus, clientId?: string): Promise<void> {
     const apiRes = await callDataApi(
       `/api/workspaces/${encodeURIComponent(workspaceId)}/leads/${encodeURIComponent(leadId)}/status`,
-      { method: 'PATCH', body: JSON.stringify({ status }) }
+      { method: 'PATCH', body: JSON.stringify({ status, clientId }) }
     );
     if (!apiRes.success) throw new Error(apiRes.error || 'Failed to update lead status.');
   }
@@ -224,10 +224,10 @@ export class SupabaseDataService {
   /**
    * Update lead notes.
    */
-  static async updateLeadNotes(workspaceId: string, leadId: string, notes: string): Promise<void> {
+  static async updateLeadNotes(workspaceId: string, leadId: string, notes: string, clientId?: string): Promise<void> {
     const apiRes = await callDataApi(
       `/api/workspaces/${encodeURIComponent(workspaceId)}/leads/${encodeURIComponent(leadId)}/notes`,
-      { method: 'PATCH', body: JSON.stringify({ notes }) }
+      { method: 'PATCH', body: JSON.stringify({ notes, clientId }) }
     );
     if (!apiRes.success) throw new Error(apiRes.error || 'Failed to update lead notes.');
   }

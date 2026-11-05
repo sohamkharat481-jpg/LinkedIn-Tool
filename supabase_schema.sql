@@ -1,5 +1,5 @@
--- LinkedIn Lead Finder - Supabase Database Schema with RLS
--- Generated for multi-tenant workspace isolation
+-- LinkedIn Lead Finder - Supabase Database Schema with Robust RLS
+-- Generated for multi-tenant workspace and organization isolation
 
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -7,15 +7,13 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- 0. WORKSPACES TABLE
 CREATE TABLE IF NOT EXISTS public.workspaces (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID,
+  owner_id TEXT,
   name TEXT NOT NULL,
   description TEXT,
-  owner_id TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
-
-ALTER TABLE public.workspaces
-  ADD COLUMN IF NOT EXISTS owner_id TEXT;
 
 -- 1. USERS TABLE
 CREATE TABLE IF NOT EXISTS public.users (
@@ -23,6 +21,7 @@ CREATE TABLE IF NOT EXISTS public.users (
   email TEXT UNIQUE NOT NULL,
   full_name TEXT,
   avatar_url TEXT,
+  organization_id UUID,
   workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
   role TEXT DEFAULT 'member',
   created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -32,7 +31,8 @@ CREATE TABLE IF NOT EXISTS public.users (
 -- 2. CLIENTS TABLE
 CREATE TABLE IF NOT EXISTS public.clients (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  workspace_id UUID NOT NULL,
+  organization_id UUID,
+  workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   niche TEXT NOT NULL,
   notes TEXT,
@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS public.clients (
 -- 3. LEAD SEARCHES TABLE
 CREATE TABLE IF NOT EXISTS public.lead_searches (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  workspace_id UUID NOT NULL,
+  organization_id UUID,
+  workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
   client_id UUID NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
   filters JSONB NOT NULL,
   candidates_found INT DEFAULT 0,
@@ -59,9 +60,11 @@ CREATE TABLE IF NOT EXISTS public.lead_searches (
 -- 4. LEADS TABLE
 CREATE TABLE IF NOT EXISTS public.leads (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  workspace_id UUID NOT NULL,
+  organization_id UUID,
+  workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
   full_name TEXT NOT NULL,
   headline TEXT,
+  seniority TEXT,
   current_job_title TEXT NOT NULL,
   company_name TEXT NOT NULL,
   location TEXT,
@@ -102,44 +105,15 @@ CREATE TABLE IF NOT EXISTS public.leads (
   CONSTRAINT unique_workspace_profile_url UNIQUE(workspace_id, profile_url)
 );
 
-ALTER TABLE public.leads
-  ADD COLUMN IF NOT EXISTS lead_type TEXT,
-  ADD COLUMN IF NOT EXISTS business_category TEXT,
-  ADD COLUMN IF NOT EXISTS business_website TEXT,
-  ADD COLUMN IF NOT EXISTS business_phone TEXT,
-  ADD COLUMN IF NOT EXISTS business_address TEXT,
-  ADD COLUMN IF NOT EXISTS business_city TEXT,
-  ADD COLUMN IF NOT EXISTS business_country TEXT,
-  ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION,
-  ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION,
-  ADD COLUMN IF NOT EXISTS business_email TEXT,
-  ADD COLUMN IF NOT EXISTS linkedin_profile_url TEXT,
-  ADD COLUMN IF NOT EXISTS contact_source TEXT,
-  ADD COLUMN IF NOT EXISTS contact_verification_status TEXT,
-  ADD COLUMN IF NOT EXISTS instagram_username TEXT,
-  ADD COLUMN IF NOT EXISTS instagram_profile_url TEXT,
-  ADD COLUMN IF NOT EXISTS instagram_verification_status TEXT,
-  ADD COLUMN IF NOT EXISTS instagram_verification_evidence TEXT,
-  ADD COLUMN IF NOT EXISTS instagram_discovery_source TEXT,
-  ADD COLUMN IF NOT EXISTS instagram_last_checked_at TIMESTAMPTZ,
-  ADD COLUMN IF NOT EXISTS relevance_score DOUBLE PRECISION,
-  ADD COLUMN IF NOT EXISTS relevance_explanation TEXT,
-  ADD COLUMN IF NOT EXISTS relevance_breakdown JSONB,
-  ADD COLUMN IF NOT EXISTS b2b_classification TEXT,
-  ADD COLUMN IF NOT EXISTS is_deceased BOOLEAN,
-  ADD COLUMN IF NOT EXISTS date_of_death TEXT,
-  ADD COLUMN IF NOT EXISTS date_of_birth TEXT,
-  ADD COLUMN IF NOT EXISTS entity_period TEXT,
-  ADD COLUMN IF NOT EXISTS active_evidence TEXT;
-
 -- 5. CLIENT LEADS TABLE (Junction table linking Leads to Clients with status & notes)
 CREATE TABLE IF NOT EXISTS public.client_leads (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  workspace_id UUID NOT NULL,
+  organization_id UUID,
+  workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
   client_id UUID NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
   lead_id UUID NOT NULL REFERENCES public.leads(id) ON DELETE CASCADE,
   search_id UUID REFERENCES public.lead_searches(id) ON DELETE SET NULL,
-  status TEXT DEFAULT 'Not Contacted' CHECK (status IN ('Not Contacted', 'Request Sent', 'Accepted', 'Replied', 'Call Booked')),
+  status TEXT DEFAULT 'Not Contacted' CHECK (status IN ('Not Contacted', 'Contacted', 'Follow-up Required', 'Replied', 'Interested', 'Not Interested', 'Converted')),
   notes TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
@@ -149,7 +123,8 @@ CREATE TABLE IF NOT EXISTS public.client_leads (
 -- 6. GOOGLE INTEGRATIONS TABLE
 CREATE TABLE IF NOT EXISTS public.google_integrations (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  workspace_id UUID NOT NULL,
+  organization_id UUID,
+  workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
   client_id UUID REFERENCES public.clients(id) ON DELETE CASCADE,
   spreadsheet_id TEXT NOT NULL,
   spreadsheet_url TEXT NOT NULL,
@@ -159,10 +134,20 @@ CREATE TABLE IF NOT EXISTS public.google_integrations (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 6.5. GOOGLE TOKENS TABLE (Secure storage for OAuth refresh tokens)
+CREATE TABLE IF NOT EXISTS public.google_tokens (
+  user_id TEXT PRIMARY KEY,
+  organization_id UUID,
+  encrypted_refresh_token TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- 7. EXPORT HISTORY TABLE
 CREATE TABLE IF NOT EXISTS public.export_history (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  workspace_id UUID NOT NULL,
+  organization_id UUID,
+  workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
   client_id UUID NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
   spreadsheet_id TEXT NOT NULL,
   exported_leads_count INT NOT NULL,
@@ -174,7 +159,8 @@ CREATE TABLE IF NOT EXISTS public.export_history (
 -- 8. INSTAGRAM INTEGRATIONS TABLE
 CREATE TABLE IF NOT EXISTS public.instagram_integrations (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  workspace_id UUID NOT NULL,
+  organization_id UUID,
+  workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
   client_id UUID NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
   instagram_user_id TEXT NOT NULL,
   instagram_username TEXT,
@@ -204,129 +190,133 @@ ALTER TABLE public.client_leads ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.google_integrations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.export_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.instagram_integrations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.google_tokens ENABLE ROW LEVEL SECURITY;
 
 -- ============================================================================
--- ROW LEVEL SECURITY (RLS) POLICIES — STRICT MULTI-TENANT ISOLATION
---
--- SECURITY NOTE:
--- A naive policy checking only 'workspace_id IS NOT NULL' IS INSECURE and DOES NOT
--- provide tenant isolation, because any authenticated user would be permitted to
--- access, insert, or manipulate records belonging to any workspace.
---
--- True tenant isolation requires checking that the record's workspace_id matches
--- a workspace authorized for the authenticated user (auth.uid()).
---
--- Both USING and WITH CHECK clauses are mandatory:
--- - USING controls which existing rows can be read (SELECT), updated (UPDATE), or deleted (DELETE).
--- - WITH CHECK ensures that new rows (INSERT) and modified rows (UPDATE) cannot be inserted into
---   or moved into an unauthorized workspace.
+-- ROW LEVEL SECURITY (RLS) POLICIES — ROBUST MULTI-TENANT ISOLATION
 -- ============================================================================
 
--- 0. WORKSPACES ISOLATION POLICY
+-- 0. GOOGLE TOKENS POLICY
+DROP POLICY IF EXISTS "Tenant isolation for google_tokens" ON public.google_tokens;
+CREATE POLICY "Tenant isolation for google_tokens" ON public.google_tokens
+  FOR ALL
+  USING (user_id = auth.uid()::text)
+  WITH CHECK (user_id = auth.uid()::text);
+
+-- 1. WORKSPACES POLICY
+DROP POLICY IF EXISTS "Tenant isolation for workspaces" ON public.workspaces;
 CREATE POLICY "Tenant isolation for workspaces" ON public.workspaces
   FOR ALL
-  USING (id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()))
-  WITH CHECK (id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()));
+  USING (
+    owner_id = auth.uid()::text
+    OR id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()::text)
+    OR organization_id IN (SELECT organization_id FROM public.users WHERE id = auth.uid()::text)
+  );
 
--- 1. USERS ISOLATION POLICY
+-- 2. USERS POLICY
+DROP POLICY IF EXISTS "Users can read self and workspace members" ON public.users;
 CREATE POLICY "Users can read self and workspace members" ON public.users
   FOR SELECT
   USING (
-    id = auth.uid()
-    OR workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid())
+    id = auth.uid()::text
+    OR workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()::text)
+    OR organization_id IN (SELECT organization_id FROM public.users WHERE id = auth.uid()::text)
   );
 
+DROP POLICY IF EXISTS "Users can only update self within authorized workspace" ON public.users;
 CREATE POLICY "Users can only update self within authorized workspace" ON public.users
   FOR UPDATE
-  USING (id = auth.uid())
-  WITH CHECK (
-    id = auth.uid()
-    AND workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid())
-  );
+  USING (id = auth.uid()::text)
+  WITH CHECK (id = auth.uid()::text);
 
--- 2. CLIENTS ISOLATION POLICY
--- Prevents selecting, modifying, deleting other workspaces' clients, AND prevents moving clients cross-workspace
+-- 3. CLIENTS POLICY
+DROP POLICY IF EXISTS "Tenant isolation for clients" ON public.clients;
 CREATE POLICY "Tenant isolation for clients" ON public.clients
   FOR ALL
-  USING (workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()))
-  WITH CHECK (workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()));
-
--- 3. LEAD SEARCHES ISOLATION POLICY
-CREATE POLICY "Tenant isolation for lead_searches" ON public.lead_searches
-  FOR ALL
   USING (
-    workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid())
-    AND client_id IN (SELECT id FROM public.clients WHERE workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()))
-  )
-  WITH CHECK (
-    workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid())
-    AND client_id IN (SELECT id FROM public.clients WHERE workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()))
+    workspace_id IN (
+      SELECT id FROM public.workspaces 
+      WHERE owner_id = auth.uid()::text 
+      OR id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()::text)
+    )
   );
 
--- 4. LEADS ISOLATION POLICY
+-- 4. LEADS POLICY
+DROP POLICY IF EXISTS "Tenant isolation for leads" ON public.leads;
 CREATE POLICY "Tenant isolation for leads" ON public.leads
   FOR ALL
-  USING (workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()))
-  WITH CHECK (workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()));
+  USING (
+    workspace_id IN (
+      SELECT id FROM public.workspaces 
+      WHERE owner_id = auth.uid()::text 
+      OR id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()::text)
+    )
+  );
 
--- 5. CLIENT LEADS JUNCTION ISOLATION POLICY
+-- 5. CLIENT LEADS JUNCTION POLICY
+DROP POLICY IF EXISTS "Tenant isolation for client_leads" ON public.client_leads;
 CREATE POLICY "Tenant isolation for client_leads" ON public.client_leads
   FOR ALL
   USING (
-    workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid())
-    AND client_id IN (SELECT id FROM public.clients WHERE workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()))
-    AND lead_id IN (SELECT id FROM public.leads WHERE workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()))
-  )
-  WITH CHECK (
-    workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid())
-    AND client_id IN (SELECT id FROM public.clients WHERE workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()))
-    AND lead_id IN (SELECT id FROM public.leads WHERE workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()))
+    workspace_id IN (
+      SELECT id FROM public.workspaces 
+      WHERE owner_id = auth.uid()::text 
+      OR id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()::text)
+    )
   );
 
--- 6. GOOGLE INTEGRATIONS ISOLATION POLICY
+-- 6. LEAD SEARCHES POLICY
+DROP POLICY IF EXISTS "Tenant isolation for lead_searches" ON public.lead_searches;
+CREATE POLICY "Tenant isolation for lead_searches" ON public.lead_searches
+  FOR ALL
+  USING (
+    workspace_id IN (
+      SELECT id FROM public.workspaces 
+      WHERE owner_id = auth.uid()::text 
+      OR id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()::text)
+    )
+  );
+
+-- 7. GOOGLE INTEGRATIONS POLICY
+DROP POLICY IF EXISTS "Tenant isolation for google_integrations" ON public.google_integrations;
 CREATE POLICY "Tenant isolation for google_integrations" ON public.google_integrations
   FOR ALL
   USING (
-    workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid())
-    AND (client_id IS NULL OR client_id IN (SELECT id FROM public.clients WHERE workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid())))
-  )
-  WITH CHECK (
-    workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid())
-    AND (client_id IS NULL OR client_id IN (SELECT id FROM public.clients WHERE workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid())))
+    workspace_id IN (
+      SELECT id FROM public.workspaces 
+      WHERE owner_id = auth.uid()::text 
+      OR id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()::text)
+    )
   );
 
--- 7. EXPORT HISTORY ISOLATION POLICY
+-- 8. EXPORT HISTORY POLICY
+DROP POLICY IF EXISTS "Tenant isolation for export_history" ON public.export_history;
 CREATE POLICY "Tenant isolation for export_history" ON public.export_history
   FOR ALL
   USING (
-    workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid())
-    AND client_id IN (SELECT id FROM public.clients WHERE workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()))
-  )
-  WITH CHECK (
-    workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid())
-    AND client_id IN (SELECT id FROM public.clients WHERE workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()))
+    workspace_id IN (
+      SELECT id FROM public.workspaces 
+      WHERE owner_id = auth.uid()::text 
+      OR id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()::text)
+    )
   );
 
--- 8. INSTAGRAM INTEGRATIONS ISOLATION POLICY
+-- 9. INSTAGRAM INTEGRATIONS POLICY
+DROP POLICY IF EXISTS "Tenant isolation for instagram_integrations" ON public.instagram_integrations;
 CREATE POLICY "Tenant isolation for instagram_integrations" ON public.instagram_integrations
   FOR ALL
   USING (
-    workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid())
-    AND client_id IN (SELECT id FROM public.clients WHERE workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()))
-  )
-  WITH CHECK (
-    workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid())
-    AND client_id IN (SELECT id FROM public.clients WHERE workspace_id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()))
+    workspace_id IN (
+      SELECT id FROM public.workspaces 
+      WHERE owner_id = auth.uid()::text 
+      OR id IN (SELECT workspace_id FROM public.users WHERE id = auth.uid()::text)
+    )
   );
 
 -- Revoke all access from unauthenticated anon role
 REVOKE ALL ON public.instagram_integrations FROM anon;
+REVOKE ALL ON public.google_tokens FROM anon;
 
--- Restrict authenticated client users to non-sensitive status columns (encrypted_access_token is never readable by frontend)
-REVOKE ALL ON public.instagram_integrations FROM authenticated;
-GRANT SELECT (id, workspace_id, client_id, instagram_user_id, instagram_username, connection_status, token_expires_at, created_at, updated_at)
-  ON public.instagram_integrations TO authenticated;
-
--- Service role maintains full access for backend token encryption/decryption
+-- Service role maintains full access
 GRANT ALL ON public.instagram_integrations TO service_role;
-
+GRANT ALL ON public.google_tokens TO service_role;

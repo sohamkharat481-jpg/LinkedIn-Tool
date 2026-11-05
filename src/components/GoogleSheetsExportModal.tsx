@@ -163,9 +163,9 @@ export const GoogleSheetsExportModal: React.FC<GoogleSheetsExportModalProps> = (
               </div>
 
               <div className="text-xs space-y-1 text-gray-600 bg-gray-50 p-3 rounded-xl border border-gray-200">
-                <p className="font-bold text-gray-800">Export Column Sequence:</p>
-                <p className="text-[11px] text-gray-500 font-mono">
-                  Full Name | Headline | Current Job Title | Company Name | Location | LinkedIn Profile | Connections | Last Activity | Date Added | Status | Notes
+                <p className="font-bold text-gray-800">Complete Data Export Active:</p>
+                <p className="text-[10px] text-gray-500 leading-relaxed">
+                  Exporting 25 columns including Full Identity, Contact Info, Business Details, Instagram Profile, Relevance Score, Outreach Status, and Custom Notes.
                 </p>
               </div>
 
@@ -175,20 +175,45 @@ export const GoogleSheetsExportModal: React.FC<GoogleSheetsExportModalProps> = (
                 </div>
               )}
 
-              <div className="pt-2 flex items-center justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="px-4 py-2 text-xs font-semibold text-gray-600 hover:text-gray-800"
-                >
-                  Cancel
-                </button>
+              <div className="pt-2 flex flex-col gap-3">
                 <button
                   type="button"
                   onClick={handleStartExport}
-                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-emerald-600/20"
+                  className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-3 rounded-xl transition-all shadow-md shadow-emerald-600/20"
                 >
-                  {isGoogleConnected ? 'Export Now' : 'Connect Google & Export'}
+                  <FileSpreadsheet className="w-4 h-4" />
+                  {isGoogleConnected ? 'Export to Google Sheets' : 'Connect Google & Export'}
+                </button>
+
+                <div className="grid grid-cols-2 gap-3">
+                   <button
+                    type="button"
+                    onClick={() => {
+                       import('../services/sheetsExport').then(m => m.exportLeadsToCsv(clientName, leadsToExport));
+                       onClose();
+                    }}
+                    className="flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold py-2.5 rounded-xl transition-all"
+                  >
+                    Download CSV
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                       import('../services/sheetsExport').then(m => m.exportLeadsToXlsx(clientName, leadsToExport));
+                       onClose();
+                    }}
+                    className="flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold py-2.5 rounded-xl transition-all"
+                  >
+                    Download XLSX
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="mt-1 w-full text-xs font-semibold text-gray-500 hover:text-gray-800 py-1"
+                >
+                  Cancel
                 </button>
               </div>
             </div>

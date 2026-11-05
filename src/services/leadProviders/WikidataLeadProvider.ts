@@ -1,9 +1,9 @@
-import { LeadFilter, RawLead } from '../../types';
+import { LeadFilter, RawLead, SeniorityLevel } from '../../types';
 import { LeadProvider } from './LeadProvider';
 import { enrichRawLead } from '../b2bRelevanceService';
 
 const SOURCE_NAME = 'Wikidata SPARQL Query Service';
-const PRIMARY_TIMEOUT_MS = 14000;
+const PRIMARY_TIMEOUT_MS = 15000;
 const FALLBACK_TIMEOUT_MS = 10000;
 const USER_AGENT = 'LinkedInLeadFinder/1.0 (https://github.com/sohamkharat481-jpg/LinkedIn-Tool; contact@example.com)';
 
@@ -39,10 +39,10 @@ export const OCCUPATION_MAP: Record<string, string[]> = {
   'marketer': ['wd:Q88206817', 'wd:Q329439'],
   'clinical director': ['wd:Q1162163', 'wd:Q3455803'],
   'chief medical officer': ['wd:Q484876', 'wd:Q1162163', 'wd:Q3455803'],
-  'software engineer': ['wd:Q5482740', 'wd:Q183'],
-  'developer': ['wd:Q5482740', 'wd:Q183'],
-  'engineer': ['wd:Q8162', 'wd:Q183'],
-  'it consultant': ['wd:Q15978655', 'wd:Q183'],
+  'software engineer': ['wd:Q5482740'],
+  'developer': ['wd:Q5482740'],
+  'engineer': ['wd:Q8162'],
+  'it consultant': ['wd:Q15978655'],
   'sales': ['wd:Q64155861', 'wd:Q43845'],
   'senior': ['wd:Q1162163', 'wd:Q3455803', 'wd:Q1622275', 'wd:Q43845']
 };
@@ -263,16 +263,23 @@ export class WikidataLeadProvider implements LeadProvider {
     const countryNorm = (filters.country || '').toLowerCase().trim();
     const countryQid = COUNTRY_MAP[countryNorm];
     const countryClause = countryQid ? `?item wdt:P27 ${countryQid} .` : '';
+    
+    const cityNorm = (filters.city || '').toLowerCase().trim();
+    const cityClause = cityNorm ? `?item wdt:P19 ?city . ?city rdfs:label ?cityFilterLabel . FILTER(CONTAINS(LCASE(?cityFilterLabel), "${cityNorm}"))` : '';
+
     const innerLimit = Math.min(Math.max(limit * 2, limit + 25), 150);
 
-
     const query = `
-      SELECT DISTINCT ?item ?itemLabel ?itemDescription ?website ?countryLabel ?dateOfBirth ?email ?phone ?linkedin ?instagram WHERE {
+      SELECT DISTINCT 
+        ?item ?itemLabel ?itemDescription ?website ?countryLabel ?cityLabel 
+        ?employerLabel ?dateOfBirth ?email ?phone ?linkedin ?instagram 
+      WHERE {
         {
           SELECT DISTINCT ?item WHERE {
             ?item wdt:P106 ?occ .
             VALUES ?occ { ${occValues} }
             ${countryClause}
+            ${cityClause}
             ?item wdt:P31 wd:Q5 .
           }
           LIMIT ${innerLimit}
@@ -281,12 +288,20 @@ export class WikidataLeadProvider implements LeadProvider {
         FILTER(!BOUND(?deathDate))
         OPTIONAL { ?item wdt:P856 ?website . }
         OPTIONAL { ?item wdt:P27 ?country . }
+        OPTIONAL { ?item wdt:P19 ?city . }
+        OPTIONAL { ?item wdt:P108 ?employer . }
         OPTIONAL { ?item wdt:P569 ?dateOfBirth . }
         OPTIONAL { ?item wdt:P968 ?email . }
         OPTIONAL { ?item wdt:P1329 ?phone . }
         OPTIONAL { ?item wdt:P6634 ?linkedin . }
         OPTIONAL { ?item wdt:P2003 ?instagram . }
-        SERVICE wikibase:label { bd:serviceParam wikibase:language "en,en-US,en-GB". }
+        SERVICE wikibase:label { 
+          bd:serviceParam wikibase:language "en,en-US,en-GB". 
+          ?country rdfs:label ?countryLabel .
+          ?city rdfs:label ?cityLabel .
+          ?employer rdfs:label ?employerLabel .
+          ?item rdfs:label ?itemLabel .
+        }
       }
       LIMIT ${limit}
     `;
@@ -307,10 +322,10 @@ export class WikidataLeadProvider implements LeadProvider {
         return null;
     }
     
-    // Ignore internal placeholder IDs if label missing
+    // Filter out obviously non-person labels or internal placeholder IDs
     const label = binding.itemLabel.value.trim();
-    if (!label || /^Q\d+$/.test(label)) {
-        console.log(`[Mapping Diagnostic] Discarding ${itemQid}: Placeholder label '${label}'`);
+    if (!label || /^Q\d+$/.test(label) || label.includes('/') || label.includes(' - ') || label.split(' ').length < 2) {
+        console.log(`[Mapping Diagnostic] Discarding ${itemQid}: Non-person or placeholder label '${label}'`);
         return null;
     }
 
@@ -344,17 +359,31 @@ export class WikidataLeadProvider implements LeadProvider {
     const instagramLastCheckedAt = instagramUsername ? new Date().toISOString() : undefined;
 
     const country = binding.countryLabel?.value ? binding.countryLabel.value.trim() : 'N/A';
+    const city = binding.cityLabel?.value ? binding.cityLabel.value.trim() : undefined;
+    const employer = binding.employerLabel?.value ? binding.employerLabel.value.trim() : undefined;
     const dateOfBirth = binding.dateOfBirth?.value;
 
     const hasContact = Boolean(website || email || phone || linkedInProfileUrl || instagramUsername);
     const contactVerificationStatus = hasContact ? 'Available' : 'Not listed';
 
+    // Infer Seniority from filters or keywords if possible
+    let inferredSeniority: SeniorityLevel = 'Entry';
+    const titleLower = (employer || description || requestedTitle).toLowerCase();
+    if (titleLower.includes('ceo') || titleLower.includes('chief') || titleLower.includes('founder')) inferredSeniority = 'C-Level';
+    else if (titleLower.includes('vp') || titleLower.includes('vice president')) inferredSeniority = 'VP';
+    else if (titleLower.includes('director')) inferredSeniority = 'Director';
+    else if (titleLower.includes('senior')) inferredSeniority = 'Senior';
+    else if (titleLower.includes('manager')) inferredSeniority = 'Manager';
+
     const baseLead: RawLead = {
       fullName: label,
       headline: description || `Professional ${requestedTitle}`,
       currentJobTitle: requestedTitle,
-      companyName: description.toLowerCase().includes('founder') ? 'Founder / Self-Employed' : 'Independent / Public Entity',
+      seniority: inferredSeniority,
+      companyName: employer || (description.toLowerCase().includes('founder') ? 'Founder / Self-Employed' : 'Independent / Public Entity'),
       location: country,
+      businessCity: city,
+      businessCountry: country,
       profileUrl: itemUri,
       connectionsOrFollowers: 'N/A',
       lastActivityDate: 'N/A',

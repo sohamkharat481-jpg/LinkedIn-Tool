@@ -46,10 +46,12 @@ interface LeadsTableViewProps {
 
 const STATUS_OPTIONS: { label: LeadStatus; color: string; bgColor: string }[] = [
   { label: 'Not Contacted', color: 'text-gray-700', bgColor: 'bg-gray-100 border-gray-200' },
-  { label: 'Request Sent', color: 'text-blue-700', bgColor: 'bg-blue-50 border-blue-200' },
-  { label: 'Accepted', color: 'text-purple-700', bgColor: 'bg-purple-50 border-purple-200' },
+  { label: 'Contacted', color: 'text-blue-700', bgColor: 'bg-blue-50 border-blue-200' },
+  { label: 'Follow-up Required', color: 'text-indigo-700', bgColor: 'bg-indigo-50 border-indigo-200' },
   { label: 'Replied', color: 'text-amber-700', bgColor: 'bg-amber-50 border-amber-200' },
-  { label: 'Call Booked', color: 'text-emerald-700', bgColor: 'bg-emerald-50 border-emerald-200' }
+  { label: 'Interested', color: 'text-emerald-700', bgColor: 'bg-emerald-50 border-emerald-200' },
+  { label: 'Not Interested', color: 'text-rose-700', bgColor: 'bg-rose-50 border-rose-200' },
+  { label: 'Converted', color: 'text-purple-700', bgColor: 'bg-purple-50 border-purple-200' }
 ];
 
 export const LeadsTableView: React.FC<LeadsTableViewProps> = ({

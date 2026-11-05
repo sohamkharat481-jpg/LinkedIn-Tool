@@ -357,12 +357,12 @@ export default function App() {
                 getSearchesForClient={(cId) => allSearches.filter(s => s.clientId === cId)}
                 onUpdateLeadStatus={async (leadId, status) => {
                     if (!activeWorkspace) return;
-                    await SupabaseDataService.updateLeadStatus(activeWorkspace.id, leadId, status);
+                    await SupabaseDataService.updateLeadStatus(activeWorkspace.id, leadId, status, activeClient?.id);
                     await loadWorkspaceData(activeWorkspace.id);
                 }}
                 onUpdateLeadNotes={async (leadId, notes) => {
                     if (!activeWorkspace) return;
-                    await SupabaseDataService.updateLeadNotes(activeWorkspace.id, leadId, notes);
+                    await SupabaseDataService.updateLeadNotes(activeWorkspace.id, leadId, notes, activeClient?.id);
                     await loadWorkspaceData(activeWorkspace.id);
                 }}
                 onUpdateLeadInstagram={async (leadId, data) => {

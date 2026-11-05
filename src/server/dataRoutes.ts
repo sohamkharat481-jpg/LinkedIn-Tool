@@ -180,6 +180,29 @@ dataRouter.post('/onboard', async (req: Request, res: Response) => {
             console.warn('[Onboard Info] Skipping organizations table query due to schema state:', orgErr?.message || orgErr);
         }
 
+        // 3. Ensure User exists in public.users
+        try {
+            const { data: existingUser } = await supabase
+                .from('users')
+                .select('*')
+                .eq('id', userId)
+                .maybeSingle();
+
+            if (!existingUser) {
+                await supabase.from('users').insert({
+                    id: userId,
+                    email: email,
+                    full_name: email.split('@')[0] || 'User',
+                    workspace_id: wsId,
+                    role: 'owner'
+                });
+            } else if (!existingUser.workspace_id) {
+                await supabase.from('users').update({ workspace_id: wsId }).eq('id', userId);
+            }
+        } catch (userErr: any) {
+            console.warn('[Onboard Info] Skipping users table query or update:', userErr?.message || userErr);
+        }
+
         logger.audit('User onboarded', { userId, organizationId: orgId, workspaceId: wsId });
 
         res.json({
@@ -576,7 +599,7 @@ dataRouter.get('/workspaces/:workspaceId/leads', async (req: Request, res: Respo
                 // Fetch leads for a specific client
                 const { data: clData, error: clError } = await getSupabaseServerClient
                     .from('client_leads')
-                    .select('lead_id')
+                    .select('lead_id, status, notes')
                     .eq('workspace_id', workspaceId)
                     .eq('client_id', clientId.trim());
 
@@ -590,17 +613,23 @@ dataRouter.get('/workspaces/:workspaceId/leads', async (req: Request, res: Respo
                 const leadsData = await fetchLeadsWithSchemaFallback(workspaceId, leadIds, ALL_LEAD_COLUMNS);
                 
                 // Map the clientId back onto the leads for the frontend
-                const leadsWithClientId = (leadsData || []).map((l: any) => ({
-                    ...l,
-                    clientId: clientId.trim()
-                }));
+                const leadsWithClientId = (leadsData || []).map((l: any) => {
+                    const clRow = (clData || []).find(r => r.lead_id === l.id);
+                    return {
+                        ...l,
+                        clientId: clientId.trim(),
+                        status: clRow?.status || 'Not Contacted',
+                        notes: clRow?.notes || '',
+                        dateAdded: l.created_at || new Date().toISOString()
+                    };
+                });
 
                 return res.json({ leads: leadsWithClientId });
             } else {
                 // Fetch all leads for the workspace with their client associations
                 const { data: clData, error: clError } = await getSupabaseServerClient
                     .from('client_leads')
-                    .select('lead_id, client_id')
+                    .select('lead_id, client_id, status, notes')
                     .eq('workspace_id', workspaceId);
 
                 if (clError) throw clError;
@@ -621,10 +650,16 @@ dataRouter.get('/workspaces/:workspaceId/leads', async (req: Request, res: Respo
                 const data = await fetchLeadsWithSchemaFallback(workspaceId, leadIds, ALL_LEAD_COLUMNS);
 
                 // Map the clientId onto each lead record
-                const leadsWithClientId = (data || []).map((l: any) => ({
-                    ...l,
-                    clientId: leadClientMap.get(l.id)
-                }));
+                const leadsWithClientId = (data || []).map((l: any) => {
+                    const clRow = (clData || []).find(r => r.lead_id === l.id);
+                    return {
+                        ...l,
+                        clientId: leadClientMap.get(l.id),
+                        status: clRow?.status || 'Not Contacted',
+                        notes: clRow?.notes || '',
+                        dateAdded: l.created_at || new Date().toISOString()
+                    };
+                });
 
                 return res.json({ leads: leadsWithClientId });
             }
@@ -653,7 +688,7 @@ dataRouter.get('/workspaces/:workspaceId/clients/:clientId/export-leads', async 
         if (getSupabaseServerClient) {
             const { data: clData, error: clError } = await getSupabaseServerClient
                 .from('client_leads')
-                .select('lead_id')
+                .select('lead_id, status, notes')
                 .eq('workspace_id', workspaceId)
                 .eq('client_id', clientId);
 
@@ -672,10 +707,19 @@ dataRouter.get('/workspaces/:workspaceId/clients/:clientId/export-leads', async 
             const leadsData = await fetchLeadsWithSchemaFallback(workspaceId, leadIds, ALL_LEAD_COLUMNS);
 
             if (leadsData) {
+                const leadsWithMeta = leadsData.map((l: any) => {
+                    const clRow = (clData || []).find(r => r.lead_id === l.id);
+                    return {
+                        ...l,
+                        status: clRow?.status || 'Not Contacted',
+                        notes: clRow?.notes || '',
+                        dateAdded: l.created_at || new Date().toISOString()
+                    };
+                });
                 return res.json({
                     success: true,
                     clientId,
-                    leads: leadsData,
+                    leads: leadsWithMeta,
                     diagnostics: { exportQueryReturnedCount: leadsData.length }
                 });
             }
@@ -741,11 +785,13 @@ dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Resp
                     workspace_id: workspaceId,
                     full_name: l.full_name || l.fullName || l.name || 'Anonymous Lead',
                     headline: l.headline || l.job_title || l.title || l.headlineRole || '',
+                    seniority: l.seniority || 'Entry',
                     current_job_title: l.current_job_title || l.currentJobTitle || l.job_title || l.title || '',
                     company_name: l.company_name || l.companyName || l.company || '',
                     location: l.location || l.country || '',
                     profile_url: profileUrl,
-                    source: l.source || 'Wikidata'
+                    source: l.source || 'Wikidata',
+                    organization_id: auth.user?.organizationId
                 };
 
                 if (minimal) return base;
@@ -838,7 +884,8 @@ dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Resp
                     id: clIdMap.get(sl.id) || crypto.randomUUID(),
                     client_id: clientId,
                     lead_id: sl.id,
-                    workspace_id: workspaceId
+                    workspace_id: workspaceId,
+                    organization_id: auth.user?.organizationId
                 }));
 
                 const { error: clError } = await getSupabaseServerClient
@@ -893,18 +940,34 @@ dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Resp
 
 dataRouter.patch('/workspaces/:workspaceId/leads/:leadId/status', async (req: Request, res: Response) => {
     const { workspaceId, leadId } = req.params;
-    const { status } = req.body;
+    const { status, clientId } = req.body;
     const auth = await verifyWorkspaceAccess(req, workspaceId);
     if (!auth.authorized) return res.status(auth.status).json({ error: auth.error });
 
     try {
         if (getSupabaseServerClient) {
-            const { error } = await getSupabaseServerClient
-                .from('leads')
-                .update({ status })
-                .eq('id', leadId)
-                .eq('workspace_id', workspaceId);
-            if (error) throw error;
+            if (clientId) {
+                // Update the status in the junction table for this specific client
+                const { error } = await getSupabaseServerClient
+                    .from('client_leads')
+                    .update({ status, updated_at: new Date().toISOString() })
+                    .eq('lead_id', leadId)
+                    .eq('client_id', clientId)
+                    .eq('workspace_id', workspaceId);
+                
+                if (error) throw error;
+            } else {
+                // Fallback or global update (if the leads table ever gets these columns, 
+                // but the schema says they are in client_leads)
+                const { error } = await getSupabaseServerClient
+                    .from('leads')
+                    .update({ status, updated_at: new Date().toISOString() })
+                    .eq('id', leadId)
+                    .eq('workspace_id', workspaceId);
+                
+                // If it fails because column doesn't exist, we don't throw if we updated at least one client_lead
+                if (error && !error.message.includes('column')) throw error;
+            }
             return res.status(200).json({ success: true });
         }
         
@@ -921,17 +984,26 @@ dataRouter.patch('/workspaces/:workspaceId/leads/:leadId/status', async (req: Re
 
 dataRouter.patch('/workspaces/:workspaceId/leads/:leadId/notes', async (req: Request, res: Response) => {
     const { workspaceId, leadId } = req.params;
-    const { notes } = req.body;
+    const { notes, clientId } = req.body;
     const auth = await verifyWorkspaceAccess(req, workspaceId);
     if (!auth.authorized) return res.status(auth.status).json({ error: auth.error });
 
     try {
         if (getSupabaseServerClient) {
-            await getSupabaseServerClient
-                .from('leads')
-                .update({ notes })
-                .eq('id', leadId)
-                .eq('workspace_id', workspaceId);
+            if (clientId) {
+                await getSupabaseServerClient
+                    .from('client_leads')
+                    .update({ notes, updated_at: new Date().toISOString() })
+                    .eq('lead_id', leadId)
+                    .eq('client_id', clientId)
+                    .eq('workspace_id', workspaceId);
+            } else {
+                await getSupabaseServerClient
+                    .from('leads')
+                    .update({ notes, updated_at: new Date().toISOString() })
+                    .eq('id', leadId)
+                    .eq('workspace_id', workspaceId);
+            }
         }
         if (process.env.NODE_ENV === 'test') {
             dbService.updateLeadNotes(workspaceId, leadId, notes);
