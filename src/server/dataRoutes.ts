@@ -790,8 +790,7 @@ dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Resp
                     company_name: l.company_name || l.companyName || l.company || '',
                     location: l.location || l.country || '',
                     profile_url: profileUrl,
-                    source: l.source || 'Wikidata',
-                    organization_id: auth.user?.organizationId
+                    source: l.source || 'Wikidata'
                 };
 
                 if (minimal) return base;
@@ -884,8 +883,7 @@ dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Resp
                     id: clIdMap.get(sl.id) || crypto.randomUUID(),
                     client_id: clientId,
                     lead_id: sl.id,
-                    workspace_id: workspaceId,
-                    organization_id: auth.user?.organizationId
+                    workspace_id: workspaceId
                 }));
 
                 const { error: clError } = await getSupabaseServerClient
@@ -1477,7 +1475,7 @@ dataRouter.get('/production-audit', async (req: Request, res: Response) => {
         const supabase = getSupabaseServerClient;
         if (!supabase) return res.status(503).json({ error: 'Database unavailable' });
 
-        const { count: orgLeads } = await supabase.from('leads').select('*', { count: 'exact', head: true }).eq('organization_id', auth.user.organizationId);
+        const { count: orgLeads } = await supabase.from('leads').select('*', { count: 'exact', head: true });
         const { count: globalLeads } = await supabase.from('leads').select('*', { count: 'exact', head: true });
         
         res.json({
