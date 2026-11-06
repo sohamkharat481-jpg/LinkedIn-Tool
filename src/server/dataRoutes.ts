@@ -780,12 +780,11 @@ dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Resp
             const prepareLeadPayload = (l: any, minimal = false) => {
                 const profileUrl = l.profile_url || l.profileUrl || l.linkedin_url || l.linkedinUrl || `https://www.linkedin.com/in/lead-${Math.random().toString(36).substr(2, 9)}`;
                 
-                const base = {
+                const coreBase = {
                     id: l.id || existingIdMap.get(profileUrl) || crypto.randomUUID(),
                     workspace_id: workspaceId,
                     full_name: l.full_name || l.fullName || l.name || 'Anonymous Lead',
                     headline: l.headline || l.job_title || l.title || l.headlineRole || '',
-                    seniority: l.seniority || 'Entry',
                     current_job_title: l.current_job_title || l.currentJobTitle || l.job_title || l.title || '',
                     company_name: l.company_name || l.companyName || l.company || '',
                     location: l.location || l.country || '',
@@ -793,10 +792,11 @@ dataRouter.post('/workspaces/:workspaceId/leads', async (req: Request, res: Resp
                     source: l.source || 'Wikidata'
                 };
 
-                if (minimal) return base;
+                if (minimal) return coreBase;
 
                 return {
-                    ...base,
+                    ...coreBase,
+                    seniority: l.seniority || 'Entry',
                     // Expanded professional fields
                     lead_type: l.lead_type || l.leadType || 'business',
                     business_category: l.business_category || l.businessCategory,
